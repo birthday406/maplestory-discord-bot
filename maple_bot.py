@@ -105,6 +105,8 @@ def calculate_hexa_cost(core_type: str, current_level: int, target_level: int) -
 
 
 @app_commands.command(name="헥사", description="HEXA 코어 강화에 필요한 재료를 계산합니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.describe(
     core_type="계산할 HEXA 코어 종류",
     current_level="현재 코어 레벨 (0~29)",
