@@ -7,6 +7,7 @@
 ### 변경됨
 
 - GitHub에 API 키와 실행 기록이 올라가지 않도록 `.gitignore`를 추가했습니다.
+- Git 이력에서 `.env`와 Python 캐시 파일을 제외하도록 정리했습니다.
 - 전체 번역 명령어를 제거했습니다.
 - 기본 알림 흐름을 "OpenAI 영어 요약 → Google 한국어 번역"으로 변경했습니다.
 - 파파고 설정을 제거하고 Google Cloud Translation API 키 설정을 추가했습니다.
