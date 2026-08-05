@@ -72,6 +72,8 @@ GOOGLE_TRANSLATE_API_KEY=Google_번역_API_키
 
 `SUNNY_SUNDAY_CHANNEL_ID`에는 전체 Sunny Sunday 일정과 해당 주의 자동 알림을 받을 채널 ID를 입력합니다. 이 값을 비우거나 작성하지 않으면 일반 공지 채널인 `DISCORD_CHANNEL_ID`를 사용합니다. `/썬데이` 명령 결과는 명령어를 실행한 채널에 표시됩니다.
 
+전용 채널 기능을 처음 배포하거나 채널 ID를 바꾸면 `state.json`에 저장된 Sunny Sunday 일정 중 아직 끝나지 않은 항목을 새 채널에 한 번 게시합니다. 게시한 채널 ID도 함께 저장하므로 서버를 재시작해도 같은 전체 일정을 반복해서 보내지 않습니다.
+
 ## 실행하기
 
 ```powershell

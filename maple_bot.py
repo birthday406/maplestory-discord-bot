@@ -104,6 +104,11 @@ def configured_sunny_sunday_channel_id(default_channel_id: int) -> int:
     return int(configured_channel_id) if configured_channel_id else default_channel_id
 
 
+def should_post_sunny_sunday_schedule(schedule: dict, channel_id: int) -> bool:
+    # 저장된 게시 채널과 현재 전용 채널이 다르면 전체 일정을 새 채널에 한 번 안내합니다.
+    return schedule.get("announcement_channel_id") != channel_id
+
+
 def post_url(post: dict) -> str:
     # Discord 알림을 클릭했을 때 원문 공지로 이동할 수 있도록 주소를 만듭니다.
     title_slug = "-".join(
@@ -525,6 +530,7 @@ class MapleNewsBot(commands.Bot):
                             ),
                             file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
                         )
+                    schedule["announcement_channel_id"] = self.sunny_sunday_channel_id
                     self.sunny_sunday = schedule
                     if self.sent_ids is not None:
                         save_state(
@@ -532,6 +538,32 @@ class MapleNewsBot(commands.Bot):
                             self.saved_categories,
                             self.sunny_sunday,
                         )
+
+        if self.sunny_sunday is not None and should_post_sunny_sunday_schedule(
+            self.sunny_sunday, self.sunny_sunday_channel_id
+        ):
+            # 전용 채널 기능을 처음 배포했거나 채널을 바꿨다면 남은 일정을 한 번만 게시합니다.
+            visible_entries = visible_sunny_sunday_entries(
+                self.sunny_sunday["entries"]
+            )
+            if visible_entries:
+                await self.sunny_sunday_channel().send(
+                    embed=build_sunny_sunday_embed(
+                        f"☀️ {self.sunny_sunday['title']} ☀️",
+                        self.sunny_sunday["url"],
+                        visible_entries,
+                    ),
+                    file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
+                )
+            self.sunny_sunday["announcement_channel_id"] = (
+                self.sunny_sunday_channel_id
+            )
+            if self.sent_ids is not None:
+                save_state(
+                    self.sent_ids,
+                    self.saved_categories,
+                    self.sunny_sunday,
+                )
 
         if self.sent_ids is None:
             # 첫 실행에는 과거 공지를 한꺼번에 보내지 않고, 현재 글을 기준점으로만 저장합니다.
@@ -591,6 +623,9 @@ class MapleNewsBot(commands.Bot):
                     await self.sunny_sunday_channel().send(
                         embed=sunny_embed,
                         file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
+                    )
+                    new_sunny_schedule["announcement_channel_id"] = (
+                        self.sunny_sunday_channel_id
                     )
             await channel.send(embed=embed)
             # Discord 전송에 성공한 뒤에만 '이미 보냄' 목록에 기록합니다.

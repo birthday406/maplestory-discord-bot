@@ -17,6 +17,7 @@ from maple_bot import (
     load_state,
     post_url,
     save_state,
+    should_post_sunny_sunday_schedule,
     sunny_sunday_entry_action,
     sunny_sunday_timestamp,
     thumbnail_url,
@@ -32,6 +33,13 @@ class NewsFilteringTests(unittest.TestCase):
 
         with patch.dict("os.environ", {"SUNNY_SUNDAY_CHANNEL_ID": "222"}):
             self.assertEqual(configured_sunny_sunday_channel_id(111), 222)
+
+    def test_sunny_sunday_schedule_is_posted_once_per_dedicated_channel(self) -> None:
+        schedule = {"announcement_channel_id": 111}
+
+        self.assertFalse(should_post_sunny_sunday_schedule(schedule, 111))
+        self.assertTrue(should_post_sunny_sunday_schedule(schedule, 222))
+        self.assertTrue(should_post_sunny_sunday_schedule({}, 111))
 
     def test_watched_posts_includes_events_and_excludes_other_categories(self) -> None:
         posts = [
