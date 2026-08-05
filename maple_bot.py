@@ -1,5 +1,6 @@
 import html
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -69,7 +70,12 @@ class MapleNewsBot(commands.Bot):
     async def setup_hook(self) -> None:
         # Discord 연결이 준비되면 30분마다 새 공지를 확인하는 작업을 시작합니다.
         self.session = aiohttp.ClientSession()
-        self.check_news.start()
+
+    async def on_ready(self) -> None:
+        # 디스코드 연결이 끝난 뒤에만 첫 공지 확인을 시작합니다.
+        # 재연결되더라도 같은 확인 작업을 중복으로 시작하지 않습니다.
+        if not self.check_news.is_running():
+            self.check_news.start()
 
     async def close(self) -> None:
         if self.session is not None:
@@ -133,6 +139,7 @@ class MapleNewsBot(commands.Bot):
 
         new_posts = [post for post in posts if post["id"] not in self.sent_ids]
         if not new_posts:
+            logging.info("No new MapleStory announcements found.")
             return
 
         channel = self.get_channel(self.channel_id)
@@ -154,6 +161,12 @@ class MapleNewsBot(commands.Bot):
             # Discord 전송에 성공한 뒤에만 '이미 보냄' 목록에 기록합니다.
             self.sent_ids.add(post["id"])
             save_sent_ids(self.sent_ids)
+            logging.info("Sent announcement %s to Discord.", post["id"])
+
+    @check_news.error
+    async def check_news_error(self, error: Exception) -> None:
+        # API나 전송 단계의 오류를 서버 로그에 남겨 원인을 확인할 수 있게 합니다.
+        logging.exception("MapleStory announcement check failed.", exc_info=error)
 
     @check_news.before_loop
     async def wait_until_ready(self) -> None:
