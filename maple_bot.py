@@ -169,7 +169,8 @@ class MapleNewsBot(commands.Bot):
         logging.exception("MapleStory announcement check failed.", exc_info=error)
 
     @check_news.before_loop
-    async def wait_until_ready(self) -> None:
+    async def before_check_news(self) -> None:
+        # 디스코드 기본 연결 대기 함수를 가리지 않도록 다른 이름을 사용합니다.
         await self.wait_until_ready()
 
 
