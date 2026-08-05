@@ -1,0 +1,7 @@
+# API keys and private bot settings
+.env
+
+# Runtime data and Python cache files
+state.json
+__pycache__/
+*.py[cod]
