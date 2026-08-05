@@ -200,6 +200,14 @@ def visible_sunny_sunday_entries(
     ]
 
 
+def current_sunny_sunday_entry(
+    entries: list[dict], now_timestamp: int | None = None
+) -> dict | None:
+    # 진행 중인 일정이 있으면 그 일정을, 없으면 가장 가까운 다음 일정 한 건을 고릅니다.
+    visible_entries = visible_sunny_sunday_entries(entries, now_timestamp)
+    return min(visible_entries, key=lambda entry: entry["timestamp"], default=None)
+
+
 def sunny_sunday_entry_action(entry: dict, now_timestamp: int) -> str | None:
     # 주간 메시지를 보낼지, 24시간이 지나 삭제할지를 시간과 저장된 메시지 ID로 결정합니다.
     start = entry["timestamp"]
@@ -287,7 +295,7 @@ async def hexa_command(
     await interaction.response.send_message(embed=embed)
 
 
-@app_commands.command(name="썬데이", description="저장된 Sunny Sunday 일정을 보여줍니다.")
+@app_commands.command(name="썬데이", description="이번 주 Sunny Sunday 일정을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def sunny_sunday_command(interaction: discord.Interaction) -> None:
@@ -299,15 +307,15 @@ async def sunny_sunday_command(interaction: discord.Interaction) -> None:
         )
         return
 
-    entries = visible_sunny_sunday_entries(schedule["entries"])
-    if not entries:
+    entry = current_sunny_sunday_entry(schedule["entries"])
+    if entry is None:
         await interaction.response.send_message(
             "남아 있는 Sunny Sunday 일정이 없습니다.", ephemeral=True
         )
         return
 
     embed = build_sunny_sunday_embed(
-        f"☀️ {schedule['title']} ☀️", schedule["url"], entries
+        f"☀️ 이번 주 Sunny Sunday ☀️", schedule["url"], [entry]
     )
     await interaction.response.send_message(
         embed=embed, file=discord.File(SUNNY_SUNDAY_IMAGE_PATH)

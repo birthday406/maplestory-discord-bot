@@ -9,6 +9,7 @@ from maple_bot import (
     HEXA_CORE_COSTS,
     calculate_hexa_cost,
     configured_sunny_sunday_channel_id,
+    current_sunny_sunday_entry,
     extract_sunny_sunday,
     format_sunny_sunday_date,
     html_to_text,
@@ -189,6 +190,19 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(
             visible_sunny_sunday_entries(entries, start + 86400),
             [entries[1]],
+        )
+
+    def test_sunny_sunday_command_selects_only_the_nearest_valid_entry(self) -> None:
+        start = sunny_sunday_timestamp("August 02, 2026")
+        entries = [
+            {"timestamp": start + 1_209_600, "name": "later"},
+            {"timestamp": start, "name": "expired"},
+            {"timestamp": start + 604_800, "name": "this week"},
+        ]
+
+        self.assertEqual(
+            current_sunny_sunday_entry(entries, start + 86_400),
+            entries[2],
         )
 
     def test_weekly_sunny_sunday_message_lifecycle(self) -> None:
