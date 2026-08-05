@@ -7,6 +7,7 @@ from pathlib import Path
 
 import aiohttp
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -30,6 +31,35 @@ CATEGORY_COLORS = {
 STATE_PATH = Path("state.json")
 POLL_INTERVAL_MINUTES = 5
 MODEL = "gpt-5.6-luna"
+
+# 각 튜플의 0번째 값은 0→1, 29번째 값은 29→30 강화 비용입니다.
+# 코어별로 첫 번째 튜플은 솔 에르다, 두 번째 튜플은 솔 에르다 조각 비용입니다.
+HEXA_CORE_COSTS = {
+    "스킬 코어": (
+        (5, 1, 1, 1, 2, 2, 2, 3, 3, 10, 3, 3, 4, 4, 4, 4, 4, 4, 5, 15, 5, 5, 5, 5, 5, 6, 6, 6, 7, 20),
+        (100, 30, 35, 40, 45, 50, 55, 60, 65, 200, 80, 90, 100, 110, 120, 130, 140, 150, 160, 350, 170, 180, 190, 200, 210, 220, 230, 240, 250, 500),
+    ),
+    "3rd 스킬 코어": (
+        (7, 1, 1, 1, 1, 2, 2, 2, 2, 8, 2, 2, 3, 3, 3, 3, 3, 3, 3, 12, 4, 4, 4, 4, 4, 4, 5, 5, 5, 14),
+        (140, 21, 26, 30, 34, 38, 43, 47, 51, 142, 62, 69, 77, 83, 91, 98, 105, 112, 120, 252, 128, 136, 145, 152, 161, 168, 177, 184, 193, 357),
+    ),
+    "마스터리 코어": (
+        (3, 1, 1, 1, 1, 1, 1, 2, 2, 5, 2, 2, 2, 2, 2, 2, 2, 2, 3, 8, 3, 3, 3, 3, 3, 3, 3, 3, 4, 10),
+        (50, 15, 18, 20, 23, 25, 28, 30, 33, 100, 40, 45, 50, 55, 60, 65, 70, 75, 80, 175, 85, 90, 95, 100, 105, 110, 115, 120, 125, 250),
+    ),
+    "강화 코어": (
+        (4, 1, 1, 1, 2, 2, 2, 3, 3, 8, 3, 3, 3, 3, 3, 3, 3, 3, 4, 12, 4, 4, 4, 4, 4, 5, 5, 5, 6, 15),
+        (75, 23, 27, 30, 34, 38, 42, 45, 49, 150, 60, 68, 75, 83, 90, 98, 105, 113, 120, 263, 128, 135, 143, 150, 158, 165, 173, 180, 188, 375),
+    ),
+    "공용 코어": (
+        (7, 2, 2, 2, 3, 3, 3, 5, 5, 14, 5, 5, 6, 6, 6, 6, 6, 6, 7, 17, 7, 7, 7, 7, 7, 9, 9, 9, 10, 20),
+        (125, 38, 44, 50, 57, 63, 69, 75, 82, 300, 110, 124, 138, 152, 165, 179, 193, 207, 220, 525, 234, 248, 262, 275, 289, 303, 317, 330, 344, 750),
+    ),
+    "직업군 공용 코어": (
+        (4, 1, 1, 1, 2, 2, 2, 3, 3, 9, 3, 3, 3, 3, 4, 4, 4, 4, 4, 14, 4, 5, 5, 5, 5, 5, 5, 5, 6, 18),
+        (90, 25, 30, 35, 40, 45, 50, 55, 60, 180, 73, 81, 90, 98, 107, 115, 124, 132, 141, 315, 151, 160, 170, 179, 189, 198, 208, 217, 227, 450),
+    ),
+}
 
 
 def watched_posts(posts: list[dict]) -> list[dict]:
@@ -55,6 +85,64 @@ def html_to_text(source: str) -> str:
     text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", source, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def calculate_hexa_cost(core_type: str, current_level: int, target_level: int) -> tuple[int, int]:
+    # 배열 인덱스가 강화 시작 레벨과 같으므로 현재 레벨부터 목표 레벨 직전까지 더합니다.
+    if not 0 <= current_level < target_level <= 30:
+        raise ValueError("현재 레벨은 목표 레벨보다 낮아야 하며 레벨 범위는 0~30입니다.")
+
+    sol_erda_costs, fragment_costs = HEXA_CORE_COSTS[core_type]
+    return (
+        sum(sol_erda_costs[current_level:target_level]),
+        sum(fragment_costs[current_level:target_level]),
+    )
+
+
+@app_commands.command(name="헥사", description="HEXA 코어 강화에 필요한 재료를 계산합니다.")
+@app_commands.describe(
+    core_type="계산할 HEXA 코어 종류",
+    current_level="현재 코어 레벨 (0~29)",
+    target_level="목표 코어 레벨 (1~30)",
+)
+@app_commands.rename(
+    core_type="코어종류",
+    current_level="현재레벨",
+    target_level="목표레벨",
+)
+@app_commands.choices(
+    core_type=[
+        app_commands.Choice(name=core_name, value=core_name)
+        for core_name in HEXA_CORE_COSTS
+    ]
+)
+async def hexa_command(
+    interaction: discord.Interaction,
+    core_type: app_commands.Choice[str],
+    current_level: app_commands.Range[int, 0, 29],
+    target_level: app_commands.Range[int, 1, 30],
+) -> None:
+    # 목표 레벨이 더 높지 않으면 계산할 강화 구간이 없으므로 사용자에게만 오류를 보여 줍니다.
+    if current_level >= target_level:
+        await interaction.response.send_message(
+            "목표 레벨은 현재 레벨보다 높아야 합니다.", ephemeral=True
+        )
+        return
+
+    sol_erda, fragments = calculate_hexa_cost(
+        core_type.value, current_level, target_level
+    )
+    embed = discord.Embed(
+        title="HEXA 매트릭스 강화 계산",
+        description=(
+            f"**{core_type.name}**\n"
+            f"◆ **{current_level} → {target_level}** 강화 비용\n\n"
+            f"솔 에르다　**{sol_erda:,}개**\n"
+            f"솔 에르다 조각　**{fragments:,}개**"
+        ),
+        color=0x3498DB,
+    )
+    await interaction.response.send_message(embed=embed)
 
 
 def load_state() -> tuple[set[int] | None, set[str]]:
@@ -96,6 +184,9 @@ class MapleNewsBot(commands.Bot):
     async def setup_hook(self) -> None:
         # Discord 연결이 준비되면 5분마다 새 공지를 확인하는 작업을 시작합니다.
         self.session = aiohttp.ClientSession()
+        # 전역 슬래시 명령을 Discord에 등록합니다. 명령 내용이 바뀌어도 재시작 시 동기화됩니다.
+        self.tree.add_command(hexa_command)
+        await self.tree.sync()
 
     async def on_ready(self) -> None:
         # 디스코드 연결이 끝난 뒤에만 첫 공지 확인을 시작합니다.

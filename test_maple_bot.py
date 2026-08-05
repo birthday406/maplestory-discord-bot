@@ -4,7 +4,15 @@ import unittest
 from pathlib import Path
 
 import maple_bot
-from maple_bot import html_to_text, load_state, post_url, thumbnail_url, watched_posts
+from maple_bot import (
+    HEXA_CORE_COSTS,
+    calculate_hexa_cost,
+    html_to_text,
+    load_state,
+    post_url,
+    thumbnail_url,
+    watched_posts,
+)
 
 
 class NewsFilteringTests(unittest.TestCase):
@@ -49,3 +57,26 @@ class NewsFilteringTests(unittest.TestCase):
     def test_html_to_text_removes_tags_and_script(self) -> None:
         source = "<h1>Patch</h1><script>ignore()</script><p>Notes</p>"
         self.assertEqual(html_to_text(source), "Patch Notes")
+
+
+class HexaCostTests(unittest.TestCase):
+    def test_enhancement_core_level_7_to_20_matches_reference(self) -> None:
+        self.assertEqual(calculate_hexa_cost("강화 코어", 7, 20), (54, 1319))
+
+    def test_level_0_to_30_totals_match_reference(self) -> None:
+        expected_totals = {
+            "스킬 코어": (150, 4500),
+            "3rd 스킬 코어": (117, 3442),
+            "마스터리 코어": (83, 2252),
+            "강화 코어": (123, 3383),
+            "공용 코어": (208, 6268),
+            "직업군 공용 코어": (137, 4035),
+        }
+
+        self.assertEqual(set(HEXA_CORE_COSTS), set(expected_totals))
+        for core_type, expected in expected_totals.items():
+            self.assertEqual(calculate_hexa_cost(core_type, 0, 30), expected)
+
+    def test_target_level_must_be_higher_than_current_level(self) -> None:
+        with self.assertRaises(ValueError):
+            calculate_hexa_cost("강화 코어", 20, 20)
