@@ -8,6 +8,7 @@ from maple_bot import (
     HEXA_CORE_COSTS,
     calculate_hexa_cost,
     extract_sunny_sunday,
+    format_sunny_sunday_date,
     html_to_text,
     is_patch_notes,
     known_sunny_sunday_translation,
@@ -124,6 +125,12 @@ class NewsFilteringTests(unittest.TestCase):
 
         for source, translation in expected.items():
             self.assertEqual(known_sunny_sunday_translation(source), translation)
+
+    def test_sunny_sunday_date_uses_discord_timestamp(self) -> None:
+        self.assertEqual(
+            format_sunny_sunday_date("August 02, 2026"),
+            "<t:1785628800:F> (<t:1785628800:R>)",
+        )
 
 
 class HexaCostTests(unittest.TestCase):

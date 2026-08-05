@@ -30,6 +30,7 @@ CATEGORY_COLORS = {
     "events": 0x57F287,  # 초록
 }
 STATE_PATH = Path("state.json")
+SUNNY_SUNDAY_IMAGE_PATH = Path(__file__).parent / "assets" / "title-sunny-sunday.webp"
 POLL_INTERVAL_MINUTES = 5
 MODEL = "gpt-5.6-luna"
 
@@ -339,7 +340,7 @@ class MapleNewsBot(commands.Bot):
 
     async def translate_sunny_sunday(
         self, entries: list[tuple[str, bool, list[str]]]
-    ) -> str:
+    ) -> list[tuple[str, str]]:
         # 고정 번역이 없는 혜택만 Google 번역으로 한꺼번에 처리합니다.
         unknown_perks = [
             perk
@@ -351,9 +352,9 @@ class MapleNewsBot(commands.Bot):
             zip(unknown_perks, await self.translate_texts(unknown_perks))
         )
 
-        sections = []
+        fields = []
         for date, is_special, perks in entries:
-            lines = [f"• __**{format_sunny_sunday_date(date)}**__"]
+            lines = []
             if is_special:
                 lines.append(
                     f"{ANIMATED_TWINKLE_EMOJI} **스페셜: 샤이닝 스타포스** "
@@ -364,9 +365,11 @@ class MapleNewsBot(commands.Bot):
                 if translation is None:
                     translation = google_translations[perk]
                 if translation:
-                    lines.append(f"• {translation}")
-            sections.append("\n".join(lines))
-        return "\n\n".join(sections)
+                    lines.append(f"- {translation}")
+            fields.append(
+                (f"· __{format_sunny_sunday_date(date)}__", "\n".join(lines))
+            )
+        return fields
 
     @tasks.loop(minutes=POLL_INTERVAL_MINUTES)
     async def check_news(self) -> None:
@@ -417,6 +420,7 @@ class MapleNewsBot(commands.Bot):
             # 공식 홈페이지 카드에 쓰인 썸네일을 임베드 하단의 큰 이미지로 보여 줍니다.
             embed.set_image(url=thumbnail_url(post))
             embeds = [embed]
+            sunny_image = None
             if is_patch_notes(post):
                 sunny_entries = extract_sunny_sunday(detail["body"])
                 if sunny_entries:
@@ -426,13 +430,26 @@ class MapleNewsBot(commands.Bot):
                     )
                     sunny_embed = discord.Embed(
                         title=f"☀️ {patch_title} ☀️",
-                        description=await self.translate_sunny_sunday(sunny_entries),
                         url=post_url(post),
                         color=CATEGORY_COLORS["update"],
                     )
                     sunny_embed.set_author(name="MapleStory | SUNNY SUNDAY")
+                    for field_name, field_value in await self.translate_sunny_sunday(
+                        sunny_entries
+                    ):
+                        sunny_embed.add_field(
+                            name=field_name, value=field_value, inline=False
+                        )
+                    # Discord 메시지에 프로젝트 이미지를 직접 첨부해 만료되는 CDN 주소를 피합니다.
+                    sunny_embed.set_image(
+                        url=f"attachment://{SUNNY_SUNDAY_IMAGE_PATH.name}"
+                    )
+                    sunny_image = discord.File(SUNNY_SUNDAY_IMAGE_PATH)
                     embeds.append(sunny_embed)
-            await channel.send(embeds=embeds)
+            if sunny_image is None:
+                await channel.send(embeds=embeds)
+            else:
+                await channel.send(embeds=embeds, file=sunny_image)
             # Discord 전송에 성공한 뒤에만 '이미 보냄' 목록에 기록합니다.
             self.sent_ids.add(post["id"])
             save_state(self.sent_ids, self.saved_categories)
