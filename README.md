@@ -60,14 +60,17 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-생성된 `.env` 파일을 메모장으로 열고 아래 네 값을 실제 값으로 바꿉니다.
+생성된 `.env` 파일을 메모장으로 열고 아래 다섯 값을 실제 값으로 바꿉니다.
 
 ```env
 DISCORD_TOKEN=Discord_봇_토큰
 DISCORD_CHANNEL_ID=알림을_보낼_채널_ID
+SUNNY_SUNDAY_CHANNEL_ID=Sunny_Sunday_전용_채널_ID
 OPENAI_API_KEY=OpenAI_API_키
 GOOGLE_TRANSLATE_API_KEY=Google_번역_API_키
 ```
+
+`SUNNY_SUNDAY_CHANNEL_ID`에는 전체 Sunny Sunday 일정과 해당 주의 자동 알림을 받을 채널 ID를 입력합니다. 이 값을 비우거나 작성하지 않으면 일반 공지 채널인 `DISCORD_CHANNEL_ID`를 사용합니다. `/썬데이` 명령 결과는 명령어를 실행한 채널에 표시됩니다.
 
 ## 실행하기
 

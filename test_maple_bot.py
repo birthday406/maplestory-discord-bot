@@ -2,11 +2,13 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import maple_bot
 from maple_bot import (
     HEXA_CORE_COSTS,
     calculate_hexa_cost,
+    configured_sunny_sunday_channel_id,
     extract_sunny_sunday,
     format_sunny_sunday_date,
     html_to_text,
@@ -24,6 +26,13 @@ from maple_bot import (
 
 
 class NewsFilteringTests(unittest.TestCase):
+    def test_sunny_sunday_channel_uses_dedicated_setting_with_existing_fallback(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(configured_sunny_sunday_channel_id(111), 111)
+
+        with patch.dict("os.environ", {"SUNNY_SUNDAY_CHANNEL_ID": "222"}):
+            self.assertEqual(configured_sunny_sunday_channel_id(111), 222)
+
     def test_watched_posts_includes_events_and_excludes_other_categories(self) -> None:
         posts = [
             {"id": 1, "category": "update"},

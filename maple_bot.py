@@ -98,6 +98,12 @@ def watched_posts(posts: list[dict]) -> list[dict]:
     return [post for post in posts if post.get("category") in WATCHED_CATEGORIES]
 
 
+def configured_sunny_sunday_channel_id(default_channel_id: int) -> int:
+    # 전용 채널을 설정하지 않은 기존 환경에서는 일반 공지 채널을 그대로 사용합니다.
+    configured_channel_id = os.getenv("SUNNY_SUNDAY_CHANNEL_ID")
+    return int(configured_channel_id) if configured_channel_id else default_channel_id
+
+
 def post_url(post: dict) -> str:
     # Discord 알림을 클릭했을 때 원문 공지로 이동할 수 있도록 주소를 만듭니다.
     title_slug = "-".join(
@@ -336,6 +342,7 @@ class MapleNewsBot(commands.Bot):
     def __init__(self, channel_id: int) -> None:
         super().__init__(command_prefix="!", intents=discord.Intents.default())
         self.channel_id = channel_id
+        self.sunny_sunday_channel_id = configured_sunny_sunday_channel_id(channel_id)
         self.sent_ids, self.saved_categories, self.sunny_sunday = load_state()
         self.session: aiohttp.ClientSession | None = None
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
@@ -475,11 +482,21 @@ class MapleNewsBot(commands.Bot):
         }
 
     def announcement_channel(self) -> discord.TextChannel:
-        # 뉴스 공지와 주간 Sunny Sunday 팝업은 기존 DISCORD_CHANNEL_ID를 함께 사용합니다.
+        # 일반 뉴스 공지는 기존 DISCORD_CHANNEL_ID에 전송합니다.
         channel = self.get_channel(self.channel_id)
         if not isinstance(channel, discord.TextChannel):
             raise RuntimeError(
                 f"DISCORD_CHANNEL_ID {self.channel_id} is not an accessible text channel"
+            )
+        return channel
+
+    def sunny_sunday_channel(self) -> discord.TextChannel:
+        # 전체 Sunny Sunday 일정과 주간 팝업만 전용 채널에 전송합니다.
+        channel = self.get_channel(self.sunny_sunday_channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            raise RuntimeError(
+                "SUNNY_SUNDAY_CHANNEL_ID "
+                f"{self.sunny_sunday_channel_id} is not an accessible text channel"
             )
         return channel
 
@@ -500,7 +517,7 @@ class MapleNewsBot(commands.Bot):
                 if schedule is not None:
                     visible_entries = visible_sunny_sunday_entries(schedule["entries"])
                     if visible_entries:
-                        await self.announcement_channel().send(
+                        await self.sunny_sunday_channel().send(
                             embed=build_sunny_sunday_embed(
                                 f"☀️ {schedule['title']} ☀️",
                                 schedule["url"],
@@ -560,8 +577,6 @@ class MapleNewsBot(commands.Bot):
             embed.set_author(name=f"MapleStory | {post['category'].upper()}")
             # 공식 홈페이지 카드에 쓰인 썸네일을 임베드 하단의 큰 이미지로 보여 줍니다.
             embed.set_image(url=thumbnail_url(post))
-            embeds = [embed]
-            sunny_image = None
             new_sunny_schedule = None
             if is_patch_notes(post):
                 new_sunny_schedule = await self.create_sunny_sunday_schedule(
@@ -573,12 +588,11 @@ class MapleNewsBot(commands.Bot):
                         new_sunny_schedule["url"],
                         new_sunny_schedule["entries"],
                     )
-                    sunny_image = discord.File(SUNNY_SUNDAY_IMAGE_PATH)
-                    embeds.append(sunny_embed)
-            if sunny_image is None:
-                await channel.send(embeds=embeds)
-            else:
-                await channel.send(embeds=embeds, file=sunny_image)
+                    await self.sunny_sunday_channel().send(
+                        embed=sunny_embed,
+                        file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
+                    )
+            await channel.send(embed=embed)
             # Discord 전송에 성공한 뒤에만 '이미 보냄' 목록에 기록합니다.
             if new_sunny_schedule is not None:
                 self.sunny_sunday = new_sunny_schedule
@@ -595,7 +609,7 @@ class MapleNewsBot(commands.Bot):
             return
 
         now_timestamp = int(datetime.now(timezone.utc).timestamp())
-        channel = self.announcement_channel()
+        channel = self.sunny_sunday_channel()
         state_changed = False
         for entry in self.sunny_sunday["entries"]:
             message_id = entry.get("message_id")
