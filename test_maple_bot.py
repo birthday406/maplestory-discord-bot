@@ -4,7 +4,7 @@ from maple_bot import html_to_text, post_url, watched_posts
 
 
 class NewsFilteringTests(unittest.TestCase):
-    def test_watched_posts_excludes_events_and_other_categories(self) -> None:
+    def test_watched_posts_includes_events_and_excludes_other_categories(self) -> None:
         posts = [
             {"id": 1, "category": "update"},
             {"id": 2, "category": "events"},
@@ -12,7 +12,7 @@ class NewsFilteringTests(unittest.TestCase):
             {"id": 4, "category": "community"},
         ]
 
-        self.assertEqual([post["id"] for post in watched_posts(posts)], [1, 3])
+        self.assertEqual([post["id"] for post in watched_posts(posts)], [1, 2, 3])
 
     def test_post_url_uses_category_id_and_title_slug(self) -> None:
         post = {"id": 123, "category": "sale", "name": "Summer Sale: It's Here!"}

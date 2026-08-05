@@ -1,6 +1,6 @@
 # 메이플스토리 Discord 공지 봇
 
-메이플스토리 공식 홈페이지의 새 공지 중 `maintenance`, `sale`, `general`, `update` 카테고리만 Discord 채널에 알려주는 파이썬 봇입니다. 이벤트(`events`) 공지는 보내지 않습니다.
+메이플스토리 공식 홈페이지의 새 공지 중 `maintenance`, `sale`, `general`, `update`, `events` 카테고리를 Discord 채널에 알려주는 파이썬 봇입니다.
 
 ## 봇이 하는 일
 
