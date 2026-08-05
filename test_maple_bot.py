@@ -1,6 +1,10 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
-from maple_bot import html_to_text, post_url, thumbnail_url, watched_posts
+import maple_bot
+from maple_bot import html_to_text, load_state, post_url, thumbnail_url, watched_posts
 
 
 class NewsFilteringTests(unittest.TestCase):
@@ -29,6 +33,18 @@ class NewsFilteringTests(unittest.TestCase):
             thumbnail_url(post),
             "https://www.nexon.com/media/example/thumbnail.png",
         )
+
+    def test_load_state_treats_legacy_state_as_pre_events_categories(self) -> None:
+        original_state_path = maple_bot.STATE_PATH
+        with tempfile.TemporaryDirectory() as directory:
+            maple_bot.STATE_PATH = Path(directory) / "state.json"
+            maple_bot.STATE_PATH.write_text(json.dumps({"sent_ids": [1]}), encoding="utf-8")
+
+            sent_ids, categories = load_state()
+
+        maple_bot.STATE_PATH = original_state_path
+        self.assertEqual(sent_ids, {1})
+        self.assertEqual(categories, {"maintenance", "sale", "general", "update"})
 
     def test_html_to_text_removes_tags_and_script(self) -> None:
         source = "<h1>Patch</h1><script>ignore()</script><p>Notes</p>"

@@ -18,6 +18,8 @@ GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2
 SITE_ORIGIN = "https://www.nexon.com"
 SITE_URL = "https://www.nexon.com/maplestory/news"
 WATCHED_CATEGORIES = {"maintenance", "sale", "general", "update", "events"}
+# 이전 state.json에 카테고리 기록이 없을 때 사용하던 기존 감시 목록입니다.
+LEGACY_WATCHED_CATEGORIES = {"maintenance", "sale", "general", "update"}
 CATEGORY_COLORS = {
     "maintenance": 0xED4245,  # 빨강
     "sale": 0x9B59B6,  # 보라
@@ -55,17 +57,28 @@ def html_to_text(source: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def load_sent_ids() -> set[int] | None:
+def load_state() -> tuple[set[int] | None, set[str]]:
     # 이전 실행에서 이미 알린 공지 번호를 불러와 같은 글을 다시 보내지 않습니다.
     if not STATE_PATH.exists():
-        return None
-    return set(json.loads(STATE_PATH.read_text(encoding="utf-8"))["sent_ids"])
+        return None, set()
+    state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    return (
+        set(state["sent_ids"]),
+        set(state.get("watched_categories", LEGACY_WATCHED_CATEGORIES)),
+    )
 
 
-def save_sent_ids(sent_ids: set[int]) -> None:
+def save_state(sent_ids: set[int], watched_categories: set[str]) -> None:
     # 봇을 껐다 켜도 중복 알림을 막을 수 있도록 공지 번호를 파일에 저장합니다.
     STATE_PATH.write_text(
-        json.dumps({"sent_ids": sorted(sent_ids)[-500:]}, indent=2), encoding="utf-8"
+        json.dumps(
+            {
+                "sent_ids": sorted(sent_ids)[-500:],
+                "watched_categories": sorted(watched_categories),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
     )
 
 
@@ -73,7 +86,7 @@ class MapleNewsBot(commands.Bot):
     def __init__(self, channel_id: int) -> None:
         super().__init__(command_prefix="!", intents=discord.Intents.default())
         self.channel_id = channel_id
-        self.sent_ids = load_sent_ids()
+        self.sent_ids, self.saved_categories = load_state()
         self.session: aiohttp.ClientSession | None = None
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
         self.openai = AsyncOpenAI()
@@ -146,9 +159,19 @@ class MapleNewsBot(commands.Bot):
         if self.sent_ids is None:
             # 첫 실행에는 과거 공지를 한꺼번에 보내지 않고, 현재 글을 기준점으로만 저장합니다.
             self.sent_ids = current_ids
-            save_sent_ids(self.sent_ids)
+            self.saved_categories = set(WATCHED_CATEGORIES)
+            save_state(self.sent_ids, self.saved_categories)
             print("Initial news state saved; no existing posts were sent.")
             return
+
+        new_categories = WATCHED_CATEGORIES - self.saved_categories
+        if new_categories:
+            # 새로 켠 카테고리의 과거 글은 기준점으로만 저장해 채널 도배를 막습니다.
+            self.sent_ids.update(
+                post["id"] for post in posts if post["category"] in new_categories
+            )
+            self.saved_categories.update(new_categories)
+            save_state(self.sent_ids, self.saved_categories)
 
         new_posts = [post for post in posts if post["id"] not in self.sent_ids]
         if not new_posts:
@@ -178,7 +201,7 @@ class MapleNewsBot(commands.Bot):
             await channel.send(embed=embed)
             # Discord 전송에 성공한 뒤에만 '이미 보냄' 목록에 기록합니다.
             self.sent_ids.add(post["id"])
-            save_sent_ids(self.sent_ids)
+            save_state(self.sent_ids, self.saved_categories)
             logging.info("Sent announcement %s to Discord.", post["id"])
 
     @check_news.error
