@@ -32,6 +32,11 @@ STATE_PATH = Path("state.json")
 POLL_INTERVAL_MINUTES = 5
 MODEL = "gpt-5.6-luna"
 
+# Discord 애플리케이션에 등록한 HEXA 계산기용 일반 이모지입니다.
+HEXA_EMOJI = "<:HEXA:1534436226751529031>"
+SOL_ERDA_EMOJI = "<:SolErda:1534436216139944108>"
+FRAGMENT_EMOJI = "<:Fragment:1534436205796790324>"
+
 # 각 튜플의 0번째 값은 0→1, 29번째 값은 29→30 강화 비용입니다.
 # 코어별로 첫 번째 튜플은 솔 에르다, 두 번째 튜플은 솔 에르다 조각 비용입니다.
 HEXA_CORE_COSTS = {
@@ -133,12 +138,12 @@ async def hexa_command(
         core_type.value, current_level, target_level
     )
     embed = discord.Embed(
-        title="HEXA 매트릭스 강화 계산",
+        title=f"{HEXA_EMOJI} HEXA 매트릭스 강화 계산",
         description=(
             f"**{core_type.name}**\n"
             f"◆ **{current_level} → {target_level}** 강화 비용\n\n"
-            f"솔 에르다　**{sol_erda:,}개**\n"
-            f"솔 에르다 조각　**{fragments:,}개**"
+            f"{SOL_ERDA_EMOJI} 솔 에르다　**{sol_erda:,}개**\n"
+            f"{FRAGMENT_EMOJI} 솔 에르다 조각　**{fragments:,}개**"
         ),
         color=0x3498DB,
     )
