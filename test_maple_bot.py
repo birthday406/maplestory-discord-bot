@@ -31,7 +31,7 @@ class NewsFilteringTests(unittest.TestCase):
 
         self.assertEqual(
             thumbnail_url(post),
-            "https://www.nexon.com/media/example/thumbnail.png",
+            "https://g.nexonstatic.com/media/example/thumbnail.png",
         )
 
     def test_load_state_treats_legacy_state_as_pre_events_categories(self) -> None:

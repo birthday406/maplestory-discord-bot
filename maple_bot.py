@@ -15,7 +15,7 @@ from openai import AsyncOpenAI
 NEWS_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news"
 NEWS_DETAIL_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news/{post_id}"
 GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2"
-SITE_ORIGIN = "https://www.nexon.com"
+SITE_ORIGIN = "https://g.nexonstatic.com"
 SITE_URL = "https://www.nexon.com/maplestory/news"
 WATCHED_CATEGORIES = {"maintenance", "sale", "general", "update", "events"}
 # 이전 state.json에 카테고리 기록이 없을 때 사용하던 기존 감시 목록입니다.
