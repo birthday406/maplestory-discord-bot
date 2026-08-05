@@ -17,6 +17,12 @@ NEWS_DETAIL_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news/{post_id}"
 GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2"
 SITE_URL = "https://www.nexon.com/maplestory/news"
 WATCHED_CATEGORIES = {"maintenance", "sale", "general", "update"}
+CATEGORY_COLORS = {
+    "maintenance": 0xED4245,
+    "sale": 0x9B59B6,
+    "general": 0x3498DB,
+    "update": 0xF1C40F,
+}
 STATE_PATH = Path("state.json")
 POLL_INTERVAL_MINUTES = 5
 MODEL = "gpt-5.6-luna"
@@ -155,8 +161,11 @@ class MapleNewsBot(commands.Bot):
                 description=korean_summary[:4_096],
                 url=post_url(post),
                 timestamp=discord.utils.parse_time(post["liveDate"]),
+                # 카테고리마다 다른 색을 써서 공지 성격을 한눈에 구분합니다.
+                color=CATEGORY_COLORS[post["category"]],
             )
-            embed.set_author(name=post["category"].upper())
+            # Discord 임베드 왼쪽 위에 표시되는 작은 출처/카테고리 라벨입니다.
+            embed.set_author(name=f"MapleStory | {post['category'].upper()}")
             await channel.send(embed=embed)
             # Discord 전송에 성공한 뒤에만 '이미 보냄' 목록에 기록합니다.
             self.sent_ids.add(post["id"])
