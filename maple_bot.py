@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiohttp
@@ -36,6 +37,29 @@ MODEL = "gpt-5.6-luna"
 HEXA_EMOJI = "<:HEXA:1534436226751529031>"
 SOL_ERDA_EMOJI = "<:SolErda:1534436216139944108>"
 FRAGMENT_EMOJI = "<:Fragment:1534436205796790324>"
+ANIMATED_TWINKLE_EMOJI = "<a:Animated_Twinkle:1534436193276792873>"
+
+# 써니 선데이에서 자주 반복되는 영문은 사용자가 지정한 표현으로 고정 번역합니다.
+# 값이 빈 문자열인 주문의 흔적 항목은 Discord 안내에서 제외합니다.
+SUNNY_SUNDAY_TRANSLATIONS = (
+    ("monster park clear exp", "몬스터 파크 클리어 경험치 250% 증가 (익몬 제외)"),
+    ("reduced chance of item destruction", "21성 이하에서 스타포스 강화 시 파괴 확률 30% 감소"),
+    ("off star force enhancements", "스타포스 강화 비용 30% 할인"),
+    ("elite monster appearance increase", "앨리트 몬스터 증가 (1마리 → 3마리)"),
+    ("[hexa matrix]", "[헥사 매트릭스] 헥사 스탯의 메인 레벨 5이상 강화 확률 20% 증가"),
+    ("off ability resets", "어빌리티 재설정 비용 50% 할인"),
+    ("1+1 star force", "10성 이하에서 스타포스 강화시 1+1"),
+    ("extra star force when enhancing", "10성 이하에서 스타포스 강화시 1+1"),
+    ("treasure hunter exp", "트레져 헌터 경험치 3배"),
+    ("sol erda when hunting", "사냥을 통해 획득할 수 있는 솔 에르다 2배 증가"),
+    ("rune appearance cooldown reduction", "룬 재등장 및 재사용 대기시간 감소 (15분 → 10분)"),
+    ("combo kill exp", "콤보킬 경험치 획득량 300% 증가"),
+    ("rune exp buff effect", "룬 경험치 버프 효과 100% 증가"),
+    ("magnificent soul", "소울 조각 사용 시 위대한 소울 획득 확률 5배"),
+    ("chance to register a new monster", "몬스터 컬렉션 신규 몬스터 등록 확률 추가 100%"),
+    ("mysterious monsterbloom", "의문의 모몽 (x3): 교환불가, 영구"),
+    ("off spell trace enhancements", ""),
+)
 
 # 각 튜플의 0번째 값은 0→1, 29번째 값은 29→30 강화 비용입니다.
 # 코어별로 첫 번째 튜플은 솔 에르다, 두 번째 튜플은 솔 에르다 조각 비용입니다.
@@ -90,6 +114,62 @@ def html_to_text(source: str) -> str:
     text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", source, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def is_patch_notes(post: dict) -> bool:
+    # update 카테고리라도 Preview나 단독 콘텐츠 소개 글은 제외하고 실제 패치노트만 찾습니다.
+    title = post.get("name", "").lower()
+    return post.get("category") == "update" and "patch notes" in title and "preview" not in title
+
+
+def extract_sunny_sunday(source: str) -> list[tuple[str, bool, list[str]]]:
+    # 공식 패치노트의 SunnySunday 앵커 다음 표에서 날짜와 혜택 목록만 꺼냅니다.
+    section = re.search(
+        r'id=["\']SunnySunday["\'].*?(<table\b.*?</table>)',
+        source,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if section is None:
+        return []
+
+    entries = []
+    for row in re.findall(r"<tr\b.*?</tr>", section.group(1), flags=re.IGNORECASE | re.DOTALL):
+        cells = re.findall(
+            r"<td\b[^>]*>(.*?)</td>", row, flags=re.IGNORECASE | re.DOTALL
+        )
+        if len(cells) < 2:
+            continue
+
+        date = html_to_text(cells[0])
+        perks = [
+            html_to_text(perk)
+            for perk in re.findall(
+                r"<li\b[^>]*>(.*?)</li>", cells[1], flags=re.IGNORECASE | re.DOTALL
+            )
+        ]
+        entries.append(
+            (date, "special sunny sunday" in html_to_text(cells[1]).lower(), perks)
+        )
+    return entries
+
+
+def known_sunny_sunday_translation(perk: str) -> str | None:
+    # 대소문자, 공백, 곱하기 기호가 달라도 같은 고정 번역을 찾을 수 있게 정규화합니다.
+    normalized = re.sub(r"\s+", " ", perk).strip().lower().replace("×", "x")
+    for phrase, translation in SUNNY_SUNDAY_TRANSLATIONS:
+        if phrase in normalized:
+            return translation
+    return None
+
+
+def format_sunny_sunday_date(date: str) -> str:
+    # 패치노트 날짜는 UTC 자정 기준입니다. Discord 시간 태그가 사용자 현지 시간으로 보여 줍니다.
+    try:
+        moment = datetime.strptime(date, "%B %d, %Y").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return f"**{date} (UTC)**"
+    timestamp = int(moment.timestamp())
+    return f"<t:{timestamp}:F> (<t:{timestamp}:R>)"
 
 
 def calculate_hexa_cost(core_type: str, current_level: int, target_level: int) -> tuple[int, int]:
@@ -237,16 +317,56 @@ class MapleNewsBot(commands.Bot):
 
     async def translate_summary(self, text: str) -> str:
         # OpenAI가 만든 짧은 영어 요약만 Google 번역으로 한국어 변환합니다.
+        return (await self.translate_texts([text]))[0]
+
+    async def translate_texts(self, texts: list[str]) -> list[str]:
+        # 여러 써니 선데이 문구도 한 요청으로 보내 번역 API 호출 횟수를 줄입니다.
+        if not texts:
+            return []
         assert self.session is not None
         async with self.session.post(
             GOOGLE_TRANSLATE_URL,
             headers={"X-Goog-Api-Key": self.google_api_key},
-            json={"q": text, "source": "en", "target": "ko", "format": "text"},
+            json={"q": texts, "source": "en", "target": "ko", "format": "text"},
             timeout=aiohttp.ClientTimeout(total=30),
         ) as response:
             response.raise_for_status()
             payload = await response.json()
-            return html.unescape(payload["data"]["translations"][0]["translatedText"])
+            return [
+                html.unescape(translation["translatedText"])
+                for translation in payload["data"]["translations"]
+            ]
+
+    async def translate_sunny_sunday(
+        self, entries: list[tuple[str, bool, list[str]]]
+    ) -> str:
+        # 고정 번역이 없는 혜택만 Google 번역으로 한꺼번에 처리합니다.
+        unknown_perks = [
+            perk
+            for _, _, perks in entries
+            for perk in perks
+            if known_sunny_sunday_translation(perk) is None
+        ]
+        google_translations = dict(
+            zip(unknown_perks, await self.translate_texts(unknown_perks))
+        )
+
+        sections = []
+        for date, is_special, perks in entries:
+            lines = [f"• __**{format_sunny_sunday_date(date)}**__"]
+            if is_special:
+                lines.append(
+                    f"{ANIMATED_TWINKLE_EMOJI} **스페셜: 샤이닝 스타포스** "
+                    f"{ANIMATED_TWINKLE_EMOJI}"
+                )
+            for perk in perks:
+                translation = known_sunny_sunday_translation(perk)
+                if translation is None:
+                    translation = google_translations[perk]
+                if translation:
+                    lines.append(f"• {translation}")
+            sections.append("\n".join(lines))
+        return "\n\n".join(sections)
 
     @tasks.loop(minutes=POLL_INTERVAL_MINUTES)
     async def check_news(self) -> None:
@@ -296,7 +416,23 @@ class MapleNewsBot(commands.Bot):
             embed.set_author(name=f"MapleStory | {post['category'].upper()}")
             # 공식 홈페이지 카드에 쓰인 썸네일을 임베드 하단의 큰 이미지로 보여 줍니다.
             embed.set_image(url=thumbnail_url(post))
-            await channel.send(embed=embed)
+            embeds = [embed]
+            if is_patch_notes(post):
+                sunny_entries = extract_sunny_sunday(detail["body"])
+                if sunny_entries:
+                    patch_title = re.sub(r"^\[[^]]+\]\s*", "", post["name"])
+                    patch_title = re.sub(
+                        r"\s+Patch Notes$", "", patch_title, flags=re.IGNORECASE
+                    )
+                    sunny_embed = discord.Embed(
+                        title=f"☀️ {patch_title} ☀️",
+                        description=await self.translate_sunny_sunday(sunny_entries),
+                        url=post_url(post),
+                        color=CATEGORY_COLORS["update"],
+                    )
+                    sunny_embed.set_author(name="MapleStory | SUNNY SUNDAY")
+                    embeds.append(sunny_embed)
+            await channel.send(embeds=embeds)
             # Discord 전송에 성공한 뒤에만 '이미 보냄' 목록에 기록합니다.
             self.sent_ids.add(post["id"])
             save_state(self.sent_ids, self.saved_categories)
