@@ -18,7 +18,7 @@ GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2
 SITE_URL = "https://www.nexon.com/maplestory/news"
 WATCHED_CATEGORIES = {"maintenance", "sale", "general", "update"}
 STATE_PATH = Path("state.json")
-POLL_INTERVAL_MINUTES = 30
+POLL_INTERVAL_MINUTES = 10
 MODEL = "gpt-5.6-luna"
 
 
@@ -68,7 +68,7 @@ class MapleNewsBot(commands.Bot):
         self.google_api_key = os.environ["GOOGLE_TRANSLATE_API_KEY"]
 
     async def setup_hook(self) -> None:
-        # Discord 연결이 준비되면 30분마다 새 공지를 확인하는 작업을 시작합니다.
+        # Discord 연결이 준비되면 10분마다 새 공지를 확인하는 작업을 시작합니다.
         self.session = aiohttp.ClientSession()
 
     async def on_ready(self) -> None:
@@ -126,7 +126,7 @@ class MapleNewsBot(commands.Bot):
 
     @tasks.loop(minutes=POLL_INTERVAL_MINUTES)
     async def check_news(self) -> None:
-        # 이 함수는 30분마다 자동 실행되는 봇의 핵심 작업입니다.
+        # 이 함수는 10분마다 자동 실행되는 봇의 핵심 작업입니다.
         posts = await self.fetch_posts()
         current_ids = {post["id"] for post in posts}
 
