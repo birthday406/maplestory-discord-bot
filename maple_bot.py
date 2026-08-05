@@ -15,6 +15,7 @@ from openai import AsyncOpenAI
 NEWS_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news"
 NEWS_DETAIL_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news/{post_id}"
 GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2"
+SITE_ORIGIN = "https://www.nexon.com"
 SITE_URL = "https://www.nexon.com/maplestory/news"
 WATCHED_CATEGORIES = {"maintenance", "sale", "general", "update", "events"}
 CATEGORY_COLORS = {
@@ -40,6 +41,11 @@ def post_url(post: dict) -> str:
         "".join(char if char.isalnum() else " " for char in post["name"]).lower().split()
     )
     return f"{SITE_URL}/{post['category']}/{post['id']}/{title_slug}"
+
+
+def thumbnail_url(post: dict) -> str:
+    # 공식 목록 API의 상대 썸네일 경로를 Discord가 읽을 수 있는 전체 주소로 바꿉니다.
+    return f"{SITE_ORIGIN}{post['imageThumbnail']}"
 
 
 def html_to_text(source: str) -> str:
@@ -167,6 +173,8 @@ class MapleNewsBot(commands.Bot):
             )
             # Discord 임베드 왼쪽 위에 표시되는 작은 출처/카테고리 라벨입니다.
             embed.set_author(name=f"MapleStory | {post['category'].upper()}")
+            # 공식 홈페이지 카드에 쓰인 썸네일을 임베드 하단의 큰 이미지로 보여 줍니다.
+            embed.set_image(url=thumbnail_url(post))
             await channel.send(embed=embed)
             # Discord 전송에 성공한 뒤에만 '이미 보냄' 목록에 기록합니다.
             self.sent_ids.add(post["id"])

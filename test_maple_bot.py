@@ -1,6 +1,6 @@
 import unittest
 
-from maple_bot import html_to_text, post_url, watched_posts
+from maple_bot import html_to_text, post_url, thumbnail_url, watched_posts
 
 
 class NewsFilteringTests(unittest.TestCase):
@@ -20,6 +20,14 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(
             post_url(post),
             "https://www.nexon.com/maplestory/news/sale/123/summer-sale-it-s-here",
+        )
+
+    def test_thumbnail_url_uses_nexon_origin(self) -> None:
+        post = {"imageThumbnail": "/media/example/thumbnail.png"}
+
+        self.assertEqual(
+            thumbnail_url(post),
+            "https://www.nexon.com/media/example/thumbnail.png",
         )
 
     def test_html_to_text_removes_tags_and_script(self) -> None:
