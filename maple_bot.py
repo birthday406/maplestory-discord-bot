@@ -18,11 +18,11 @@ GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2
 SITE_URL = "https://www.nexon.com/maplestory/news"
 WATCHED_CATEGORIES = {"maintenance", "sale", "general", "update", "events"}
 CATEGORY_COLORS = {
-    "maintenance": 0xED4245,
-    "sale": 0x9B59B6,
-    "general": 0x3498DB,
-    "update": 0xF1C40F,
-    "events": 0x57F287,
+    "maintenance": 0xED4245,  # 빨강
+    "sale": 0x9B59B6,  # 보라
+    "general": 0x3498DB,  # 파랑
+    "update": 0xF1C40F,  # 금색
+    "events": 0x57F287,  # 초록
 }
 STATE_PATH = Path("state.json")
 POLL_INTERVAL_MINUTES = 5
