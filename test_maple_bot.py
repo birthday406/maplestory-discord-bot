@@ -14,7 +14,11 @@ from maple_bot import (
     known_sunny_sunday_translation,
     load_state,
     post_url,
+    save_state,
+    sunny_sunday_entry_action,
+    sunny_sunday_timestamp,
     thumbnail_url,
+    visible_sunny_sunday_entries,
     watched_posts,
 )
 
@@ -52,11 +56,37 @@ class NewsFilteringTests(unittest.TestCase):
             maple_bot.STATE_PATH = Path(directory) / "state.json"
             maple_bot.STATE_PATH.write_text(json.dumps({"sent_ids": [1]}), encoding="utf-8")
 
-            sent_ids, categories = load_state()
+            sent_ids, categories, sunny_sunday = load_state()
 
         maple_bot.STATE_PATH = original_state_path
         self.assertEqual(sent_ids, {1})
         self.assertEqual(categories, {"maintenance", "sale", "general", "update"})
+        self.assertIsNone(sunny_sunday)
+
+    def test_sunny_sunday_schedule_is_saved_and_loaded(self) -> None:
+        original_state_path = maple_bot.STATE_PATH
+        schedule = {
+            "post_id": 42415,
+            "title": "v.270 - Ride the Lightning",
+            "url": "https://example.com/patch-notes",
+            "entries": [
+                {
+                    "timestamp": 1785628800,
+                    "name": "· __<t:1785628800:F> (<t:1785628800:R>)__",
+                    "value": "- 스타포스 강화 비용 30% 할인",
+                    "message_id": 123,
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            maple_bot.STATE_PATH = Path(directory) / "state.json"
+            save_state({1}, {"update"}, schedule)
+            sent_ids, categories, loaded_schedule = load_state()
+
+        maple_bot.STATE_PATH = original_state_path
+        self.assertEqual(sent_ids, {1})
+        self.assertEqual(categories, {"update"})
+        self.assertEqual(loaded_schedule, schedule)
 
     def test_html_to_text_removes_tags_and_script(self) -> None:
         source = "<h1>Patch</h1><script>ignore()</script><p>Notes</p>"
@@ -130,6 +160,30 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(
             format_sunny_sunday_date("August 02, 2026"),
             "<t:1785628800:F> (<t:1785628800:R>)",
+        )
+
+    def test_sunny_sunday_list_excludes_entries_after_24_hours(self) -> None:
+        start = sunny_sunday_timestamp("August 02, 2026")
+        entries = [
+            {"timestamp": start, "name": "expired"},
+            {"timestamp": start + 604800, "name": "upcoming"},
+        ]
+
+        self.assertEqual(
+            visible_sunny_sunday_entries(entries, start + 86400),
+            [entries[1]],
+        )
+
+    def test_weekly_sunny_sunday_message_lifecycle(self) -> None:
+        start = sunny_sunday_timestamp("August 02, 2026")
+        entry = {"timestamp": start, "message_id": None}
+
+        self.assertIsNone(sunny_sunday_entry_action(entry, start - 1))
+        self.assertEqual(sunny_sunday_entry_action(entry, start), "send")
+        entry["message_id"] = 123
+        self.assertIsNone(sunny_sunday_entry_action(entry, start + 86399))
+        self.assertEqual(
+            sunny_sunday_entry_action(entry, start + 86400), "delete"
         )
 
 

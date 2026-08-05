@@ -32,6 +32,7 @@ CATEGORY_COLORS = {
 STATE_PATH = Path("state.json")
 SUNNY_SUNDAY_IMAGE_PATH = Path(__file__).parent / "assets" / "title-sunny-sunday.webp"
 POLL_INTERVAL_MINUTES = 5
+SUNNY_SUNDAY_DURATION_SECONDS = 24 * 60 * 60
 MODEL = "gpt-5.6-luna"
 
 # Discord 애플리케이션에 등록한 HEXA 계산기용 일반 이모지입니다.
@@ -163,14 +164,56 @@ def known_sunny_sunday_translation(perk: str) -> str | None:
     return None
 
 
+def sunny_sunday_timestamp(date: str) -> int:
+    # 공식 표의 날짜는 UTC 자정 기준이므로 저장과 자동 알림에 사용할 Unix 시간으로 바꿉니다.
+    moment = datetime.strptime(date, "%B %d, %Y").replace(tzinfo=timezone.utc)
+    return int(moment.timestamp())
+
+
 def format_sunny_sunday_date(date: str) -> str:
-    # 패치노트 날짜는 UTC 자정 기준입니다. Discord 시간 태그가 사용자 현지 시간으로 보여 줍니다.
-    try:
-        moment = datetime.strptime(date, "%B %d, %Y").replace(tzinfo=timezone.utc)
-    except ValueError:
-        return f"**{date} (UTC)**"
-    timestamp = int(moment.timestamp())
+    # Discord 시간 태그는 각 사용자의 현지 시간과 상대 시간으로 자동 표시됩니다.
+    timestamp = sunny_sunday_timestamp(date)
     return f"<t:{timestamp}:F> (<t:{timestamp}:R>)"
+
+
+def visible_sunny_sunday_entries(
+    entries: list[dict], now_timestamp: int | None = None
+) -> list[dict]:
+    # 시작 시각에서 24시간이 지나지 않은 현재 및 미래 일정만 목록에 남깁니다.
+    if now_timestamp is None:
+        now_timestamp = int(datetime.now(timezone.utc).timestamp())
+    return [
+        entry
+        for entry in entries
+        if now_timestamp < entry["timestamp"] + SUNNY_SUNDAY_DURATION_SECONDS
+    ]
+
+
+def sunny_sunday_entry_action(entry: dict, now_timestamp: int) -> str | None:
+    # 주간 메시지를 보낼지, 24시간이 지나 삭제할지를 시간과 저장된 메시지 ID로 결정합니다.
+    start = entry["timestamp"]
+    end = start + SUNNY_SUNDAY_DURATION_SECONDS
+    if entry.get("message_id") is None and start <= now_timestamp < end:
+        return "send"
+    if entry.get("message_id") is not None and now_timestamp >= end:
+        return "delete"
+    return None
+
+
+def build_sunny_sunday_embed(
+    title: str, url: str, entries: list[dict]
+) -> discord.Embed:
+    # 전체 일정과 주간 자동 알림, /썬데이 명령어가 같은 모양을 사용합니다.
+    embed = discord.Embed(
+        title=title,
+        url=url,
+        color=CATEGORY_COLORS["update"],
+    )
+    embed.set_author(name="MapleStory | SUNNY SUNDAY")
+    for entry in entries:
+        embed.add_field(name=entry["name"], value=entry["value"], inline=False)
+    embed.set_image(url=f"attachment://{SUNNY_SUNDAY_IMAGE_PATH.name}")
+    return embed
 
 
 def calculate_hexa_cost(core_type: str, current_level: int, target_level: int) -> tuple[int, int]:
@@ -233,24 +276,55 @@ async def hexa_command(
     await interaction.response.send_message(embed=embed)
 
 
-def load_state() -> tuple[set[int] | None, set[str]]:
+@app_commands.command(name="썬데이", description="저장된 Sunny Sunday 일정을 보여줍니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def sunny_sunday_command(interaction: discord.Interaction) -> None:
+    # 패치노트를 다시 요청하지 않고 봇이 state.json에서 불러온 일정만 사용합니다.
+    schedule = getattr(interaction.client, "sunny_sunday", None)
+    if schedule is None:
+        await interaction.response.send_message(
+            "저장된 Sunny Sunday 일정이 없습니다.", ephemeral=True
+        )
+        return
+
+    entries = visible_sunny_sunday_entries(schedule["entries"])
+    if not entries:
+        await interaction.response.send_message(
+            "남아 있는 Sunny Sunday 일정이 없습니다.", ephemeral=True
+        )
+        return
+
+    embed = build_sunny_sunday_embed(
+        f"☀️ {schedule['title']} ☀️", schedule["url"], entries
+    )
+    await interaction.response.send_message(
+        embed=embed, file=discord.File(SUNNY_SUNDAY_IMAGE_PATH)
+    )
+
+
+def load_state() -> tuple[set[int] | None, set[str], dict | None]:
     # 이전 실행에서 이미 알린 공지 번호를 불러와 같은 글을 다시 보내지 않습니다.
     if not STATE_PATH.exists():
-        return None, set()
+        return None, set(), None
     state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     return (
         set(state["sent_ids"]),
         set(state.get("watched_categories", LEGACY_WATCHED_CATEGORIES)),
+        state.get("sunny_sunday"),
     )
 
 
-def save_state(sent_ids: set[int], watched_categories: set[str]) -> None:
+def save_state(
+    sent_ids: set[int], watched_categories: set[str], sunny_sunday: dict | None
+) -> None:
     # 봇을 껐다 켜도 중복 알림을 막을 수 있도록 공지 번호를 파일에 저장합니다.
     STATE_PATH.write_text(
         json.dumps(
             {
                 "sent_ids": sorted(sent_ids)[-500:],
                 "watched_categories": sorted(watched_categories),
+                "sunny_sunday": sunny_sunday,
             },
             indent=2,
         ),
@@ -262,7 +336,7 @@ class MapleNewsBot(commands.Bot):
     def __init__(self, channel_id: int) -> None:
         super().__init__(command_prefix="!", intents=discord.Intents.default())
         self.channel_id = channel_id
-        self.sent_ids, self.saved_categories = load_state()
+        self.sent_ids, self.saved_categories, self.sunny_sunday = load_state()
         self.session: aiohttp.ClientSession | None = None
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
         self.openai = AsyncOpenAI()
@@ -274,6 +348,7 @@ class MapleNewsBot(commands.Bot):
         self.session = aiohttp.ClientSession()
         # 전역 슬래시 명령을 Discord에 등록합니다. 명령 내용이 바뀌어도 재시작 시 동기화됩니다.
         self.tree.add_command(hexa_command)
+        self.tree.add_command(sunny_sunday_command)
         await self.tree.sync()
 
     async def on_ready(self) -> None:
@@ -281,6 +356,8 @@ class MapleNewsBot(commands.Bot):
         # 재연결되더라도 같은 확인 작업을 중복으로 시작하지 않습니다.
         if not self.check_news.is_running():
             self.check_news.start()
+        if not self.check_sunny_sunday.is_running():
+            self.check_sunny_sunday.start()
 
     async def close(self) -> None:
         if self.session is not None:
@@ -340,7 +417,7 @@ class MapleNewsBot(commands.Bot):
 
     async def translate_sunny_sunday(
         self, entries: list[tuple[str, bool, list[str]]]
-    ) -> list[tuple[str, str]]:
+    ) -> list[dict]:
         # 고정 번역이 없는 혜택만 Google 번역으로 한꺼번에 처리합니다.
         unknown_perks = [
             perk
@@ -352,7 +429,7 @@ class MapleNewsBot(commands.Bot):
             zip(unknown_perks, await self.translate_texts(unknown_perks))
         )
 
-        fields = []
+        stored_entries = []
         for date, is_special, perks in entries:
             lines = []
             if is_special:
@@ -366,10 +443,45 @@ class MapleNewsBot(commands.Bot):
                     translation = google_translations[perk]
                 if translation:
                     lines.append(f"- {translation}")
-            fields.append(
-                (f"· __{format_sunny_sunday_date(date)}__", "\n".join(lines))
+            stored_entries.append(
+                {
+                    "timestamp": sunny_sunday_timestamp(date),
+                    "name": f"· __{format_sunny_sunday_date(date)}__",
+                    "value": "\n".join(lines),
+                    "message_id": None,
+                }
             )
-        return fields
+        return stored_entries
+
+    async def create_sunny_sunday_schedule(
+        self, post: dict, detail: dict | None = None
+    ) -> dict | None:
+        # 새 패치노트에서 한 번만 추출·번역한 결과를 state.json에 저장할 형태로 만듭니다.
+        if detail is None:
+            detail = await self.fetch_post_detail(post["id"])
+        entries = extract_sunny_sunday(detail["body"])
+        if not entries:
+            return None
+
+        patch_title = re.sub(r"^\[[^]]+\]\s*", "", post["name"])
+        patch_title = re.sub(
+            r"\s+Patch Notes$", "", patch_title, flags=re.IGNORECASE
+        )
+        return {
+            "post_id": post["id"],
+            "title": patch_title,
+            "url": post_url(post),
+            "entries": await self.translate_sunny_sunday(entries),
+        }
+
+    def announcement_channel(self) -> discord.TextChannel:
+        # 뉴스 공지와 주간 Sunny Sunday 팝업은 기존 DISCORD_CHANNEL_ID를 함께 사용합니다.
+        channel = self.get_channel(self.channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            raise RuntimeError(
+                f"DISCORD_CHANNEL_ID {self.channel_id} is not an accessible text channel"
+            )
+        return channel
 
     @tasks.loop(minutes=POLL_INTERVAL_MINUTES)
     async def check_news(self) -> None:
@@ -377,11 +489,40 @@ class MapleNewsBot(commands.Bot):
         posts = await self.fetch_posts()
         current_ids = {post["id"] for post in posts}
 
+        if self.sunny_sunday is None:
+            # 기존 state.json에는 일정이 없으므로, 이미 처리한 최신 패치노트에서 최초 한 번만 채웁니다.
+            latest_patch = next((post for post in posts if is_patch_notes(post)), None)
+            should_bootstrap = latest_patch is not None and (
+                self.sent_ids is None or latest_patch["id"] in self.sent_ids
+            )
+            if should_bootstrap:
+                schedule = await self.create_sunny_sunday_schedule(latest_patch)
+                if schedule is not None:
+                    visible_entries = visible_sunny_sunday_entries(schedule["entries"])
+                    if visible_entries:
+                        await self.announcement_channel().send(
+                            embed=build_sunny_sunday_embed(
+                                f"☀️ {schedule['title']} ☀️",
+                                schedule["url"],
+                                visible_entries,
+                            ),
+                            file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
+                        )
+                    self.sunny_sunday = schedule
+                    if self.sent_ids is not None:
+                        save_state(
+                            self.sent_ids,
+                            self.saved_categories,
+                            self.sunny_sunday,
+                        )
+
         if self.sent_ids is None:
             # 첫 실행에는 과거 공지를 한꺼번에 보내지 않고, 현재 글을 기준점으로만 저장합니다.
             self.sent_ids = current_ids
             self.saved_categories = set(WATCHED_CATEGORIES)
-            save_state(self.sent_ids, self.saved_categories)
+            save_state(
+                self.sent_ids, self.saved_categories, self.sunny_sunday
+            )
             print("Initial news state saved; no existing posts were sent.")
             return
 
@@ -392,16 +533,16 @@ class MapleNewsBot(commands.Bot):
                 post["id"] for post in posts if post["category"] in new_categories
             )
             self.saved_categories.update(new_categories)
-            save_state(self.sent_ids, self.saved_categories)
+            save_state(
+                self.sent_ids, self.saved_categories, self.sunny_sunday
+            )
 
         new_posts = [post for post in posts if post["id"] not in self.sent_ids]
         if not new_posts:
             logging.info("No new MapleStory announcements found.")
             return
 
-        channel = self.get_channel(self.channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            raise RuntimeError(f"DISCORD_CHANNEL_ID {self.channel_id} is not an accessible text channel")
+        channel = self.announcement_channel()
 
         for post in sorted(new_posts, key=lambda item: item["liveDate"]):
             # 새 공지 한 건의 본문을 가져와 요약하고, 그 요약을 한국어로 번역합니다.
@@ -421,28 +562,16 @@ class MapleNewsBot(commands.Bot):
             embed.set_image(url=thumbnail_url(post))
             embeds = [embed]
             sunny_image = None
+            new_sunny_schedule = None
             if is_patch_notes(post):
-                sunny_entries = extract_sunny_sunday(detail["body"])
-                if sunny_entries:
-                    patch_title = re.sub(r"^\[[^]]+\]\s*", "", post["name"])
-                    patch_title = re.sub(
-                        r"\s+Patch Notes$", "", patch_title, flags=re.IGNORECASE
-                    )
-                    sunny_embed = discord.Embed(
-                        title=f"☀️ {patch_title} ☀️",
-                        url=post_url(post),
-                        color=CATEGORY_COLORS["update"],
-                    )
-                    sunny_embed.set_author(name="MapleStory | SUNNY SUNDAY")
-                    for field_name, field_value in await self.translate_sunny_sunday(
-                        sunny_entries
-                    ):
-                        sunny_embed.add_field(
-                            name=field_name, value=field_value, inline=False
-                        )
-                    # Discord 메시지에 프로젝트 이미지를 직접 첨부해 만료되는 CDN 주소를 피합니다.
-                    sunny_embed.set_image(
-                        url=f"attachment://{SUNNY_SUNDAY_IMAGE_PATH.name}"
+                new_sunny_schedule = await self.create_sunny_sunday_schedule(
+                    post, detail
+                )
+                if new_sunny_schedule is not None:
+                    sunny_embed = build_sunny_sunday_embed(
+                        f"☀️ {new_sunny_schedule['title']} ☀️",
+                        new_sunny_schedule["url"],
+                        new_sunny_schedule["entries"],
                     )
                     sunny_image = discord.File(SUNNY_SUNDAY_IMAGE_PATH)
                     embeds.append(sunny_embed)
@@ -451,18 +580,70 @@ class MapleNewsBot(commands.Bot):
             else:
                 await channel.send(embeds=embeds, file=sunny_image)
             # Discord 전송에 성공한 뒤에만 '이미 보냄' 목록에 기록합니다.
+            if new_sunny_schedule is not None:
+                self.sunny_sunday = new_sunny_schedule
             self.sent_ids.add(post["id"])
-            save_state(self.sent_ids, self.saved_categories)
+            save_state(
+                self.sent_ids, self.saved_categories, self.sunny_sunday
+            )
             logging.info("Sent announcement %s to Discord.", post["id"])
+
+    @tasks.loop(minutes=1)
+    async def check_sunny_sunday(self) -> None:
+        # 저장된 일정만 확인해 시작 시 주간 팝업을 보내고 24시간 뒤 그 메시지를 삭제합니다.
+        if self.sunny_sunday is None or self.sent_ids is None:
+            return
+
+        now_timestamp = int(datetime.now(timezone.utc).timestamp())
+        channel = self.announcement_channel()
+        state_changed = False
+        for entry in self.sunny_sunday["entries"]:
+            message_id = entry.get("message_id")
+            action = sunny_sunday_entry_action(entry, now_timestamp)
+
+            if action == "send":
+                message = await channel.send(
+                    embed=build_sunny_sunday_embed(
+                        "☀️ 이번 주 Sunny Sunday ☀️",
+                        self.sunny_sunday["url"],
+                        [entry],
+                    ),
+                    file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
+                )
+                entry["message_id"] = message.id
+                state_changed = True
+                logging.info("Sent weekly Sunny Sunday message %s.", message.id)
+            elif action == "delete":
+                try:
+                    await channel.get_partial_message(message_id).delete()
+                except discord.NotFound:
+                    pass
+                entry["message_id"] = None
+                state_changed = True
+                logging.info("Removed expired Sunny Sunday message %s.", message_id)
+
+        if state_changed:
+            save_state(
+                self.sent_ids, self.saved_categories, self.sunny_sunday
+            )
 
     @check_news.error
     async def check_news_error(self, error: Exception) -> None:
         # API나 전송 단계의 오류를 서버 로그에 남겨 원인을 확인할 수 있게 합니다.
         logging.exception("MapleStory announcement check failed.", exc_info=error)
 
+    @check_sunny_sunday.error
+    async def check_sunny_sunday_error(self, error: Exception) -> None:
+        # 주간 팝업 전송이나 삭제 실패를 서버 로그에서 확인할 수 있게 합니다.
+        logging.exception("Sunny Sunday schedule check failed.", exc_info=error)
+
     @check_news.before_loop
     async def before_check_news(self) -> None:
         # 디스코드 기본 연결 대기 함수를 가리지 않도록 다른 이름을 사용합니다.
+        await self.wait_until_ready()
+
+    @check_sunny_sunday.before_loop
+    async def before_check_sunny_sunday(self) -> None:
         await self.wait_until_ready()
 
 
