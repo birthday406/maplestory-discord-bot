@@ -589,10 +589,6 @@ class MapleNewsBot(commands.Bot):
         )
         return response.output_text
 
-    async def translate_summary(self, text: str) -> str:
-        # OpenAI가 만든 짧은 영어 요약만 Google 번역으로 한국어 변환합니다.
-        return (await self.translate_texts([text]))[0]
-
     async def translate_texts(self, texts: list[str]) -> list[str]:
         # 여러 써니 선데이 문구도 한 요청으로 보내 번역 API 호출 횟수를 줄입니다.
         if not texts:
@@ -876,7 +872,9 @@ class MapleNewsBot(commands.Bot):
             detail = await self.fetch_post_detail(post["id"])
             if sends_news:
                 # 새 공지 한 건을 요약·번역한 뒤 등록된 모든 공지 채널에 같은 임베드를 보냅니다.
-                korean_summary = await self.translate_summary(await self.summarize(detail))
+                korean_summary = (
+                    await self.translate_texts([await self.summarize(detail)])
+                )[0]
                 embed = discord.Embed(
                     title=post["name"],
                     description=korean_summary[:4_096],
