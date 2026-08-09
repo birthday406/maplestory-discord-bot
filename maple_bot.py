@@ -34,6 +34,10 @@ SUNNY_SUNDAY_IMAGE_PATH = Path(__file__).parent / "assets" / "title-sunny-sunday
 POLL_INTERVAL_MINUTES = 5
 SUNNY_SUNDAY_DURATION_SECONDS = 24 * 60 * 60
 MODEL = "gpt-5.6-luna"
+ALERT_NEWS = "news"
+ALERT_SUNNY_DAY = "sunny_day"
+ALERT_SUNNY_LIST = "sunny_list"
+ALERT_TYPES = (ALERT_NEWS, ALERT_SUNNY_DAY, ALERT_SUNNY_LIST)
 
 # Discord 애플리케이션에 등록한 HEXA 계산기용 일반 이모지입니다.
 HEXA_EMOJI = "<:HEXA:1534436226751529031>"
@@ -98,15 +102,59 @@ def watched_posts(posts: list[dict]) -> list[dict]:
     return [post for post in posts if post.get("category") in WATCHED_CATEGORIES]
 
 
-def configured_sunny_sunday_channel_id(default_channel_id: int) -> int:
-    # 전용 채널을 설정하지 않은 기존 환경에서는 일반 공지 채널을 그대로 사용합니다.
-    configured_channel_id = os.getenv("SUNNY_SUNDAY_CHANNEL_ID")
-    return int(configured_channel_id) if configured_channel_id else default_channel_id
+def normalize_alert_channels(
+    stored_channels: dict | None,
+    news_channel_id: int,
+    sunny_channel_id: int,
+) -> dict[str, set[int]]:
+    # 예전 환경변수 채널은 설정 데이터가 없는 최초 한 번만 새 알리미 구조로 옮깁니다.
+    if stored_channels is None:
+        return {
+            ALERT_NEWS: {news_channel_id},
+            ALERT_SUNNY_DAY: {sunny_channel_id},
+            ALERT_SUNNY_LIST: {sunny_channel_id},
+        }
+    return {
+        alert_type: {
+            int(channel_id) for channel_id in stored_channels.get(alert_type, [])
+        }
+        for alert_type in ALERT_TYPES
+    }
 
 
-def should_post_sunny_sunday_schedule(schedule: dict, channel_id: int) -> bool:
-    # 저장된 게시 채널과 현재 전용 채널이 다르면 전체 일정을 새 채널에 한 번 안내합니다.
-    return schedule.get("announcement_channel_id") != channel_id
+def update_alert_channel(
+    alert_channels: dict[str, set[int]],
+    alert_type: str,
+    channel_id: int,
+    enabled: bool,
+) -> bool:
+    # 같은 설정을 반복해도 state.json과 Discord 메시지가 중복 변경되지 않게 합니다.
+    channels = alert_channels[alert_type]
+    if enabled:
+        if channel_id in channels:
+            return False
+        channels.add(channel_id)
+        return True
+    if channel_id not in channels:
+        return False
+    channels.remove(channel_id)
+    return True
+
+
+def migrate_sunny_sunday_state(schedule: dict | None, channel_id: int) -> bool:
+    # 단일 채널 시절의 message_id를 채널별 message_ids 구조로 한 번 변환합니다.
+    if schedule is None:
+        return False
+    changed = schedule.pop("announcement_channel_id", None) is not None
+    for entry in schedule["entries"]:
+        if "message_ids" not in entry:
+            entry["message_ids"] = {}
+            changed = True
+        old_message_id = entry.pop("message_id", None)
+        if old_message_id is not None:
+            entry["message_ids"][str(channel_id)] = old_message_id
+            changed = True
+    return changed
 
 
 def post_url(post: dict) -> str:
@@ -208,13 +256,16 @@ def current_sunny_sunday_entry(
     return min(visible_entries, key=lambda entry: entry["timestamp"], default=None)
 
 
-def sunny_sunday_entry_action(entry: dict, now_timestamp: int) -> str | None:
+def sunny_sunday_entry_action(
+    entry: dict, channel_id: int, now_timestamp: int
+) -> str | None:
     # 주간 메시지를 보낼지, 24시간이 지나 삭제할지를 시간과 저장된 메시지 ID로 결정합니다.
     start = entry["timestamp"]
     end = start + SUNNY_SUNDAY_DURATION_SECONDS
-    if entry.get("message_id") is None and start <= now_timestamp < end:
+    has_message = str(channel_id) in entry.get("message_ids", {})
+    if not has_message and start <= now_timestamp < end:
         return "send"
-    if entry.get("message_id") is not None and now_timestamp >= end:
+    if has_message and now_timestamp >= end:
         return "delete"
     return None
 
@@ -322,28 +373,126 @@ async def sunny_sunday_command(interaction: discord.Interaction) -> None:
     )
 
 
-def load_state() -> tuple[set[int] | None, set[str], dict | None]:
+@app_commands.command(name="썬데이목록", description="저장된 Sunny Sunday 전체 일정을 보여줍니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def sunny_sunday_list_command(interaction: discord.Interaction) -> None:
+    # 이미 번역해 저장한 최신 패치노트의 전체 목록을 API 호출 없이 보여 줍니다.
+    schedule = getattr(interaction.client, "sunny_sunday", None)
+    if schedule is None:
+        await interaction.response.send_message(
+            "저장된 Sunny Sunday 일정이 없습니다.", ephemeral=True
+        )
+        return
+    await interaction.response.send_message(
+        embed=build_sunny_sunday_embed(
+            f"☀️ {schedule['title']} ☀️", schedule["url"], schedule["entries"]
+        ),
+        file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
+    )
+
+
+ALERT_ACTION_CHOICES = [
+    app_commands.Choice(name="ON", value="on"),
+    app_commands.Choice(name="OFF", value="off"),
+]
+
+
+async def run_alert_setting_command(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    action: app_commands.Choice[str],
+    alert_type: str,
+    alert_name: str,
+) -> None:
+    # 세 설정 명령은 표시 이름만 다르고 권한 검사와 저장 동작은 함께 사용합니다.
+    await interaction.client.configure_alert_channel(
+        interaction, channel, action.value == "on", alert_type, alert_name
+    )
+
+
+@app_commands.command(name="공지알림", description="번역 공지 알림 채널을 설정합니다.")
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+@app_commands.rename(channel="채널", action="동작")
+@app_commands.describe(channel="알림을 받을 텍스트 채널", action="알림 ON 또는 OFF")
+@app_commands.choices(action=ALERT_ACTION_CHOICES)
+async def news_alert_command(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    action: app_commands.Choice[str],
+) -> None:
+    await run_alert_setting_command(
+        interaction, channel, action, ALERT_NEWS, "공지 알림"
+    )
+
+
+@app_commands.command(name="썬데이알림", description="당일 Sunny Sunday 알림 채널을 설정합니다.")
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+@app_commands.rename(channel="채널", action="동작")
+@app_commands.describe(channel="알림을 받을 텍스트 채널", action="알림 ON 또는 OFF")
+@app_commands.choices(action=ALERT_ACTION_CHOICES)
+async def sunny_day_alert_command(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    action: app_commands.Choice[str],
+) -> None:
+    await run_alert_setting_command(
+        interaction, channel, action, ALERT_SUNNY_DAY, "썬데이 당일 알림"
+    )
+
+
+@app_commands.command(name="썬데이목록알림", description="전체 Sunny Sunday 목록 알림 채널을 설정합니다.")
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+@app_commands.rename(channel="채널", action="동작")
+@app_commands.describe(channel="알림을 받을 텍스트 채널", action="알림 ON 또는 OFF")
+@app_commands.choices(action=ALERT_ACTION_CHOICES)
+async def sunny_list_alert_command(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    action: app_commands.Choice[str],
+) -> None:
+    await run_alert_setting_command(
+        interaction, channel, action, ALERT_SUNNY_LIST, "썬데이 목록 알림"
+    )
+
+
+def load_state() -> tuple[set[int] | None, set[str], dict | None, dict | None]:
     # 이전 실행에서 이미 알린 공지 번호를 불러와 같은 글을 다시 보내지 않습니다.
     if not STATE_PATH.exists():
-        return None, set(), None
+        return None, set(), None, None
     state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    stored_sent_ids = state.get("sent_ids")
     return (
-        set(state["sent_ids"]),
+        None if stored_sent_ids is None else set(stored_sent_ids),
         set(state.get("watched_categories", LEGACY_WATCHED_CATEGORIES)),
         state.get("sunny_sunday"),
+        state.get("alert_channels"),
     )
 
 
 def save_state(
-    sent_ids: set[int], watched_categories: set[str], sunny_sunday: dict | None
+    sent_ids: set[int] | None,
+    watched_categories: set[str],
+    sunny_sunday: dict | None,
+    alert_channels: dict[str, set[int]],
 ) -> None:
     # 봇을 껐다 켜도 중복 알림을 막을 수 있도록 공지 번호를 파일에 저장합니다.
     STATE_PATH.write_text(
         json.dumps(
             {
-                "sent_ids": sorted(sent_ids)[-500:],
+                "sent_ids": None if sent_ids is None else sorted(sent_ids)[-500:],
                 "watched_categories": sorted(watched_categories),
                 "sunny_sunday": sunny_sunday,
+                "alert_channels": {
+                    alert_type: sorted(channel_ids)
+                    for alert_type, channel_ids in alert_channels.items()
+                },
             },
             indent=2,
         ),
@@ -354,9 +503,20 @@ def save_state(
 class MapleNewsBot(commands.Bot):
     def __init__(self, channel_id: int) -> None:
         super().__init__(command_prefix="!", intents=discord.Intents.default())
-        self.channel_id = channel_id
-        self.sunny_sunday_channel_id = configured_sunny_sunday_channel_id(channel_id)
-        self.sent_ids, self.saved_categories, self.sunny_sunday = load_state()
+        stored_sunny_channel_id = os.getenv("SUNNY_SUNDAY_CHANNEL_ID")
+        sunny_channel_id = (
+            int(stored_sunny_channel_id) if stored_sunny_channel_id else channel_id
+        )
+        (
+            self.sent_ids,
+            self.saved_categories,
+            self.sunny_sunday,
+            stored_alert_channels,
+        ) = load_state()
+        self.alert_channels = normalize_alert_channels(
+            stored_alert_channels, channel_id, sunny_channel_id
+        )
+        migrate_sunny_sunday_state(self.sunny_sunday, sunny_channel_id)
         self.session: aiohttp.ClientSession | None = None
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
         self.openai = AsyncOpenAI()
@@ -367,9 +527,25 @@ class MapleNewsBot(commands.Bot):
         # Discord 연결이 준비되면 5분마다 새 공지를 확인하는 작업을 시작합니다.
         self.session = aiohttp.ClientSession()
         # 전역 슬래시 명령을 Discord에 등록합니다. 명령 내용이 바뀌어도 재시작 시 동기화됩니다.
-        self.tree.add_command(hexa_command)
-        self.tree.add_command(sunny_sunday_command)
+        for command in (
+            hexa_command,
+            sunny_sunday_command,
+            sunny_sunday_list_command,
+            news_alert_command,
+            sunny_day_alert_command,
+            sunny_list_alert_command,
+        ):
+            self.tree.add_command(command)
         await self.tree.sync()
+        self.persist_state()
+
+    def persist_state(self) -> None:
+        save_state(
+            self.sent_ids,
+            self.saved_categories,
+            self.sunny_sunday,
+            self.alert_channels,
+        )
 
     async def on_ready(self) -> None:
         # 디스코드 연결이 끝난 뒤에만 첫 공지 확인을 시작합니다.
@@ -468,7 +644,7 @@ class MapleNewsBot(commands.Bot):
                     "timestamp": sunny_sunday_timestamp(date),
                     "name": f"· __{format_sunny_sunday_date(date)}__",
                     "value": "\n".join(lines),
-                    "message_id": None,
+                    "message_ids": {},
                 }
             )
         return stored_entries
@@ -494,24 +670,149 @@ class MapleNewsBot(commands.Bot):
             "entries": await self.translate_sunny_sunday(entries),
         }
 
-    def announcement_channel(self) -> discord.TextChannel:
-        # 일반 뉴스 공지는 기존 DISCORD_CHANNEL_ID에 전송합니다.
-        channel = self.get_channel(self.channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            raise RuntimeError(
-                f"DISCORD_CHANNEL_ID {self.channel_id} is not an accessible text channel"
-            )
-        return channel
+    def alert_text_channels(self, alert_type: str) -> list[discord.TextChannel]:
+        # 삭제되었거나 봇이 볼 수 없는 채널은 건너뛰고 서버 로그에 남깁니다.
+        channels = []
+        for channel_id in sorted(self.alert_channels[alert_type]):
+            channel = self.get_channel(channel_id)
+            if isinstance(channel, discord.TextChannel):
+                channels.append(channel)
+            else:
+                logging.warning("Alert channel %s is not accessible.", channel_id)
+        return channels
 
-    def sunny_sunday_channel(self) -> discord.TextChannel:
-        # 전체 Sunny Sunday 일정과 주간 팝업만 전용 채널에 전송합니다.
-        channel = self.get_channel(self.sunny_sunday_channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            raise RuntimeError(
-                "SUNNY_SUNDAY_CHANNEL_ID "
-                f"{self.sunny_sunday_channel_id} is not an accessible text channel"
+    async def send_sunny_sunday_to_channel(
+        self, channel: discord.TextChannel, title: str, entries: list[dict]
+    ) -> discord.Message:
+        assert self.sunny_sunday is not None
+        return await channel.send(
+            embed=build_sunny_sunday_embed(
+                title, self.sunny_sunday["url"], entries
+            ),
+            file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
+        )
+
+    async def send_alert_embed(
+        self, alert_type: str, embed: discord.Embed, attach_sunny_image: bool = False
+    ) -> dict[int, int]:
+        # 한 채널의 권한 오류가 다른 채널 전송과 다음 공지 처리를 막지 않게 합니다.
+        sent_message_ids = {}
+        for channel in self.alert_text_channels(alert_type):
+            try:
+                file = (
+                    discord.File(SUNNY_SUNDAY_IMAGE_PATH)
+                    if attach_sunny_image
+                    else None
+                )
+                message = await channel.send(embed=embed, file=file)
+            except discord.HTTPException:
+                logging.exception("Failed to send alert to channel %s.", channel.id)
+            else:
+                sent_message_ids[channel.id] = message.id
+        return sent_message_ids
+
+    async def delete_sunny_day_message(self, channel: discord.TextChannel) -> None:
+        # 당일 알림을 끄면 그 채널에 남아 있는 임시 주간 메시지도 함께 제거합니다.
+        if self.sunny_sunday is None:
+            return
+        for entry in self.sunny_sunday["entries"]:
+            message_id = entry["message_ids"].get(str(channel.id))
+            if message_id is None:
+                continue
+            try:
+                await channel.get_partial_message(message_id).delete()
+            except discord.NotFound:
+                pass
+            except discord.HTTPException:
+                logging.exception(
+                    "Failed to delete Sunny Sunday message %s.", message_id
+                )
+                continue
+            del entry["message_ids"][str(channel.id)]
+
+    async def configure_alert_channel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        enabled: bool,
+        alert_type: str,
+        alert_name: str,
+    ) -> None:
+        # Discord 명령 표시 권한과 별개로 실행 순간의 실제 관리자 권한도 검사합니다.
+        if interaction.guild is None or not interaction.permissions.administrator:
+            await interaction.response.send_message(
+                "이 설정은 서버 관리자만 변경할 수 있습니다.", ephemeral=True
             )
-        return channel
+            return
+        if channel.guild.id != interaction.guild.id:
+            await interaction.response.send_message(
+                "현재 서버의 텍스트 채널만 선택할 수 있습니다.", ephemeral=True
+            )
+            return
+
+        already_enabled = channel.id in self.alert_channels[alert_type]
+        if enabled == already_enabled:
+            state = "이미 켜져" if enabled else "이미 꺼져"
+            await interaction.response.send_message(
+                f"{channel.mention}의 {alert_name}이 {state} 있습니다.", ephemeral=True
+            )
+            return
+
+        if enabled:
+            bot_member = channel.guild.me
+            permissions = channel.permissions_for(bot_member) if bot_member else None
+            needs_attachment = alert_type in {ALERT_SUNNY_DAY, ALERT_SUNNY_LIST}
+            if permissions is None or not (
+                permissions.view_channel
+                and permissions.send_messages
+                and permissions.embed_links
+                and (permissions.attach_files or not needs_attachment)
+            ):
+                await interaction.response.send_message(
+                    "선택한 채널에서 봇의 채널 보기·메시지 보내기·링크 첨부"
+                    + ("·파일 첨부" if needs_attachment else "")
+                    + " 권한을 확인해주세요.",
+                    ephemeral=True,
+                )
+                return
+
+        await interaction.response.defer(ephemeral=True)
+        if enabled and self.sunny_sunday is not None:
+            try:
+                if alert_type == ALERT_SUNNY_LIST:
+                    await self.send_sunny_sunday_to_channel(
+                        channel,
+                        f"☀️ {self.sunny_sunday['title']} ☀️",
+                        self.sunny_sunday["entries"],
+                    )
+                elif alert_type == ALERT_SUNNY_DAY:
+                    now_timestamp = int(datetime.now(timezone.utc).timestamp())
+                    entry = current_sunny_sunday_entry(
+                        self.sunny_sunday["entries"], now_timestamp
+                    )
+                    if (
+                        entry is not None
+                        and entry["timestamp"] <= now_timestamp
+                        < entry["timestamp"] + SUNNY_SUNDAY_DURATION_SECONDS
+                    ):
+                        message = await self.send_sunny_sunday_to_channel(
+                            channel, "☀️ 이번 주 Sunny Sunday ☀️", [entry]
+                        )
+                        entry["message_ids"][str(channel.id)] = message.id
+            except discord.HTTPException:
+                await interaction.followup.send(
+                    "선택한 채널에 테스트 알림을 보내지 못했습니다.", ephemeral=True
+                )
+                return
+        elif not enabled and alert_type == ALERT_SUNNY_DAY:
+            await self.delete_sunny_day_message(channel)
+
+        update_alert_channel(self.alert_channels, alert_type, channel.id, enabled)
+        self.persist_state()
+        await interaction.followup.send(
+            f"{channel.mention}의 {alert_name}을 {'켰습니다' if enabled else '껐습니다'}.",
+            ephemeral=True,
+        )
 
     @tasks.loop(minutes=POLL_INTERVAL_MINUTES)
     async def check_news(self) -> None:
@@ -528,58 +829,24 @@ class MapleNewsBot(commands.Bot):
             if should_bootstrap:
                 schedule = await self.create_sunny_sunday_schedule(latest_patch)
                 if schedule is not None:
-                    visible_entries = visible_sunny_sunday_entries(schedule["entries"])
-                    if visible_entries:
-                        await self.sunny_sunday_channel().send(
-                            embed=build_sunny_sunday_embed(
-                                f"☀️ {schedule['title']} ☀️",
-                                schedule["url"],
-                                visible_entries,
-                            ),
-                            file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
-                        )
-                    schedule["announcement_channel_id"] = self.sunny_sunday_channel_id
+                    await self.send_alert_embed(
+                        ALERT_SUNNY_LIST,
+                        build_sunny_sunday_embed(
+                            f"☀️ {schedule['title']} ☀️",
+                            schedule["url"],
+                            schedule["entries"],
+                        ),
+                        attach_sunny_image=True,
+                    )
                     self.sunny_sunday = schedule
                     if self.sent_ids is not None:
-                        save_state(
-                            self.sent_ids,
-                            self.saved_categories,
-                            self.sunny_sunday,
-                        )
-
-        if self.sunny_sunday is not None and should_post_sunny_sunday_schedule(
-            self.sunny_sunday, self.sunny_sunday_channel_id
-        ):
-            # 전용 채널 기능을 처음 배포했거나 채널을 바꿨다면 남은 일정을 한 번만 게시합니다.
-            visible_entries = visible_sunny_sunday_entries(
-                self.sunny_sunday["entries"]
-            )
-            if visible_entries:
-                await self.sunny_sunday_channel().send(
-                    embed=build_sunny_sunday_embed(
-                        f"☀️ {self.sunny_sunday['title']} ☀️",
-                        self.sunny_sunday["url"],
-                        visible_entries,
-                    ),
-                    file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
-                )
-            self.sunny_sunday["announcement_channel_id"] = (
-                self.sunny_sunday_channel_id
-            )
-            if self.sent_ids is not None:
-                save_state(
-                    self.sent_ids,
-                    self.saved_categories,
-                    self.sunny_sunday,
-                )
+                        self.persist_state()
 
         if self.sent_ids is None:
             # 첫 실행에는 과거 공지를 한꺼번에 보내지 않고, 현재 글을 기준점으로만 저장합니다.
             self.sent_ids = current_ids
             self.saved_categories = set(WATCHED_CATEGORIES)
-            save_state(
-                self.sent_ids, self.saved_categories, self.sunny_sunday
-            )
+            self.persist_state()
             print("Initial news state saved; no existing posts were sent.")
             return
 
@@ -590,99 +857,125 @@ class MapleNewsBot(commands.Bot):
                 post["id"] for post in posts if post["category"] in new_categories
             )
             self.saved_categories.update(new_categories)
-            save_state(
-                self.sent_ids, self.saved_categories, self.sunny_sunday
-            )
+            self.persist_state()
 
         new_posts = [post for post in posts if post["id"] not in self.sent_ids]
         if not new_posts:
             logging.info("No new MapleStory announcements found.")
             return
 
-        channel = self.announcement_channel()
-
         for post in sorted(new_posts, key=lambda item: item["liveDate"]):
-            # 새 공지 한 건의 본문을 가져와 요약하고, 그 요약을 한국어로 번역합니다.
+            is_sunny_patch = is_patch_notes(post)
+            sends_news = bool(self.alert_channels[ALERT_NEWS])
+            if not sends_news and not is_sunny_patch:
+                # 알림 채널이 없으면 불필요한 요약·번역 API를 호출하지 않고 기준점만 저장합니다.
+                self.sent_ids.add(post["id"])
+                self.persist_state()
+                continue
+
             detail = await self.fetch_post_detail(post["id"])
-            korean_summary = await self.translate_summary(await self.summarize(detail))
-            embed = discord.Embed(
-                title=post["name"],
-                description=korean_summary[:4_096],
-                url=post_url(post),
-                timestamp=discord.utils.parse_time(post["liveDate"]),
-                # 카테고리마다 다른 색을 써서 공지 성격을 한눈에 구분합니다.
-                color=CATEGORY_COLORS[post["category"]],
-            )
-            # Discord 임베드 왼쪽 위에 표시되는 작은 출처/카테고리 라벨입니다.
-            embed.set_author(name=f"MapleStory | {post['category'].upper()}")
-            # 공식 홈페이지 카드에 쓰인 썸네일을 임베드 하단의 큰 이미지로 보여 줍니다.
-            embed.set_image(url=thumbnail_url(post))
+            if sends_news:
+                # 새 공지 한 건을 요약·번역한 뒤 등록된 모든 공지 채널에 같은 임베드를 보냅니다.
+                korean_summary = await self.translate_summary(await self.summarize(detail))
+                embed = discord.Embed(
+                    title=post["name"],
+                    description=korean_summary[:4_096],
+                    url=post_url(post),
+                    timestamp=discord.utils.parse_time(post["liveDate"]),
+                    # 카테고리마다 다른 색을 써서 공지 성격을 한눈에 구분합니다.
+                    color=CATEGORY_COLORS[post["category"]],
+                )
+                # Discord 임베드 왼쪽 위에 표시되는 작은 출처/카테고리 라벨입니다.
+                embed.set_author(name=f"MapleStory | {post['category'].upper()}")
+                # 공식 홈페이지 카드에 쓰인 썸네일을 임베드 하단의 큰 이미지로 보여 줍니다.
+                embed.set_image(url=thumbnail_url(post))
+                await self.send_alert_embed(ALERT_NEWS, embed)
+
             new_sunny_schedule = None
-            if is_patch_notes(post):
+            if is_sunny_patch:
                 new_sunny_schedule = await self.create_sunny_sunday_schedule(
                     post, detail
                 )
                 if new_sunny_schedule is not None:
-                    sunny_embed = build_sunny_sunday_embed(
-                        f"☀️ {new_sunny_schedule['title']} ☀️",
-                        new_sunny_schedule["url"],
-                        new_sunny_schedule["entries"],
+                    await self.send_alert_embed(
+                        ALERT_SUNNY_LIST,
+                        build_sunny_sunday_embed(
+                            f"☀️ {new_sunny_schedule['title']} ☀️",
+                            new_sunny_schedule["url"],
+                            new_sunny_schedule["entries"],
+                        ),
+                        attach_sunny_image=True,
                     )
-                    await self.sunny_sunday_channel().send(
-                        embed=sunny_embed,
-                        file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
-                    )
-                    new_sunny_schedule["announcement_channel_id"] = (
-                        self.sunny_sunday_channel_id
-                    )
-            await channel.send(embed=embed)
-            # Discord 전송에 성공한 뒤에만 '이미 보냄' 목록에 기록합니다.
+            # 새 공지를 처리한 뒤 같은 글을 다시 요약하거나 전송하지 않도록 기록합니다.
             if new_sunny_schedule is not None:
                 self.sunny_sunday = new_sunny_schedule
             self.sent_ids.add(post["id"])
-            save_state(
-                self.sent_ids, self.saved_categories, self.sunny_sunday
-            )
+            self.persist_state()
             logging.info("Sent announcement %s to Discord.", post["id"])
 
     @tasks.loop(minutes=1)
     async def check_sunny_sunday(self) -> None:
-        # 저장된 일정만 확인해 시작 시 주간 팝업을 보내고 24시간 뒤 그 메시지를 삭제합니다.
+        # 저장된 일정만 확인해 모든 당일 알림 채널에 보내고 24시간 뒤 각각 삭제합니다.
         if self.sunny_sunday is None or self.sent_ids is None:
             return
 
         now_timestamp = int(datetime.now(timezone.utc).timestamp())
-        channel = self.sunny_sunday_channel()
         state_changed = False
         for entry in self.sunny_sunday["entries"]:
-            message_id = entry.get("message_id")
-            action = sunny_sunday_entry_action(entry, now_timestamp)
-
-            if action == "send":
-                message = await channel.send(
-                    embed=build_sunny_sunday_embed(
-                        "☀️ 이번 주 Sunny Sunday ☀️",
-                        self.sunny_sunday["url"],
-                        [entry],
-                    ),
-                    file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
+            message_ids = entry["message_ids"]
+            channel_ids = self.alert_channels[ALERT_SUNNY_DAY] | {
+                int(channel_id) for channel_id in message_ids
+            }
+            for channel_id in sorted(channel_ids):
+                action = sunny_sunday_entry_action(
+                    entry, channel_id, now_timestamp
                 )
-                entry["message_id"] = message.id
-                state_changed = True
-                logging.info("Sent weekly Sunny Sunday message %s.", message.id)
-            elif action == "delete":
-                try:
-                    await channel.get_partial_message(message_id).delete()
-                except discord.NotFound:
-                    pass
-                entry["message_id"] = None
-                state_changed = True
-                logging.info("Removed expired Sunny Sunday message %s.", message_id)
+                if action is None:
+                    continue
+                channel = self.get_channel(channel_id)
+                if not isinstance(channel, discord.TextChannel):
+                    logging.warning(
+                        "Sunny Sunday channel %s is not accessible.", channel_id
+                    )
+                    if action == "delete":
+                        del message_ids[str(channel_id)]
+                        state_changed = True
+                    continue
+
+                if action == "send":
+                    try:
+                        message = await self.send_sunny_sunday_to_channel(
+                            channel, "☀️ 이번 주 Sunny Sunday ☀️", [entry]
+                        )
+                    except discord.HTTPException:
+                        logging.exception(
+                            "Failed to send weekly Sunny Sunday to %s.", channel_id
+                        )
+                        continue
+                    message_ids[str(channel_id)] = message.id
+                    state_changed = True
+                    logging.info(
+                        "Sent weekly Sunny Sunday message %s to %s.",
+                        message.id,
+                        channel_id,
+                    )
+                elif action == "delete":
+                    message_id = message_ids[str(channel_id)]
+                    try:
+                        await channel.get_partial_message(message_id).delete()
+                    except discord.NotFound:
+                        pass
+                    except discord.HTTPException:
+                        logging.exception(
+                            "Failed to delete Sunny Sunday message %s.", message_id
+                        )
+                        continue
+                    del message_ids[str(channel_id)]
+                    state_changed = True
+                    logging.info("Removed expired Sunny Sunday message %s.", message_id)
 
         if state_changed:
-            save_state(
-                self.sent_ids, self.saved_categories, self.sunny_sunday
-            )
+            self.persist_state()
 
     @check_news.error
     async def check_news_error(self, error: Exception) -> None:

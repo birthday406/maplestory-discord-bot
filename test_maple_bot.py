@@ -2,13 +2,16 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import maple_bot
 from maple_bot import (
+    ALERT_NEWS,
+    ALERT_SUNNY_DAY,
+    ALERT_SUNNY_LIST,
     HEXA_CORE_COSTS,
     calculate_hexa_cost,
-    configured_sunny_sunday_channel_id,
     current_sunny_sunday_entry,
     extract_sunny_sunday,
     format_sunny_sunday_date,
@@ -16,31 +19,58 @@ from maple_bot import (
     is_patch_notes,
     known_sunny_sunday_translation,
     load_state,
+    migrate_sunny_sunday_state,
+    news_alert_command,
+    normalize_alert_channels,
     post_url,
     save_state,
-    should_post_sunny_sunday_schedule,
+    sunny_day_alert_command,
+    sunny_list_alert_command,
     sunny_sunday_entry_action,
     sunny_sunday_timestamp,
     thumbnail_url,
+    update_alert_channel,
     visible_sunny_sunday_entries,
     watched_posts,
 )
 
 
 class NewsFilteringTests(unittest.TestCase):
-    def test_sunny_sunday_channel_uses_dedicated_setting_with_existing_fallback(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(configured_sunny_sunday_channel_id(111), 111)
+    def test_legacy_channels_are_migrated_only_when_no_saved_setting_exists(self) -> None:
+        self.assertEqual(
+            normalize_alert_channels(None, 111, 222),
+            {
+                ALERT_NEWS: {111},
+                ALERT_SUNNY_DAY: {222},
+                ALERT_SUNNY_LIST: {222},
+            },
+        )
+        self.assertEqual(
+            normalize_alert_channels({}, 111, 222),
+            {ALERT_NEWS: set(), ALERT_SUNNY_DAY: set(), ALERT_SUNNY_LIST: set()},
+        )
 
-        with patch.dict("os.environ", {"SUNNY_SUNDAY_CHANNEL_ID": "222"}):
-            self.assertEqual(configured_sunny_sunday_channel_id(111), 222)
+    def test_alert_channels_support_multiple_channels_and_idempotent_updates(self) -> None:
+        channels = {ALERT_NEWS: set(), ALERT_SUNNY_DAY: set(), ALERT_SUNNY_LIST: set()}
 
-    def test_sunny_sunday_schedule_is_posted_once_per_dedicated_channel(self) -> None:
-        schedule = {"announcement_channel_id": 111}
+        self.assertTrue(update_alert_channel(channels, ALERT_SUNNY_DAY, 111, True))
+        self.assertTrue(update_alert_channel(channels, ALERT_SUNNY_DAY, 222, True))
+        self.assertFalse(update_alert_channel(channels, ALERT_SUNNY_DAY, 222, True))
+        self.assertTrue(update_alert_channel(channels, ALERT_SUNNY_DAY, 111, False))
+        self.assertEqual(channels[ALERT_SUNNY_DAY], {222})
 
-        self.assertFalse(should_post_sunny_sunday_schedule(schedule, 111))
-        self.assertTrue(should_post_sunny_sunday_schedule(schedule, 222))
-        self.assertTrue(should_post_sunny_sunday_schedule({}, 111))
+    def test_alert_setting_commands_are_guild_only_and_admin_only(self) -> None:
+        for command in (
+            news_alert_command,
+            sunny_day_alert_command,
+            sunny_list_alert_command,
+        ):
+            self.assertTrue(command.guild_only)
+            self.assertTrue(command.default_permissions.administrator)
+            self.assertEqual(
+                {choice.value for choice in command.parameters[1].choices},
+                {"on", "off"},
+            )
 
     def test_watched_posts_includes_events_and_excludes_other_categories(self) -> None:
         posts = [
@@ -74,12 +104,22 @@ class NewsFilteringTests(unittest.TestCase):
             maple_bot.STATE_PATH = Path(directory) / "state.json"
             maple_bot.STATE_PATH.write_text(json.dumps({"sent_ids": [1]}), encoding="utf-8")
 
-            sent_ids, categories, sunny_sunday = load_state()
+            sent_ids, categories, sunny_sunday, alert_channels = load_state()
 
         maple_bot.STATE_PATH = original_state_path
         self.assertEqual(sent_ids, {1})
         self.assertEqual(categories, {"maintenance", "sale", "general", "update"})
         self.assertIsNone(sunny_sunday)
+        self.assertIsNone(alert_channels)
+
+    def test_legacy_weekly_message_id_is_migrated_to_its_channel(self) -> None:
+        schedule = {
+            "announcement_channel_id": 222,
+            "entries": [{"message_id": 333}],
+        }
+
+        self.assertTrue(migrate_sunny_sunday_state(schedule, 222))
+        self.assertEqual(schedule, {"entries": [{"message_ids": {"222": 333}}]})
 
     def test_sunny_sunday_schedule_is_saved_and_loaded(self) -> None:
         original_state_path = maple_bot.STATE_PATH
@@ -92,19 +132,27 @@ class NewsFilteringTests(unittest.TestCase):
                     "timestamp": 1785628800,
                     "name": "· __<t:1785628800:F> (<t:1785628800:R>)__",
                     "value": "- 스타포스 강화 비용 30% 할인",
-                    "message_id": 123,
+                    "message_ids": {"222": 123},
                 }
             ],
         }
+        alert_channels = {
+            ALERT_NEWS: {111},
+            ALERT_SUNNY_DAY: {222, 333},
+            ALERT_SUNNY_LIST: {222},
+        }
         with tempfile.TemporaryDirectory() as directory:
             maple_bot.STATE_PATH = Path(directory) / "state.json"
-            save_state({1}, {"update"}, schedule)
-            sent_ids, categories, loaded_schedule = load_state()
+            save_state({1}, {"update"}, schedule, alert_channels)
+            sent_ids, categories, loaded_schedule, loaded_channels = load_state()
 
         maple_bot.STATE_PATH = original_state_path
         self.assertEqual(sent_ids, {1})
         self.assertEqual(categories, {"update"})
         self.assertEqual(loaded_schedule, schedule)
+        self.assertEqual(
+            normalize_alert_channels(loaded_channels, 999, 999), alert_channels
+        )
 
     def test_html_to_text_removes_tags_and_script(self) -> None:
         source = "<h1>Patch</h1><script>ignore()</script><p>Notes</p>"
@@ -207,15 +255,90 @@ class NewsFilteringTests(unittest.TestCase):
 
     def test_weekly_sunny_sunday_message_lifecycle(self) -> None:
         start = sunny_sunday_timestamp("August 02, 2026")
-        entry = {"timestamp": start, "message_id": None}
+        entry = {"timestamp": start, "message_ids": {}}
 
-        self.assertIsNone(sunny_sunday_entry_action(entry, start - 1))
-        self.assertEqual(sunny_sunday_entry_action(entry, start), "send")
-        entry["message_id"] = 123
-        self.assertIsNone(sunny_sunday_entry_action(entry, start + 86399))
+        self.assertIsNone(sunny_sunday_entry_action(entry, 111, start - 1))
+        self.assertEqual(sunny_sunday_entry_action(entry, 111, start), "send")
+        entry["message_ids"]["111"] = 123
+        self.assertIsNone(sunny_sunday_entry_action(entry, 111, start + 86399))
         self.assertEqual(
-            sunny_sunday_entry_action(entry, start + 86400), "delete"
+            sunny_sunday_entry_action(entry, 111, start + 86400), "delete"
         )
+        self.assertEqual(
+            sunny_sunday_entry_action(entry, 222, start + 1), "send"
+        )
+
+
+class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_one_translated_embed_is_sent_to_every_registered_channel(self) -> None:
+        first_channel = SimpleNamespace(
+            id=111, send=AsyncMock(return_value=SimpleNamespace(id=1001))
+        )
+        second_channel = SimpleNamespace(
+            id=222, send=AsyncMock(return_value=SimpleNamespace(id=1002))
+        )
+        bot = SimpleNamespace(
+            alert_text_channels=lambda alert_type: [first_channel, second_channel]
+        )
+        embed = maple_bot.discord.Embed(title="translated announcement")
+
+        sent_message_ids = await maple_bot.MapleNewsBot.send_alert_embed(
+            bot, ALERT_NEWS, embed
+        )
+
+        self.assertEqual(sent_message_ids, {111: 1001, 222: 1002})
+        first_channel.send.assert_awaited_once_with(embed=embed, file=None)
+        second_channel.send.assert_awaited_once_with(embed=embed, file=None)
+
+    async def test_enabling_new_list_channel_sends_saved_schedule_once(self) -> None:
+        guild = SimpleNamespace(id=10, me=object())
+        permissions = SimpleNamespace(
+            view_channel=True,
+            send_messages=True,
+            embed_links=True,
+            attach_files=True,
+        )
+        channel = SimpleNamespace(
+            id=222,
+            guild=guild,
+            mention="#sunny",
+            permissions_for=Mock(return_value=permissions),
+        )
+        interaction = SimpleNamespace(
+            guild=guild,
+            permissions=SimpleNamespace(administrator=True),
+            response=SimpleNamespace(
+                send_message=AsyncMock(), defer=AsyncMock()
+            ),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        schedule = {
+            "title": "v.270",
+            "entries": [{"timestamp": 1, "message_ids": {}}],
+        }
+        bot = SimpleNamespace(
+            alert_channels={
+                ALERT_NEWS: set(),
+                ALERT_SUNNY_DAY: set(),
+                ALERT_SUNNY_LIST: set(),
+            },
+            sunny_sunday=schedule,
+            send_sunny_sunday_to_channel=AsyncMock(
+                return_value=SimpleNamespace(id=1001)
+            ),
+            delete_sunny_day_message=AsyncMock(),
+            persist_state=Mock(),
+        )
+
+        await maple_bot.MapleNewsBot.configure_alert_channel(
+            bot, interaction, channel, True, ALERT_SUNNY_LIST, "썬데이 목록 알림"
+        )
+
+        self.assertEqual(bot.alert_channels[ALERT_SUNNY_LIST], {222})
+        bot.send_sunny_sunday_to_channel.assert_awaited_once_with(
+            channel, "☀️ v.270 ☀️", schedule["entries"]
+        )
+        bot.persist_state.assert_called_once_with()
 
 
 class HexaCostTests(unittest.TestCase):
