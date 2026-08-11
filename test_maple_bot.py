@@ -7,7 +7,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import maple_bot
-from maple_calculators import calculate_symbol, simulate_extreme_growth_potions
+from maple_calculators import (
+    calculate_arcane_symbol_completion,
+    calculate_symbol,
+    simulate_extreme_growth_potions,
+)
 from maple_data import (
     ARCANE_SYMBOL_GROWTH,
     AUTHENTIC_SYMBOL_GROWTH,
@@ -953,6 +957,20 @@ class SymbolCalculatorTests(unittest.TestCase):
             (29, 36_500_000, 10, 16, 2, date(2026, 8, 11)),
         )
 
+    def test_arcane_weekly_scenarios_do_not_increase_weekly_reward(self) -> None:
+        self.assertEqual(
+            calculate_arcane_symbol_completion(
+                145, 20, 24, date(2026, 8, 10), True
+            ),
+            (2, date(2026, 8, 11)),
+        )
+        self.assertEqual(
+            calculate_arcane_symbol_completion(
+                145, 20, 24, date(2026, 8, 10), False
+            ),
+            (7, date(2026, 8, 16)),
+        )
+
     def test_command_offers_regions_potion_levels_and_elanos_options(self) -> None:
         self.assertEqual(symbol_calculator_command.name, "심볼계산기")
         self.assertEqual(
@@ -990,6 +1008,27 @@ class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("아케인 심볼 · 소멸의 여로", embed.description)
         self.assertIn("현재 성장치**　10 / 12", embed.description)
         self.assertIn("엘라노스**　적용", embed.description)
+        self.assertIn("이번 주 주간퀘 함", embed.description)
+        self.assertIn("이번 주 주간퀘 안 함", embed.description)
+
+    async def test_authentic_result_does_not_show_arcane_weekly_quest(self) -> None:
+        region = next(
+            choice
+            for choice in symbol_calculator_command.parameters[0].choices
+            if choice.value == "세르니움"
+        )
+        potion = symbol_calculator_command.parameters[4].choices[0]
+        elanos = symbol_calculator_command.parameters[5].choices[0]
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await symbol_calculator_command.callback(
+            interaction, region, 1, 0, 2, potion, elanos
+        )
+
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertNotIn("주간퀘", embed.description)
 
 
 class HelpCommandTests(unittest.IsolatedAsyncioTestCase):

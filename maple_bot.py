@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from maple_calculators import (
+    calculate_arcane_symbol_completion,
     calculate_epic_dungeon,
     calculate_exp_coupons,
     calculate_growth_potions,
@@ -892,6 +893,34 @@ async def symbol_calculator_command(
             f"(<t:{completion_timestamp}:R>)"
         )
 
+    weekly_completion_text = ""
+    if symbol_type == "아케인 심볼" and required_symbols:
+        weekly_lines = []
+        for label, current_weekly_quest in (
+            ("이번 주 주간퀘 함", True),
+            ("이번 주 주간퀘 안 함", False),
+        ):
+            weekly_days, weekly_date = calculate_arcane_symbol_completion(
+                required_symbols,
+                base_daily_symbols,
+                selected_daily_symbols,
+                start_date,
+                current_weekly_quest,
+            )
+            weekly_timestamp = int(
+                datetime(
+                    weekly_date.year,
+                    weekly_date.month,
+                    weekly_date.day,
+                    tzinfo=timezone.utc,
+                ).timestamp()
+            )
+            weekly_lines.append(
+                f"◆ **{label}**　{weekly_days:,}일 · "
+                f"<t:{weekly_timestamp}:D> (<t:{weekly_timestamp}:R>)"
+            )
+        weekly_completion_text = "\n" + "\n".join(weekly_lines)
+
     embed = discord.Embed(
         title="🔮 아케인·어센틱 심볼 계산기",
         description=(
@@ -902,14 +931,18 @@ async def symbol_calculator_command(
             f"**엘라노스**　{elanos.name}\n\n"
             f"◆ **추가 필요 심볼**　{required_symbols:,}개\n"
             f"◆ **강화 비용**　{meso_cost:,} 메소\n"
-            f"◆ **예상 소요일**　{completion_text}\n\n"
+            f"◆ **일일퀘만 수행**　{completion_text}"
+            f"{weekly_completion_text}\n\n"
             f"**평소 일일 획득**　{base_daily_symbols}개\n"
             f"**선택 조건 일일 획득**　{selected_daily_symbols}개\n"
             f"**엘라노스 종료**　<t:{event_end_timestamp}:F>"
         ),
         color=0x9B59B6,
     )
-    embed.set_footer(text="오늘 일일 퀘스트를 아직 받지 않은 것으로 계산합니다.")
+    footer_text = "오늘 일일 퀘스트를 아직 받지 않은 성장치 기준입니다."
+    if symbol_type == "아케인 심볼":
+        footer_text = "오늘 일일 퀘스트와 이번 주 주간 퀘스트를 아직 받지 않은 성장치 기준입니다."
+    embed.set_footer(text=footer_text)
     await interaction.response.send_message(embed=embed)
 
 

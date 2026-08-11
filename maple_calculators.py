@@ -265,3 +265,34 @@ def calculate_symbol(
         required_days,
         completion_date,
     )
+
+
+def calculate_arcane_symbol_completion(
+    required_symbols: int,
+    base_daily_symbols: int,
+    selected_daily_symbols: int,
+    start_date: date,
+    current_weekly_quest: bool,
+) -> tuple[int, date]:
+    """아케인 일일퀘와 주간퀘 120개를 반영한 소요일과 완료일을 반환합니다."""
+    remaining_symbols = required_symbols
+    day_index = 0
+
+    while remaining_symbols > 0:
+        # 이번 주 수행 가정은 오늘 120개를 받고, 두 경우 모두 이후 7일마다 받습니다.
+        if (day_index == 0 and current_weekly_quest) or (
+            day_index > 0 and day_index % 7 == 0
+        ):
+            remaining_symbols -= 120
+
+        if remaining_symbols > 0:
+            current_date = start_date + timedelta(days=day_index)
+            daily_symbols = base_daily_symbols
+            if current_date <= ELANOS_SYMBOL_BONUS_END.date():
+                daily_symbols = selected_daily_symbols
+            remaining_symbols -= daily_symbols
+
+        if remaining_symbols > 0:
+            day_index += 1
+
+    return day_index + 1, start_date + timedelta(days=day_index)
