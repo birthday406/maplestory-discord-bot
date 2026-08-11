@@ -1,7 +1,7 @@
 import json
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -15,6 +15,7 @@ from maple_calculators import (
 from maple_data import (
     ARCANE_SYMBOL_GROWTH,
     AUTHENTIC_SYMBOL_GROWTH,
+    BOSS_TRAFFIC_LIGHTS,
     EXTREME_GROWTH_POTION_RATES,
     SYMBOL_REGIONS,
 )
@@ -23,8 +24,10 @@ from maple_bot import (
     ALERT_CUBE_SALE,
     ALERT_MIRACLE_TIME,
     ALERT_NEWS,
+    ALERT_SERVER,
     ALERT_SUNNY_DAY,
     ALERT_SUNNY_LIST,
+    ALERT_URSUS,
     EPIC_DUNGEON_BONUSES,
     EPIC_DUNGEONS,
     EXP_COUPON_BURNING_OPTIONS,
@@ -34,16 +37,20 @@ from maple_bot import (
     HEXA_CORE_COSTS,
     LEVEL_EXP,
     build_miracle_time_embed,
+    build_server_status_embed,
+    build_ursus_embed,
     calculate_epic_dungeon,
     calculate_exp_coupons,
     calculate_growth_potions,
     calculate_hexa_cost,
+    cash_shop_command,
     cash_shop_transfer_alert_command,
     cash_shop_transfer_command,
     channel_recommend_command,
     cube_sale_alert_command,
     cube_sale_command,
     current_sunny_sunday_entry,
+    current_ursus_window,
     epic_dungeon_command,
     exp_coupon_command,
     extreme_growth_potion_command,
@@ -51,10 +58,12 @@ from maple_bot import (
     extract_miracle_time,
     extract_sunny_sunday,
     format_sunny_sunday_date,
+    format_boss_hp_as_k,
     growth_potion_command,
     help_command,
     hot_week_command,
     html_to_text,
+    is_cash_shop_update,
     is_patch_notes,
     known_sunny_sunday_translation,
     localize_sunny_sunday_text,
@@ -66,9 +75,12 @@ from maple_bot import (
     news_alert_command,
     normalize_alert_channels,
     parse_pssb_rates,
+    parse_server_status,
     post_url,
     pssb_command,
     save_state,
+    server_status_alert_command,
+    server_status_command,
     should_send_cash_shop_transfer,
     should_send_miracle_time,
     sunny_day_alert_command,
@@ -79,8 +91,12 @@ from maple_bot import (
     sunny_sunday_timestamp,
     symbol_calculator_command,
     thumbnail_url,
+    traffic_light_command,
     update_alert_channel,
     utc_event_timestamp,
+    ursus_alert_command,
+    ursus_boundary_event,
+    ursus_command,
     visible_sunny_sunday_entries,
     watched_posts,
 )
@@ -119,6 +135,8 @@ class NewsFilteringTests(unittest.TestCase):
                 ALERT_MIRACLE_TIME: set(),
                 ALERT_CASH_TRANSFER: set(),
                 ALERT_CUBE_SALE: set(),
+                ALERT_URSUS: set(),
+                ALERT_SERVER: set(),
             },
         )
         self.assertEqual(
@@ -130,6 +148,8 @@ class NewsFilteringTests(unittest.TestCase):
                 ALERT_MIRACLE_TIME: set(),
                 ALERT_CASH_TRANSFER: set(),
                 ALERT_CUBE_SALE: set(),
+                ALERT_URSUS: set(),
+                ALERT_SERVER: set(),
             },
         )
 
@@ -150,6 +170,8 @@ class NewsFilteringTests(unittest.TestCase):
             miracle_time_alert_command,
             cash_shop_transfer_alert_command,
             cube_sale_alert_command,
+            ursus_alert_command,
+            server_status_alert_command,
         ):
             self.assertTrue(command.guild_only)
             self.assertTrue(command.default_permissions.administrator)
@@ -157,6 +179,29 @@ class NewsFilteringTests(unittest.TestCase):
                 {choice.value for choice in command.parameters[1].choices},
                 {"on", "off"},
             )
+
+    def test_server_status_requires_all_logins_and_one_game_channel(self) -> None:
+        payload = {
+            "servers": [
+                {
+                    "worldName": world,
+                    "Login00": 1,
+                    "Login01": 1,
+                    "Game00": 1 if world != "Bera" else 0,
+                    "Game01": -1,
+                }
+                for world in ("Scania", "Bera", "Kronos", "Hyperion")
+            ]
+        }
+
+        self.assertEqual(
+            parse_server_status(payload),
+            {"Scania": True, "Bera": False, "Kronos": True, "Hyperion": True},
+        )
+
+    def test_server_status_rejects_missing_world_data(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_server_status({"servers": []})
 
     def test_watched_posts_includes_events_and_excludes_other_categories(self) -> None:
         posts = [
@@ -174,6 +219,26 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(
             post_url(post),
             "https://www.nexon.com/maplestory/news/sale/123/summer-sale-it-s-here",
+        )
+
+    def test_cash_shop_update_only_matches_sale_update_posts(self) -> None:
+        self.assertTrue(
+            is_cash_shop_update(
+                {
+                    "category": "sale",
+                    "name": "Cash Shop Update for August 11",
+                }
+            )
+        )
+        self.assertFalse(
+            is_cash_shop_update(
+                {"category": "sale", "name": "Premium Surprise Style Box"}
+            )
+        )
+        self.assertFalse(
+            is_cash_shop_update(
+                {"category": "events", "name": "Cash Shop Update Preview"}
+            )
         )
 
     def test_thumbnail_url_uses_nexon_origin(self) -> None:
@@ -198,6 +263,9 @@ class NewsFilteringTests(unittest.TestCase):
                 alert_channels,
                 exp_coupon_preferences,
                 symbol_preferences,
+                ursus_alert_events,
+                latest_cash_shop,
+                server_status,
             ) = load_state()
 
         maple_bot.STATE_PATH = original_state_path
@@ -208,6 +276,9 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertIsNone(alert_channels)
         self.assertEqual(exp_coupon_preferences, {})
         self.assertEqual(symbol_preferences, {})
+        self.assertEqual(ursus_alert_events, {})
+        self.assertIsNone(latest_cash_shop)
+        self.assertIsNone(server_status)
 
     def test_legacy_weekly_message_id_is_migrated_to_its_channel(self) -> None:
         schedule = {
@@ -240,11 +311,19 @@ class NewsFilteringTests(unittest.TestCase):
             ALERT_MIRACLE_TIME: set(),
             ALERT_CASH_TRANSFER: set(),
             ALERT_CUBE_SALE: set(),
+            ALERT_URSUS: set(),
+            ALERT_SERVER: set(),
         }
         patch_events = {"post_id": 42415, "miracle_time": []}
         exp_coupon_preferences = {"123": "하이퍼버닝"}
         symbol_preferences = {
             "123": {"potion_level": 3, "elanos": "적용"}
+        }
+        ursus_alert_events = {"111": "start:1786467600"}
+        latest_cash_shop = {
+            "post_id": 42853,
+            "title": "Cash Shop Update for August 11",
+            "url": "https://example.com/cash-shop-update",
         }
         with tempfile.TemporaryDirectory() as directory:
             maple_bot.STATE_PATH = Path(directory) / "state.json"
@@ -256,6 +335,9 @@ class NewsFilteringTests(unittest.TestCase):
                 patch_events,
                 exp_coupon_preferences,
                 symbol_preferences,
+                ursus_alert_events,
+                latest_cash_shop,
+                "down",
             )
             (
                 sent_ids,
@@ -265,6 +347,9 @@ class NewsFilteringTests(unittest.TestCase):
                 loaded_channels,
                 loaded_exp_coupon_preferences,
                 loaded_symbol_preferences,
+                loaded_ursus_alert_events,
+                loaded_latest_cash_shop,
+                loaded_server_status,
             ) = load_state()
 
         maple_bot.STATE_PATH = original_state_path
@@ -277,6 +362,52 @@ class NewsFilteringTests(unittest.TestCase):
         )
         self.assertEqual(loaded_exp_coupon_preferences, exp_coupon_preferences)
         self.assertEqual(loaded_symbol_preferences, symbol_preferences)
+        self.assertEqual(loaded_ursus_alert_events, ursus_alert_events)
+        self.assertEqual(loaded_latest_cash_shop, latest_cash_shop)
+        self.assertEqual(loaded_server_status, "down")
+
+    def test_ursus_schedule_follows_pacific_daylight_saving_time(self) -> None:
+        summer_start = datetime(2026, 8, 11, 17, 0, tzinfo=timezone.utc)
+        summer_window = current_ursus_window(summer_start)
+        self.assertIsNotNone(summer_window)
+        self.assertEqual((summer_window[0].hour, summer_window[1].hour), (10, 14))
+        self.assertEqual(ursus_boundary_event(summer_start)[0], "start")
+        self.assertEqual(
+            ursus_boundary_event(datetime(2026, 8, 11, 21, 0, tzinfo=timezone.utc))[0],
+            "end",
+        )
+        self.assertIsNone(
+            current_ursus_window(datetime(2026, 8, 11, 21, 0, tzinfo=timezone.utc))
+        )
+        self.assertIsNone(
+            ursus_boundary_event(datetime(2026, 8, 11, 17, 1, tzinfo=timezone.utc))
+        )
+
+        winter_start = datetime(2026, 1, 15, 17, 0, tzinfo=timezone.utc)
+        winter_window = current_ursus_window(winter_start)
+        self.assertIsNotNone(winter_window)
+        self.assertEqual((winter_window[0].hour, winter_window[1].hour), (9, 13))
+
+    def test_ursus_embed_uses_discord_timestamps_and_state_image(self) -> None:
+        now = datetime(2026, 8, 11, 17, 0, tzinfo=timezone.utc)
+        window = current_ursus_window(now)
+        embed, image_path = build_ursus_embed("active", window, now)
+
+        self.assertEqual(image_path, maple_bot.URSUS_ACTIVE_IMAGE_PATH)
+        self.assertIn("진행 중입니다", embed.description)
+        self.assertIn(f"<t:{int(window[0].timestamp())}:T>", embed.description)
+        self.assertEqual(embed.image.url, "attachment://ursus-golden-time.jpg")
+
+        inactive_embed, inactive_path = build_ursus_embed("inactive", now=now)
+        self.assertEqual(inactive_path, maple_bot.URSUS_INACTIVE_IMAGE_PATH)
+        self.assertIn("진행 중이지 않습니다", inactive_embed.description)
+        self.assertEqual(
+            inactive_embed.image.url,
+            "attachment://ursus-golden-time-inactive.jpg",
+        )
+        ended_embed, ended_path = build_ursus_embed("ended", window, now)
+        self.assertEqual(ended_path, maple_bot.URSUS_INACTIVE_IMAGE_PATH)
+        self.assertIn("끝났습니다", ended_embed.description)
 
     def test_html_to_text_removes_tags_and_script(self) -> None:
         source = "<h1>Patch</h1><script>ignore()</script><p>Notes</p>"
@@ -523,6 +654,118 @@ class NewsFilteringTests(unittest.TestCase):
 
 
 class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_server_command_shows_all_four_main_worlds(self) -> None:
+        statuses = {
+            "Scania": True,
+            "Bera": True,
+            "Kronos": False,
+            "Hyperion": True,
+        }
+        interaction = SimpleNamespace(
+            client=SimpleNamespace(fetch_server_status=AsyncMock(return_value=statuses)),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+        await server_status_command.callback(interaction)
+
+        interaction.response.defer.assert_awaited_once_with()
+        embed = interaction.followup.send.await_args.kwargs["embed"]
+        self.assertEqual({field.name for field in embed.fields}, set(statuses))
+        self.assertIn("점검 중", next(field.value for field in embed.fields if field.name == "Kronos"))
+
+    async def test_server_open_alert_is_sent_once_after_down_to_up_transition(self) -> None:
+        statuses = {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")}
+        bot = SimpleNamespace(
+            server_status="down",
+            fetch_server_status=AsyncMock(return_value=statuses),
+            send_alert_embed=AsyncMock(),
+            persist_state=Mock(),
+        )
+
+        await maple_bot.MapleNewsBot.check_server_status.coro(bot)
+        await maple_bot.MapleNewsBot.check_server_status.coro(bot)
+
+        self.assertEqual(bot.server_status, "up")
+        bot.send_alert_embed.assert_awaited_once()
+        self.assertEqual(bot.send_alert_embed.await_args.args[0], ALERT_SERVER)
+        bot.persist_state.assert_called_once_with()
+
+    async def test_server_api_error_does_not_change_saved_status(self) -> None:
+        bot = SimpleNamespace(
+            server_status="up",
+            fetch_server_status=AsyncMock(side_effect=ValueError("bad response")),
+            send_alert_embed=AsyncMock(),
+            persist_state=Mock(),
+        )
+
+        await maple_bot.MapleNewsBot.check_server_status.coro(bot)
+
+        self.assertEqual(bot.server_status, "up")
+        bot.send_alert_embed.assert_not_awaited()
+        bot.persist_state.assert_not_called()
+
+    def test_server_open_embed_uses_green_color(self) -> None:
+        statuses = {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")}
+        embed = build_server_status_embed(statuses, opened=True)
+
+        self.assertEqual(embed.color.value, 0x57F287)
+        self.assertIn("모두 열렸습니다", embed.description)
+
+    async def test_ursus_command_attaches_active_image(self) -> None:
+        window = (
+            datetime(2026, 8, 11, 10, 0, tzinfo=maple_bot.URSUS_TIMEZONE),
+            datetime(2026, 8, 11, 14, 0, tzinfo=maple_bot.URSUS_TIMEZONE),
+        )
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+        image_file = object()
+
+        with patch("maple_bot.current_ursus_window", return_value=window), patch(
+            "maple_bot.discord.File", return_value=image_file
+        ) as file_class:
+            await ursus_command.callback(interaction)
+
+        file_class.assert_called_once_with(maple_bot.URSUS_ACTIVE_IMAGE_PATH)
+        send_kwargs = interaction.response.send_message.await_args.kwargs
+        self.assertIs(send_kwargs["file"], image_file)
+        self.assertIn("진행 중입니다", send_kwargs["embed"].description)
+
+    async def test_ursus_start_and_end_alerts_are_each_sent_once(self) -> None:
+        class DummyTextChannel:
+            def __init__(self) -> None:
+                self.id = 111
+                self.send = AsyncMock()
+
+        channel = DummyTextChannel()
+        start = datetime(2026, 8, 11, 10, 0, tzinfo=maple_bot.URSUS_TIMEZONE)
+        end = datetime(2026, 8, 11, 14, 0, tzinfo=maple_bot.URSUS_TIMEZONE)
+        bot = SimpleNamespace(
+            alert_channels={ALERT_URSUS: {111}},
+            ursus_alert_events={},
+            get_channel=lambda channel_id: channel,
+            persist_state=Mock(),
+        )
+        image_file = object()
+
+        with patch.object(maple_bot.discord, "TextChannel", DummyTextChannel), patch(
+            "maple_bot.ursus_boundary_event", return_value=("start", start, end)
+        ) as boundary_event, patch(
+            "maple_bot.discord.File", return_value=image_file
+        ):
+            await maple_bot.MapleNewsBot.check_ursus.coro(bot)
+            await maple_bot.MapleNewsBot.check_ursus.coro(bot)
+            boundary_event.return_value = ("end", start, end)
+            await maple_bot.MapleNewsBot.check_ursus.coro(bot)
+
+        self.assertEqual(channel.send.await_count, 2)
+        self.assertEqual(
+            bot.ursus_alert_events,
+            {"111": f"end:{int(end.timestamp())}"},
+        )
+        self.assertEqual(bot.persist_state.call_count, 2)
+
     async def test_cash_transfer_command_attaches_embed_image(self) -> None:
         schedule = {
             "url": "https://example.com/patch",
@@ -686,6 +929,58 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
             channel, "☀️ v.270 ☀️", schedule["entries"]
         )
         bot.persist_state.assert_called_once_with()
+
+
+class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
+    def test_boss_hp_units_are_converted_to_ingame_k_unit(self) -> None:
+        self.assertEqual(format_boss_hp_as_k("38.5B"), "38,500,000K")
+        self.assertEqual(format_boss_hp_as_k("24.175T"), "24,175,000,000K")
+        self.assertEqual(format_boss_hp_as_k("1.01Q"), "1,010,000,000,000K")
+
+    def test_boss_choices_match_all_provided_health_values(self) -> None:
+        self.assertEqual(len(BOSS_TRAFFIC_LIGHTS), 18)
+        self.assertEqual(
+            {choice.value for choice in traffic_light_command.parameters[0].choices},
+            set(BOSS_TRAFFIC_LIGHTS),
+        )
+        self.assertEqual(BOSS_TRAFFIC_LIGHTS["칼로스"]["카오스"], ("5.12Q", "256T"))
+        self.assertEqual(BOSS_TRAFFIC_LIGHTS["칼로스"]["익스트림"], ("21.57Q", "1.08Q"))
+        self.assertEqual(BOSS_TRAFFIC_LIGHTS["세렌"]["익스트림"], ("6.48Q", "324T"))
+        self.assertEqual(BOSS_TRAFFIC_LIGHTS["카링"]["익스트림"], ("55.10Q", "2.76Q"))
+        self.assertEqual(BOSS_TRAFFIC_LIGHTS["림보"]["하드"], ("12.55Q", "627.65T"))
+        self.assertEqual(BOSS_TRAFFIC_LIGHTS["발드릭스"]["노말"], ("8.90Q", "445T"))
+        self.assertEqual(BOSS_TRAFFIC_LIGHTS["발드릭스"]["하드"], ("20.27Q", "1.01Q"))
+
+    async def test_command_shows_selected_boss_five_percent_requirement(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await traffic_light_command.callback(
+            interaction,
+            SimpleNamespace(value="발드릭스"),
+            SimpleNamespace(value="하드"),
+        )
+
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertIn("**총 체력**　20,270,000,000,000K", embed.description)
+        self.assertIn("**5% 최소 피해량**　1,010,000,000,000K", embed.description)
+
+    async def test_command_explains_invalid_boss_difficulty_combination(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await traffic_light_command.callback(
+            interaction,
+            SimpleNamespace(value="림보"),
+            SimpleNamespace(value="카오스"),
+        )
+
+        interaction.response.send_message.assert_awaited_once_with(
+            "림보에서 선택 가능한 난이도: **노말, 하드**",
+            ephemeral=True,
+        )
 
 
 class HexaCostTests(unittest.TestCase):
@@ -1393,6 +1688,39 @@ class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("**엘라노스**　적용", last_embed.description)
 
 
+class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_polling_saves_latest_cash_shop_update_without_resending_post(self) -> None:
+        post = {
+            "id": 42853,
+            "category": "sale",
+            "name": "Cash Shop Update for August 11",
+            "liveDate": "2026-08-11T00:00:00Z",
+        }
+        bot = SimpleNamespace(
+            fetch_posts=AsyncMock(return_value=[post]),
+            sent_ids={post["id"]},
+            latest_cash_shop=None,
+            sunny_sunday={},
+            saved_categories=set(maple_bot.WATCHED_CATEGORIES),
+            persist_state=Mock(),
+        )
+
+        await maple_bot.MapleNewsBot.check_news.coro(bot)
+
+        self.assertEqual(
+            bot.latest_cash_shop,
+            {
+                "post_id": 42853,
+                "title": "Cash Shop Update for August 11",
+                "url": (
+                    "https://www.nexon.com/maplestory/news/sale/42853/"
+                    "cash-shop-update-for-august-11"
+                ),
+            },
+        )
+        bot.persist_state.assert_called_once_with()
+
+
 class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_command_guide_is_private_and_lists_only_user_commands(self) -> None:
         interaction = SimpleNamespace(
@@ -1406,10 +1734,40 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(arguments.kwargs["ephemeral"])
         field_text = "\n".join(field.value for field in arguments.kwargs["embed"].fields)
         self.assertIn("/심볼계산기", field_text)
+        self.assertIn("/5퍼", field_text)
+        self.assertIn("/우르스", field_text)
+        self.assertIn("/서버", field_text)
+        self.assertIn("/캐샵", field_text)
         self.assertNotIn("/공지알림", field_text)
 
 
 class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cash_shop_command_uses_saved_latest_link_and_thumbnail(self) -> None:
+        interaction = SimpleNamespace(
+            client=SimpleNamespace(
+                latest_cash_shop={
+                    "post_id": 42853,
+                    "title": "Cash Shop Update for August 11",
+                    "url": "https://example.com/latest-cash-shop",
+                }
+            ),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+        with patch("maple_bot.discord.File", return_value=Mock()) as discord_file:
+            await cash_shop_command.callback(interaction)
+
+        arguments = interaction.response.send_message.await_args
+        embed = arguments.kwargs["embed"]
+        self.assertEqual(embed.title, "[ 캐시샵 업데이트 ]")
+        self.assertIn("https://example.com/latest-cash-shop", embed.description)
+        self.assertIn("https://masonym.dev/cash-shop", embed.description)
+        self.assertEqual(embed.thumbnail.url, "attachment://cash-shop-update.png")
+        discord_file.assert_called_once_with(
+            maple_bot.CASH_SHOP_UPDATE_IMAGE_PATH,
+            filename="cash-shop-update.png",
+        )
+
     async def test_sunny_commands_hide_past_entries_and_use_korean_title(self) -> None:
         schedule = {
             "title": "v.270 Sunny Sunday",

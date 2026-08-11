@@ -4,8 +4,10 @@ import logging
 import os
 import random
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import discord
@@ -24,6 +26,7 @@ from maple_calculators import (
     simulate_extreme_growth_potions,
 )
 from maple_data import (
+    BOSS_TRAFFIC_LIGHTS,
     ELANOS_SYMBOL_BONUS_END,
     EPIC_DUNGEON_BONUSES,
     EPIC_DUNGEONS,
@@ -39,8 +42,14 @@ from maple_data import (
 
 NEWS_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news"
 NEWS_DETAIL_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news/{post_id}"
+SERVER_STATUS_API_URL = "https://www.nexon.com/api/maplestory/no-auth/v1/server-status/na"
+SERVER_STATUS_PAGE_URL = (
+    "https://www.nexon.com/maplestory/support/server-status/north-america/scania"
+)
+MAIN_WORLDS = ("Scania", "Bera", "Kronos", "Hyperion")
 PSSB_RATES_API_URL = "https://g.nexonstatic.com/maplestory/cms/v1/general-posts/5797"
 PSSB_RATES_PAGE_URL = "https://www.nexon.com/maplestory/general-post/5797"
+CASH_SHOP_MINING_URL = "https://masonym.dev/cash-shop"
 GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2"
 SITE_ORIGIN = "https://g.nexonstatic.com"
 SITE_URL = "https://www.nexon.com/maplestory/news"
@@ -57,6 +66,10 @@ CATEGORY_COLORS = {
 STATE_PATH = Path("state.json")
 SUNNY_SUNDAY_IMAGE_PATH = Path(__file__).parent / "assets" / "title-sunny-sunday.webp"
 CASH_SHOP_TRANSFER_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-transfer.png"
+CASH_SHOP_UPDATE_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-update.png"
+URSUS_ACTIVE_IMAGE_PATH = Path(__file__).parent / "assets" / "ursus-golden-time.jpg"
+URSUS_INACTIVE_IMAGE_PATH = Path(__file__).parent / "assets" / "ursus-golden-time-inactive.jpg"
+URSUS_TIMEZONE = ZoneInfo("America/Los_Angeles")
 POLL_INTERVAL_MINUTES = 5
 SUNNY_SUNDAY_DURATION_SECONDS = 24 * 60 * 60
 MODEL = "gpt-5.6-luna"
@@ -66,6 +79,8 @@ ALERT_SUNNY_LIST = "sunny_list"
 ALERT_MIRACLE_TIME = "miracle_time"
 ALERT_CASH_TRANSFER = "cash_transfer"
 ALERT_CUBE_SALE = "cube_sale"
+ALERT_URSUS = "ursus"
+ALERT_SERVER = "server"
 ALERT_TYPES = (
     ALERT_NEWS,
     ALERT_SUNNY_DAY,
@@ -73,6 +88,8 @@ ALERT_TYPES = (
     ALERT_MIRACLE_TIME,
     ALERT_CASH_TRANSFER,
     ALERT_CUBE_SALE,
+    ALERT_URSUS,
+    ALERT_SERVER,
 )
 
 # Discord 애플리케이션에 등록한 HEXA 계산기용 일반 이모지입니다.
@@ -161,6 +178,8 @@ def normalize_alert_channels(
             ALERT_MIRACLE_TIME: set(),
             ALERT_CASH_TRANSFER: set(),
             ALERT_CUBE_SALE: set(),
+            ALERT_URSUS: set(),
+            ALERT_SERVER: set(),
         }
     return {
         alert_type: {
@@ -187,6 +206,35 @@ def update_alert_channel(
         return False
     channels.remove(channel_id)
     return True
+
+
+def parse_server_status(payload: dict) -> dict[str, bool]:
+    """넥슨 서버 상태 응답에서 주요 4개 월드의 접속 가능 여부만 꺼냅니다."""
+    servers = {
+        server.get("worldName"): server for server in payload.get("servers", [])
+    }
+    statuses = {}
+    for world in MAIN_WORLDS:
+        server = servers.get(world)
+        if server is None:
+            # API 형식이 바뀐 상황을 점검으로 오인하지 않도록 오류로 처리합니다.
+            raise ValueError(f"Missing MapleStory world: {world}")
+        login_servers = [
+            value
+            for key, value in server.items()
+            if key.startswith("Login") and value not in {None, -1}
+        ]
+        game_channels = [
+            value
+            for key, value in server.items()
+            if key.startswith("Game") and value not in {None, -1}
+        ]
+        if not login_servers or not game_channels:
+            raise ValueError(f"Missing MapleStory server data: {world}")
+        statuses[world] = all(value == 1 for value in login_servers) and any(
+            value == 1 for value in game_channels
+        )
+    return statuses
 
 
 def migrate_sunny_sunday_state(schedule: dict | None, channel_id: int) -> bool:
@@ -277,6 +325,14 @@ def is_patch_notes(post: dict) -> bool:
     # update 카테고리라도 Preview나 단독 콘텐츠 소개 글은 제외하고 실제 패치노트만 찾습니다.
     title = post.get("name", "").lower()
     return post.get("category") == "update" and "patch notes" in title and "preview" not in title
+
+
+def is_cash_shop_update(post: dict) -> bool:
+    # sale 카테고리의 일반 판매 글이 최신 캐시샵 링크를 덮어쓰지 않게 제목도 함께 확인합니다.
+    return (
+        post.get("category") == "sale"
+        and "cash shop update" in post.get("name", "").lower()
+    )
 
 
 def extract_sunny_sunday(source: str) -> list[tuple[str, bool, list[str]]]:
@@ -428,6 +484,65 @@ def should_send_cash_shop_transfer(
     )
 
 
+def ursus_daily_windows(
+    now: datetime | None = None,
+) -> list[tuple[datetime, datetime]]:
+    """미국 서부의 서머타임 여부에 맞는 오늘의 우르스 골든타임을 반환합니다."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    local_now = now.astimezone(URSUS_TIMEZONE)
+    # 서머타임 전환일 새벽에도 그날 낮의 실제 시간표를 보여 주도록 정오를 기준으로 판별합니다.
+    local_noon = datetime(
+        local_now.year, local_now.month, local_now.day, 12, tzinfo=URSUS_TIMEZONE
+    )
+    hours = (
+        ((10, 14), (18, 22))
+        if local_noon.dst() != timedelta(0)
+        else ((9, 13), (17, 21))
+    )
+    return [
+        (
+            local_now.replace(hour=start_hour, minute=0, second=0, microsecond=0),
+            local_now.replace(hour=end_hour, minute=0, second=0, microsecond=0),
+        )
+        for start_hour, end_hour in hours
+    ]
+
+
+def current_ursus_window(
+    now: datetime | None = None,
+) -> tuple[datetime, datetime] | None:
+    """현재 우르스 골든타임이면 해당 시작·종료 시각을 반환합니다."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    local_now = now.astimezone(URSUS_TIMEZONE)
+    return next(
+        (
+            (start, end)
+            for start, end in ursus_daily_windows(now)
+            if start <= local_now < end
+        ),
+        None,
+    )
+
+
+def ursus_boundary_event(
+    now: datetime | None = None,
+) -> tuple[str, datetime, datetime] | None:
+    """골든타임 시작·종료 첫 1분에만 알림 종류와 해당 시간대를 반환합니다."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    local_now = now.astimezone(URSUS_TIMEZONE)
+    if local_now.minute != 0:
+        return None
+    for start, end in ursus_daily_windows(now):
+        if local_now.hour == start.hour:
+            return "start", start, end
+        if local_now.hour == end.hour:
+            return "end", start, end
+    return None
+
+
 def known_sunny_sunday_translation(perk: str) -> str | None:
     # 대소문자, 공백, 곱하기 기호가 달라도 같은 고정 번역을 찾을 수 있게 정규화합니다.
     normalized = re.sub(r"\s+", " ", perk).strip().lower().replace("×", "x")
@@ -530,6 +645,67 @@ def build_cash_shop_transfer_embed(schedule: dict) -> discord.Embed:
     )
     embed.set_author(name="MapleStory | CASH SHOP TRANSFER")
     embed.set_image(url=f"attachment://{CASH_SHOP_TRANSFER_IMAGE_PATH.name}")
+    return embed
+
+
+def build_ursus_embed(
+    status: str,
+    window: tuple[datetime, datetime] | None = None,
+    now: datetime | None = None,
+) -> tuple[discord.Embed, Path]:
+    """명령어와 시작·종료 알림이 함께 사용하는 우르스 임베드를 만듭니다."""
+    if status == "active":
+        message = "**우르스 골든타임이 진행 중입니다.**"
+        color = 0x5865F2
+        image_path = URSUS_ACTIVE_IMAGE_PATH
+    elif status == "ended":
+        message = "**우르스 골든타임이 끝났습니다.**"
+        color = 0xED4245
+        image_path = URSUS_INACTIVE_IMAGE_PATH
+    else:
+        message = "**현재 우르스 골든타임이 진행 중이지 않습니다.**"
+        color = 0x747F8D
+        image_path = URSUS_INACTIVE_IMAGE_PATH
+
+    windows = [window] if window is not None else ursus_daily_windows(now)
+    schedule = "\n".join(
+        f"• __<t:{int(start.timestamp())}:T> ~ <t:{int(end.timestamp())}:T>__"
+        for start, end in windows
+    )
+    embed = discord.Embed(
+        title="우르스 골든타임",
+        description=f"{message}\n{schedule}",
+        color=color,
+    )
+    embed.set_author(name="MapleStory | URSUS")
+    embed.set_footer(text="미국 서부시간 기준 · Discord 현지시간으로 자동 변환")
+    embed.set_image(url=f"attachment://{image_path.name}")
+    return embed, image_path
+
+
+def build_server_status_embed(
+    statuses: dict[str, bool], opened: bool = False
+) -> discord.Embed:
+    """명령어와 점검 종료 알림에서 같은 주요 월드 상태를 보여줍니다."""
+    all_open = all(statuses.values())
+    embed = discord.Embed(
+        title="메이플스토리 서버 오픈" if opened else "메이플스토리 서버 상태",
+        url=SERVER_STATUS_PAGE_URL,
+        description=(
+            "**주요 월드가 모두 열렸습니다.**"
+            if opened
+            else "넥슨 공식 서버 상태를 기준으로 확인했습니다."
+        ),
+        color=0x57F287 if all_open else 0xED4245,
+    )
+    embed.set_author(name="MapleStory | SERVER STATUS")
+    for world in MAIN_WORLDS:
+        embed.add_field(
+            name=world,
+            value="🟢 정상" if statuses[world] else "🔴 점검 중",
+            inline=True,
+        )
+    embed.set_footer(text="Scania · Bera · Kronos · Hyperion 기준")
     return embed
 
 
@@ -1049,7 +1225,7 @@ async def help_command(interaction: discord.Interaction) -> None:
         name="계산기",
         value=(
             "`/헥사` `/성장의비약` `/exp쿠폰`\n"
-            "`/에픽던전` `/심볼계산기`"
+            "`/에픽던전` `/심볼계산기` `/5퍼`"
         ),
         inline=False,
     )
@@ -1061,12 +1237,70 @@ async def help_command(interaction: discord.Interaction) -> None:
     embed.add_field(
         name="일정 확인",
         value=(
-            "`/썬데이` `/썬데이목록` `/캐시이동`\n"
-            "`/미라클큐브` `/핫위크` `/큐브세일`"
+            "`/썬데이` `/썬데이목록` `/캐시이동` `/우르스` `/서버`\n"
+            "`/캐샵` `/미라클큐브` `/핫위크` `/큐브세일`"
         ),
         inline=False,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+def format_boss_hp_as_k(value: str) -> str:
+    """B·T·Q 단위 체력을 인게임 전투분석에서 쓰는 K 단위로 바꿉니다."""
+    # K는 1,000이므로 B·T·Q를 각각 아래 배수만큼 곱하면 됩니다.
+    multiplier = {"B": 1_000_000, "T": 1_000_000_000, "Q": 1_000_000_000_000}
+    return f"{int(Decimal(value[:-1]) * multiplier[value[-1]]):,}K"
+
+
+@app_commands.command(name="5퍼", description="글로벌 리부트 보스의 5% 최소 피해량을 확인합니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.rename(boss="보스", difficulty="난이도")
+@app_commands.describe(
+    boss="보상 획득 기준을 확인할 보스",
+    difficulty="확인할 보스 난이도",
+)
+@app_commands.choices(
+    boss=[app_commands.Choice(name=name, value=name) for name in BOSS_TRAFFIC_LIGHTS],
+    difficulty=[
+        app_commands.Choice(name=name, value=name)
+        for name in ("해당 없음", "이지", "노말", "하드", "카오스", "익스트림")
+    ],
+)
+async def traffic_light_command(
+    interaction: discord.Interaction,
+    boss: app_commands.Choice[str],
+    difficulty: app_commands.Choice[str],
+) -> None:
+    boss_difficulties = BOSS_TRAFFIC_LIGHTS[boss.value]
+    if difficulty.value not in boss_difficulties:
+        available = ", ".join(boss_difficulties)
+        await interaction.response.send_message(
+            f"{boss.value}에서 선택 가능한 난이도: **{available}**",
+            ephemeral=True,
+        )
+        return
+
+    total_hp, minimum_damage = boss_difficulties[difficulty.value]
+    total_hp_k = format_boss_hp_as_k(total_hp)
+    minimum_damage_k = format_boss_hp_as_k(minimum_damage)
+    boss_name = (
+        boss.value
+        if difficulty.value == "해당 없음"
+        else f"{difficulty.value} {boss.value}"
+    )
+    embed = discord.Embed(
+        title="🚦 글로벌 리부트 보스 5%",
+        description=(
+            f"**{boss_name}**\n\n"
+            f"**총 체력**　{total_hp_k}\n"
+            f"**5% 최소 피해량**　{minimum_damage_k}\n\n"
+            f"전투력 분석에 **{minimum_damage_k} 이상** 기록해야 보상을 받을 수 있습니다."
+        ),
+        color=0x57F287,
+    )
+    embed.set_footer(text="K = 1,000 HP")
+    await interaction.response.send_message(embed=embed)
 
 
 @app_commands.command(
@@ -1142,6 +1376,38 @@ async def pssb_command(
     await interaction.followup.send(embed=embed)
 
 
+@app_commands.command(name="캐샵", description="최신 캐시샵 업데이트 링크를 보여줍니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def cash_shop_command(interaction: discord.Interaction) -> None:
+    """저장된 최신 공식 캐시샵 공지와 데이터 마이닝 페이지를 보여줍니다."""
+    latest = getattr(interaction.client, "latest_cash_shop", None)
+    if latest is None:
+        await interaction.response.send_message(
+            "저장된 캐시샵 업데이트가 없습니다. 다음 공지 확인 후 다시 시도해주세요.",
+            ephemeral=True,
+        )
+        return
+
+    embed = discord.Embed(
+        title="[ 캐시샵 업데이트 ]",
+        description=(
+            f"[공식 캐시샵 업데이트]({latest['url']})　"
+            f"[캐시샵 데이터 마이닝]({CASH_SHOP_MINING_URL})"
+        ),
+        color=0x4E5058,
+    )
+    # 첨부 파일을 사용하면 외부 이미지 주소가 만료되어도 썸네일이 계속 표시됩니다.
+    embed.set_thumbnail(url="attachment://cash-shop-update.png")
+    await interaction.response.send_message(
+        embed=embed,
+        file=discord.File(
+            CASH_SHOP_UPDATE_IMAGE_PATH,
+            filename="cash-shop-update.png",
+        ),
+    )
+
+
 @app_commands.command(name="썬데이", description="이번 주 썬데이 메이플 일정을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -1208,6 +1474,39 @@ async def cash_shop_transfer_command(interaction: discord.Interaction) -> None:
         embed=build_cash_shop_transfer_embed(schedule),
         file=discord.File(CASH_SHOP_TRANSFER_IMAGE_PATH),
     )
+
+
+@app_commands.command(name="우르스", description="현재 우르스 골든타임 여부를 확인합니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def ursus_command(interaction: discord.Interaction) -> None:
+    now = datetime.now(timezone.utc)
+    window = current_ursus_window(now)
+    embed, image_path = build_ursus_embed(
+        "active" if window is not None else "inactive", window, now
+    )
+    await interaction.response.send_message(
+        embed=embed,
+        file=discord.File(image_path),
+    )
+
+
+@app_commands.command(name="서버", description="글로벌 메이플 주요 월드의 접속 상태를 확인합니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def server_status_command(interaction: discord.Interaction) -> None:
+    # 공식 API 응답을 기다리는 동안 Discord의 3초 응답 제한을 넘기지 않게 합니다.
+    await interaction.response.defer()
+    try:
+        statuses = await interaction.client.fetch_server_status()
+    except (aiohttp.ClientError, TimeoutError, ValueError):
+        logging.exception("Failed to load the official MapleStory server status.")
+        await interaction.followup.send(
+            "공식 서버 상태를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
+            ephemeral=True,
+        )
+        return
+    await interaction.followup.send(embed=build_server_status_embed(statuses))
 
 
 @app_commands.command(name="핫위크", description="핫위크 일정 안내를 확인합니다.")
@@ -1369,6 +1668,40 @@ async def cash_shop_transfer_alert_command(
     )
 
 
+@app_commands.command(name="우르스알림", description="우르스 골든타임 시작·종료 알림 채널을 설정합니다.")
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+@app_commands.rename(channel="채널", action="동작")
+@app_commands.describe(channel="알림을 받을 텍스트 채널", action="알림 ON 또는 OFF")
+@app_commands.choices(action=ALERT_ACTION_CHOICES)
+async def ursus_alert_command(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    action: app_commands.Choice[str],
+) -> None:
+    await run_alert_setting_command(
+        interaction, channel, action, ALERT_URSUS, "우르스 골든타임 알림"
+    )
+
+
+@app_commands.command(name="서버알림", description="점검 종료 후 서버 오픈 알림 채널을 설정합니다.")
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+@app_commands.rename(channel="채널", action="동작")
+@app_commands.describe(channel="알림을 받을 텍스트 채널", action="알림 ON 또는 OFF")
+@app_commands.choices(action=ALERT_ACTION_CHOICES)
+async def server_status_alert_command(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    action: app_commands.Choice[str],
+) -> None:
+    await run_alert_setting_command(
+        interaction, channel, action, ALERT_SERVER, "서버 오픈 알림"
+    )
+
+
 @app_commands.command(name="큐브세일알림", description="큐브세일 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
@@ -1395,10 +1728,13 @@ def load_state() -> tuple[
     dict | None,
     dict[str, str],
     dict[str, dict],
+    dict[str, str],
+    dict | None,
+    str | None,
 ]:
     # 이전 실행에서 이미 알린 공지 번호를 불러와 같은 글을 다시 보내지 않습니다.
     if not STATE_PATH.exists():
-        return None, set(), None, None, None, {}, {}
+        return None, set(), None, None, None, {}, {}, {}, None, None
     state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     stored_sent_ids = state.get("sent_ids")
     return (
@@ -1409,6 +1745,9 @@ def load_state() -> tuple[
         state.get("alert_channels"),
         state.get("exp_coupon_burning_preferences", {}),
         state.get("symbol_calculator_preferences", {}),
+        state.get("ursus_alert_events", {}),
+        state.get("latest_cash_shop"),
+        state.get("server_status"),
     )
 
 
@@ -1420,6 +1759,9 @@ def save_state(
     patch_events: dict | None = None,
     exp_coupon_burning_preferences: dict[str, str] | None = None,
     symbol_calculator_preferences: dict[str, dict] | None = None,
+    ursus_alert_events: dict[str, str] | None = None,
+    latest_cash_shop: dict | None = None,
+    server_status: str | None = None,
 ) -> None:
     # 봇을 껐다 켜도 중복 알림을 막을 수 있도록 공지 번호를 파일에 저장합니다.
     STATE_PATH.write_text(
@@ -1437,6 +1779,9 @@ def save_state(
                     exp_coupon_burning_preferences or {}
                 ),
                 "symbol_calculator_preferences": symbol_calculator_preferences or {},
+                "ursus_alert_events": ursus_alert_events or {},
+                "latest_cash_shop": latest_cash_shop,
+                "server_status": server_status,
             },
             indent=2,
         ),
@@ -1459,6 +1804,9 @@ class MapleNewsBot(commands.Bot):
             stored_alert_channels,
             self.exp_coupon_burning_preferences,
             self.symbol_calculator_preferences,
+            self.ursus_alert_events,
+            self.latest_cash_shop,
+            self.server_status,
         ) = load_state()
         self.alert_channels = normalize_alert_channels(
             stored_alert_channels, channel_id, sunny_channel_id
@@ -1482,19 +1830,25 @@ class MapleNewsBot(commands.Bot):
             exp_coupon_command,
             epic_dungeon_command,
             symbol_calculator_command,
+            traffic_light_command,
             channel_recommend_command,
             pssb_command,
+            cash_shop_command,
             sunny_sunday_command,
             sunny_sunday_list_command,
             cash_shop_transfer_command,
+            ursus_command,
             hot_week_command,
             cube_sale_command,
             miracle_time_command,
+            server_status_command,
             news_alert_command,
             sunny_day_alert_command,
             sunny_list_alert_command,
             miracle_time_alert_command,
             cash_shop_transfer_alert_command,
+            ursus_alert_command,
+            server_status_alert_command,
             cube_sale_alert_command,
         ):
             self.tree.add_command(command)
@@ -1510,6 +1864,9 @@ class MapleNewsBot(commands.Bot):
             self.patch_events,
             self.exp_coupon_burning_preferences,
             self.symbol_calculator_preferences,
+            self.ursus_alert_events,
+            self.latest_cash_shop,
+            self.server_status,
         )
 
     async def on_ready(self) -> None:
@@ -1523,6 +1880,10 @@ class MapleNewsBot(commands.Bot):
             self.check_miracle_time.start()
         if not self.check_cash_shop_transfer.is_running():
             self.check_cash_shop_transfer.start()
+        if not self.check_ursus.is_running():
+            self.check_ursus.start()
+        if not self.check_server_status.is_running():
+            self.check_server_status.start()
 
     async def close(self) -> None:
         if self.session is not None:
@@ -1535,6 +1896,16 @@ class MapleNewsBot(commands.Bot):
         async with self.session.get(NEWS_URL, timeout=aiohttp.ClientTimeout(total=20)) as response:
             response.raise_for_status()
             return watched_posts(await response.json())
+
+    async def fetch_server_status(self) -> dict[str, bool]:
+        # 넥슨 공식 상태 API 한 번으로 주요 4개 월드를 함께 확인합니다.
+        assert self.session is not None
+        async with self.session.get(
+            SERVER_STATUS_API_URL,
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as response:
+            response.raise_for_status()
+            return parse_server_status(await response.json())
 
     async def fetch_post_detail(self, post_id: int) -> dict:
         # 목록에는 본문이 없으므로, 새 공지의 본문을 별도로 가져옵니다.
@@ -1754,7 +2125,12 @@ class MapleNewsBot(commands.Bot):
         if enabled:
             bot_member = channel.guild.me
             permissions = channel.permissions_for(bot_member) if bot_member else None
-            needs_attachment = alert_type in {ALERT_SUNNY_DAY, ALERT_SUNNY_LIST}
+            needs_attachment = alert_type in {
+                ALERT_SUNNY_DAY,
+                ALERT_SUNNY_LIST,
+                ALERT_CASH_TRANSFER,
+                ALERT_URSUS,
+            }
             if permissions is None or not (
                 permissions.view_channel
                 and permissions.send_messages
@@ -1818,6 +2194,23 @@ class MapleNewsBot(commands.Bot):
         current_ids = {post["id"] for post in posts}
         latest_patch = next((post for post in posts if is_patch_notes(post)), None)
         latest_patch_detail = None
+
+        # 목록은 최신순이므로 첫 Cash Shop Update가 현재 공식 캐시샵 공지입니다.
+        latest_cash_shop_post = next(
+            (post for post in posts if is_cash_shop_update(post)),
+            None,
+        )
+        if latest_cash_shop_post is not None:
+            latest_cash_shop = {
+                "post_id": latest_cash_shop_post["id"],
+                "title": latest_cash_shop_post["name"],
+                "url": post_url(latest_cash_shop_post),
+            }
+            if latest_cash_shop != self.latest_cash_shop:
+                self.latest_cash_shop = latest_cash_shop
+                # 기존 설치의 state.json에 새 항목을 추가할 때도 바로 저장합니다.
+                if self.sent_ids is not None:
+                    self.persist_state()
 
         # 이미 읽은 최신 패치노트도 다시 확인해 사후 추가된 이벤트 일정을 반영합니다.
         should_refresh_patch = latest_patch is not None and (
@@ -2076,6 +2469,67 @@ class MapleNewsBot(commands.Bot):
         if state_changed:
             self.persist_state()
 
+    @tasks.loop(minutes=1)
+    async def check_ursus(self) -> None:
+        # 시작·종료 시각의 첫 1분에만 알리고 채널별 마지막 알림을 저장해 중복을 막습니다.
+        now = datetime.now(timezone.utc)
+        event = ursus_boundary_event(now)
+        if event is None:
+            return
+
+        event_type, start, end = event
+        boundary = start if event_type == "start" else end
+        event_key = f"{event_type}:{int(boundary.timestamp())}"
+        embed, image_path = build_ursus_embed(
+            "active" if event_type == "start" else "ended",
+            (start, end),
+            now,
+        )
+        state_changed = False
+        for channel_id in sorted(self.alert_channels[ALERT_URSUS]):
+            if self.ursus_alert_events.get(str(channel_id)) == event_key:
+                continue
+            channel = self.get_channel(channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                logging.warning("Ursus channel %s is not accessible.", channel_id)
+                continue
+            try:
+                await channel.send(
+                    embed=embed,
+                    file=discord.File(image_path),
+                )
+            except discord.HTTPException:
+                logging.exception("Failed to send Ursus alert to %s.", channel_id)
+                continue
+            self.ursus_alert_events[str(channel_id)] = event_key
+            state_changed = True
+
+        if state_changed:
+            self.persist_state()
+
+    @tasks.loop(minutes=1)
+    async def check_server_status(self) -> None:
+        # API 오류는 점검으로 저장하지 않습니다. 정상 응답의 상태 변화만 기록합니다.
+        try:
+            statuses = await self.fetch_server_status()
+        except (aiohttp.ClientError, TimeoutError, ValueError) as error:
+            logging.warning("MapleStory server status check failed: %s", error)
+            return
+
+        current_status = "up" if all(statuses.values()) else "down"
+        previous_status = self.server_status
+        if current_status == previous_status:
+            return
+
+        # 첫 실행은 현재 상태만 기준점으로 저장하고, 점검 중→정상 전환에만 알립니다.
+        if previous_status == "down" and current_status == "up":
+            await self.send_alert_embed(
+                ALERT_SERVER,
+                build_server_status_embed(statuses, opened=True),
+            )
+        self.server_status = current_status
+        self.persist_state()
+
     @check_news.error
     async def check_news_error(self, error: Exception) -> None:
         # API나 전송 단계의 오류를 서버 로그에 남겨 원인을 확인할 수 있게 합니다.
@@ -2094,6 +2548,14 @@ class MapleNewsBot(commands.Bot):
     async def check_cash_shop_transfer_error(self, error: Exception) -> None:
         logging.exception("Cash Shop Transfer schedule check failed.", exc_info=error)
 
+    @check_ursus.error
+    async def check_ursus_error(self, error: Exception) -> None:
+        logging.exception("Ursus schedule check failed.", exc_info=error)
+
+    @check_server_status.error
+    async def check_server_status_error(self, error: Exception) -> None:
+        logging.exception("MapleStory server status task failed.", exc_info=error)
+
     @check_news.before_loop
     async def before_check_news(self) -> None:
         # 디스코드 기본 연결 대기 함수를 가리지 않도록 다른 이름을 사용합니다.
@@ -2109,6 +2571,14 @@ class MapleNewsBot(commands.Bot):
 
     @check_cash_shop_transfer.before_loop
     async def before_check_cash_shop_transfer(self) -> None:
+        await self.wait_until_ready()
+
+    @check_ursus.before_loop
+    async def before_check_ursus(self) -> None:
+        await self.wait_until_ready()
+
+    @check_server_status.before_loop
+    async def before_check_server_status(self) -> None:
         await self.wait_until_ready()
 
 
