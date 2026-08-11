@@ -56,6 +56,7 @@ CATEGORY_COLORS = {
 }
 STATE_PATH = Path("state.json")
 SUNNY_SUNDAY_IMAGE_PATH = Path(__file__).parent / "assets" / "title-sunny-sunday.webp"
+CASH_SHOP_TRANSFER_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-transfer.png"
 POLL_INTERVAL_MINUTES = 5
 SUNNY_SUNDAY_DURATION_SECONDS = 24 * 60 * 60
 MODEL = "gpt-5.6-luna"
@@ -528,6 +529,7 @@ def build_cash_shop_transfer_embed(schedule: dict) -> discord.Embed:
         color=0x3498DB,
     )
     embed.set_author(name="MapleStory | CASH SHOP TRANSFER")
+    embed.set_image(url=f"attachment://{CASH_SHOP_TRANSFER_IMAGE_PATH.name}")
     return embed
 
 
@@ -1203,7 +1205,8 @@ async def cash_shop_transfer_command(interaction: discord.Interaction) -> None:
         )
         return
     await interaction.response.send_message(
-        embed=build_cash_shop_transfer_embed(schedule)
+        embed=build_cash_shop_transfer_embed(schedule),
+        file=discord.File(CASH_SHOP_TRANSFER_IMAGE_PATH),
     )
 
 
@@ -2059,7 +2062,8 @@ class MapleNewsBot(commands.Bot):
                 continue
             try:
                 await channel.send(
-                    embed=build_cash_shop_transfer_embed(self.patch_events)
+                    embed=build_cash_shop_transfer_embed(self.patch_events),
+                    file=discord.File(CASH_SHOP_TRANSFER_IMAGE_PATH),
                 )
             except discord.HTTPException:
                 logging.exception(

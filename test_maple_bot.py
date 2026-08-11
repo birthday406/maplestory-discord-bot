@@ -523,6 +523,28 @@ class NewsFilteringTests(unittest.TestCase):
 
 
 class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cash_transfer_command_attaches_embed_image(self) -> None:
+        schedule = {
+            "url": "https://example.com/patch",
+            "cash_shop_transfer": {"start_timestamp": 100, "end_timestamp": 200},
+        }
+        interaction = SimpleNamespace(
+            client=SimpleNamespace(patch_events=schedule),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+        image_file = object()
+
+        with patch("maple_bot.discord.File", return_value=image_file) as file_class:
+            await cash_shop_transfer_command.callback(interaction)
+
+        file_class.assert_called_once_with(maple_bot.CASH_SHOP_TRANSFER_IMAGE_PATH)
+        send_kwargs = interaction.response.send_message.await_args.kwargs
+        self.assertIs(send_kwargs["file"], image_file)
+        self.assertEqual(
+            send_kwargs["embed"].image.url,
+            "attachment://cash-shop-transfer.png",
+        )
+
     async def test_miracle_time_alert_is_sent_and_recorded_once(self) -> None:
         class DummyTextChannel:
             def __init__(self) -> None:
@@ -577,13 +599,21 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
             persist_state=Mock(),
         )
 
+        image_file = object()
         with patch.object(maple_bot.discord, "TextChannel", DummyTextChannel), patch(
-            "maple_bot.datetime"
-        ) as mocked_datetime:
+            "maple_bot.discord.File", return_value=image_file
+        ) as file_class, patch("maple_bot.datetime") as mocked_datetime:
             mocked_datetime.now.return_value.timestamp.return_value = 1
             await maple_bot.MapleNewsBot.check_cash_shop_transfer.coro(bot)
 
         channel.send.assert_awaited_once()
+        file_class.assert_called_once_with(maple_bot.CASH_SHOP_TRANSFER_IMAGE_PATH)
+        send_kwargs = channel.send.await_args.kwargs
+        self.assertIs(send_kwargs["file"], image_file)
+        self.assertEqual(
+            send_kwargs["embed"].image.url,
+            "attachment://cash-shop-transfer.png",
+        )
         self.assertEqual(event["notified_channel_ids"], [111])
         bot.persist_state.assert_called_once_with()
 
