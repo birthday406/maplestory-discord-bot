@@ -660,8 +660,8 @@ async def extreme_growth_potion_command(
     potion="사용할 성장의 비약 종류",
     current_level="시작 캐릭터 레벨 (200~299)",
     current_exp_percent="현재 경험치 퍼센트 (0 이상 100 미만)",
-    hyper_burning="하이퍼 버닝 캐릭터인지 선택",
-    beyond_burning="비욘드 버닝 캐릭터인지 선택",
+    hyper_burning="생략하면 미적용",
+    beyond_burning="생략하면 미적용",
     count="사용할 비약 개수 (1~100)",
 )
 @app_commands.choices(
@@ -682,12 +682,14 @@ async def growth_potion_command(
     current_level: app_commands.Range[int, 200, 299],
     current_exp_percent: app_commands.Range[float, 0.0, 99.999],
     count: app_commands.Range[int, 1, 100],
-    hyper_burning: app_commands.Choice[str],
-    beyond_burning: app_commands.Choice[str],
+    hyper_burning: app_commands.Choice[str] | None = None,
+    beyond_burning: app_commands.Choice[str] | None = None,
 ) -> None:
-    # Discord에는 한글 선택지를 보여주고 계산 함수에는 기존 bool 값으로 전달합니다.
-    hyper_burning_enabled = hyper_burning.value == "적용"
-    beyond_burning_enabled = beyond_burning.value == "적용"
+    # 버닝 선택을 생략하면 미적용으로 표시하고 계산 함수에는 False를 전달합니다.
+    hyper_burning_name = hyper_burning.name if hyper_burning is not None else "미적용"
+    beyond_burning_name = beyond_burning.name if beyond_burning is not None else "미적용"
+    hyper_burning_enabled = hyper_burning is not None and hyper_burning.value == "적용"
+    beyond_burning_enabled = beyond_burning is not None and beyond_burning.value == "적용"
     result_level, result_exp, gained_exp, used_count = calculate_growth_potions(
         potion.value,
         current_level,
@@ -710,8 +712,8 @@ async def growth_potion_command(
         description=(
             f"**비약**　{potion.name}\n"
             f"**사용 전**　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
-            f"**하이퍼 버닝**　{hyper_burning.name}\n"
-            f"**비욘드 버닝**　{beyond_burning.name}\n"
+            f"**하이퍼 버닝**　{hyper_burning_name}\n"
+            f"**비욘드 버닝**　{beyond_burning_name}\n"
             f"**사용 개수**　{count_text}\n\n"
             f"◆ **사용 후**　{result_text}\n"
             f"◆ **지급 경험치**　{gained_exp:,}"

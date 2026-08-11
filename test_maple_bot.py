@@ -846,6 +846,7 @@ class GrowthPotionTests(unittest.TestCase):
             set(GROWTH_POTIONS),
         )
         for parameter_index in (4, 5):
+            self.assertFalse(growth_potion_command.parameters[parameter_index].required)
             self.assertEqual(
                 {
                     choice.value
@@ -861,6 +862,26 @@ class GrowthPotionTests(unittest.TestCase):
 
 
 class GrowthPotionCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_omitted_burning_choices_default_to_disabled(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+        potion = SimpleNamespace(
+            name="극성비 · 극한 성장의 비약",
+            value="극성비 · 극한 성장의 비약",
+        )
+
+        with patch(
+            "maple_bot.calculate_growth_potions",
+            return_value=(245, 0, 0, 1),
+        ) as calculator:
+            await growth_potion_command.callback(interaction, potion, 245, 0, 1)
+
+        calculator.assert_called_once_with(potion.value, 245, 0, 1, False, False)
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertIn("하이퍼 버닝**　미적용", embed.description)
+        self.assertIn("비욘드 버닝**　미적용", embed.description)
+
     async def test_korean_burning_choices_are_converted_to_boolean(self) -> None:
         interaction = SimpleNamespace(
             response=SimpleNamespace(send_message=AsyncMock())
