@@ -83,6 +83,13 @@ EGP_EMOJI = "<:EGP:1536685490789679104>"
 LADY_BLAIR_EMOJI = "<:ladyblair:1536691685017518110>"
 BONUS_CUBE_EMOJI = "<:BC:1536697424251330630>"
 PSSB_EMOJI = "<:SSB:1536697384011178015>"
+GROWTH_POTION_EMOJIS = {
+    "익성비 · 익스트림 성장의 비약": EGP_EMOJI,
+    "궁성비 · 궁극의 유니온 성장의 비약": "<:UGP:1536686894434488471>",
+    "극성비 · 극한 성장의 비약": "<:MGP:1536686939049168967>",
+    "초성비 · 초월 성장의 비약": "<:TGP:1536686905238749245>",
+    "전성비 · 전설 성장의 비약": "<:LGP:1536686920707342407>",
+}
 EXP_COUPON_EMOJIS = {
     "EXP 교환권": "<:EV:1536691867293323274>",
     "상급 EXP 교환권": "<:AEV:1536691857692565554>",
@@ -126,6 +133,7 @@ SUNNY_SUNDAY_LOCALIZATIONS = (
 
 MIRACLE_TIME_EQUIPMENT_TRANSLATIONS = {
     "Emblem, Mechanical Heart, Ring, Accessory": "엠블렘, 기계 심장, 반지, 장신구",
+    "Emblem, Mechanical Heart, Ring, Accessory, Shoulder Accessory": "엠블렘, 기계 심장, 반지, 장신구, 어깨장식",
     "Weapon, Secondary Weapon, Shield": "무기, 보조무기, 방패",
     "Top, Bottom, Outfit, Cape": "상의, 하의, 한벌옷, 망토",
     "Hat": "모자",
@@ -533,7 +541,7 @@ def build_miracle_time_embed(
         url=schedule["url"],
         description=(
             "대상 장비에 큐브를 사용할 때 **잠재능력 등급 상승 확률이 2배**가 됩니다.\n"
-            "사용 가능: Glowing·Bright·Bonus Glowing·Bonus Bright·Violet Cube"
+            "사용 가능: Glowing Cube (레드 큐브)·Bright Cube (블랙 큐브)"
         ),
         color=0x9B59B6,
     )
@@ -542,7 +550,7 @@ def build_miracle_time_embed(
         start = entry["start_timestamp"]
         embed.add_field(
             name=f"· __<t:{start}:F> (<t:{start}:R>)__",
-            value=f"**대상 장비**　{entry['equipment']}",
+            value=f"대상 장비　{entry['equipment']}",
             inline=False,
         )
     return embed
@@ -673,9 +681,9 @@ async def growth_potion_command(
     potion: app_commands.Choice[str],
     current_level: app_commands.Range[int, 200, 299],
     current_exp_percent: app_commands.Range[float, 0.0, 99.999],
+    count: app_commands.Range[int, 1, 100],
     hyper_burning: app_commands.Choice[str],
     beyond_burning: app_commands.Choice[str],
-    count: app_commands.Range[int, 1, 100],
 ) -> None:
     # Discord에는 한글 선택지를 보여주고 계산 함수에는 기존 bool 값으로 전달합니다.
     hyper_burning_enabled = hyper_burning.value == "적용"
@@ -698,7 +706,7 @@ async def growth_potion_command(
         count_text += f" (Lv.300 도달로 {used_count}개 적용)"
 
     embed = discord.Embed(
-        title="🌱 성장의 비약 계산기",
+        title=f"{GROWTH_POTION_EMOJIS[potion.value]} 성장의 비약 계산기",
         description=(
             f"**비약**　{potion.name}\n"
             f"**사용 전**　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
@@ -1071,12 +1079,11 @@ async def channel_recommend_command(interaction: discord.Interaction) -> None:
 
     # 말투를 바꾸고 싶다면 아래 문자열만 수정하면 됩니다.
     message = (
-        f"우우우... **{display_name}**, 오늘도 많이 힘들었구나요! 😭\n"
-        "간절한 마음을 모아 카미쨩이 아이템이 쏟아질 "
-        "**행운의 채널**을 점지해드릴게요! ✨\n\n"
-        "두구두구... 🥁 오늘의 추천 채널은 바로\n"
-        f"🍀 **[ {channel_number}채널 ]** 🍀\n\n"
-        "여기서 꼭 대박 아이템이 팡팡 터지길 바랄게요! 💖✅"
+        f"헐 **{display_name}**야 오늘도 많이 힘들었구나 어떡해 ㅠㅠ\n"
+        "불쌍하니까 **광휘나 칠흑 잘뜨는 채널** 점지해줄게 ✨\n\n"
+        "오늘의 추천 채널은 바로\n"
+        f"**[ {channel_number}채널 ]** 이야\n\n"
+        "광휘나 칠흑 꼭 먹고 나 보스 캐리해줘야돼 ㅋㅋ"
     )
     await interaction.response.send_message(message)
 

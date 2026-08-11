@@ -29,9 +29,11 @@ from maple_bot import (
     EPIC_DUNGEONS,
     EXP_COUPON_BURNING_OPTIONS,
     EXP_COUPONS,
+    GROWTH_POTION_EMOJIS,
     GROWTH_POTIONS,
     HEXA_CORE_COSTS,
     LEVEL_EXP,
+    build_miracle_time_embed,
     calculate_epic_dungeon,
     calculate_exp_coupons,
     calculate_growth_potions,
@@ -299,7 +301,7 @@ class NewsFilteringTests(unittest.TestCase):
         source = """
         <a id="MiracleTime"></a><h2>Miracle Time</h2>
         <table><tr><th>Equipment</th><th>Date</th></tr><tr>
-          <td>Emblem, Mechanical Heart, Ring, Accessory</td>
+          <td>Emblem, Mechanical Heart, Ring, Accessory, Shoulder Accessory</td>
           <td>August 14, 2026<br>12:00 AM UTC - 11:59 PM UTC</td>
         </tr></table>
         <a id="CashShopTransfer"></a><h2>Cash Shop Transfer</h2>
@@ -321,7 +323,7 @@ class NewsFilteringTests(unittest.TestCase):
             extract_miracle_time(source),
             [
                 {
-                    "equipment": "엠블렘, 기계 심장, 반지, 장신구",
+                    "equipment": "엠블렘, 기계 심장, 반지, 장신구, 어깨장식",
                     "start_timestamp": utc_event_timestamp(
                         "August 14, 2026 12:00 AM UTC"
                     ),
@@ -331,6 +333,22 @@ class NewsFilteringTests(unittest.TestCase):
                     "notified_channel_ids": [],
                 }
             ],
+        )
+
+    def test_miracle_time_embed_uses_requested_cube_and_equipment_lines(self) -> None:
+        embed = build_miracle_time_embed(
+            {"url": "https://example.com/patch"},
+            [{"start_timestamp": 123, "equipment": "엠블렘, 기계 심장, 반지, 장신구, 어깨장식"}],
+        )
+
+        self.assertEqual(
+            embed.description.splitlines()[1],
+            "사용 가능: Glowing Cube (레드 큐브)·Bright Cube (블랙 큐브)",
+        )
+        self.assertEqual(embed.fields[0].name, "· __<t:123:F> (<t:123:R>)__")
+        self.assertEqual(
+            embed.fields[0].value,
+            "대상 장비　엠블렘, 기계 심장, 반지, 장신구, 어깨장식",
         )
 
     def test_patch_note_refresh_keeps_sent_miracle_alerts(self) -> None:
@@ -744,6 +762,18 @@ class ExtremeGrowthPotionCommandTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GrowthPotionTests(unittest.TestCase):
+    def test_each_potion_has_its_requested_custom_emoji(self) -> None:
+        self.assertEqual(
+            GROWTH_POTION_EMOJIS,
+            {
+                "익성비 · 익스트림 성장의 비약": "<:EGP:1536685490789679104>",
+                "궁성비 · 궁극의 유니온 성장의 비약": "<:UGP:1536686894434488471>",
+                "극성비 · 극한 성장의 비약": "<:MGP:1536686939049168967>",
+                "초성비 · 초월 성장의 비약": "<:TGP:1536686905238749245>",
+                "전성비 · 전설 성장의 비약": "<:LGP:1536686920707342407>",
+            },
+        )
+
     def test_level_exp_table_covers_level_200_through_299(self) -> None:
         self.assertEqual(len(LEVEL_EXP), 100)
         self.assertEqual(LEVEL_EXP[0], 2_207_026_470)
@@ -808,10 +838,14 @@ class GrowthPotionTests(unittest.TestCase):
 
     def test_command_offers_only_requested_potions(self) -> None:
         self.assertEqual(
+            [parameter.display_name for parameter in growth_potion_command.parameters],
+            ["비약종류", "시작레벨", "경험치", "개수", "하이퍼버닝", "비욘드버닝"],
+        )
+        self.assertEqual(
             {choice.value for choice in growth_potion_command.parameters[0].choices},
             set(GROWTH_POTIONS),
         )
-        for parameter_index in (3, 4):
+        for parameter_index in (4, 5):
             self.assertEqual(
                 {
                     choice.value
@@ -845,15 +879,16 @@ class GrowthPotionCommandTests(unittest.IsolatedAsyncioTestCase):
                 potion,
                 245,
                 0,
+                1,
                 SimpleNamespace(name="적용", value="적용"),
                 SimpleNamespace(name="미적용", value="미적용"),
-                1,
             )
 
         calculator.assert_called_once_with(
             potion.value, 245, 0, 1, True, False
         )
         embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertIn("<:MGP:1536686939049168967>", embed.title)
         self.assertIn("하이퍼 버닝**　적용", embed.description)
         self.assertIn("비욘드 버닝**　미적용", embed.description)
 
@@ -1388,3 +1423,5 @@ class ChannelRecommendationTests(unittest.IsolatedAsyncioTestCase):
         message = interaction.response.send_message.await_args.args[0]
         self.assertIn("류\\*게이", message)
         self.assertIn("27채널", message)
+        self.assertIn("광휘나 칠흑 잘뜨는 채널", message)
+        self.assertIn("나 보스 캐리해줘야돼 ㅋㅋ", message)
