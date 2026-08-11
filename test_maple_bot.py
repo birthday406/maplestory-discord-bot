@@ -1,41 +1,105 @@
 import json
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import maple_bot
+from maple_calculators import calculate_symbol, simulate_extreme_growth_potions
+from maple_data import (
+    ARCANE_SYMBOL_GROWTH,
+    AUTHENTIC_SYMBOL_GROWTH,
+    EXTREME_GROWTH_POTION_RATES,
+    SYMBOL_REGIONS,
+)
 from maple_bot import (
+    ALERT_CASH_TRANSFER,
+    ALERT_CUBE_SALE,
+    ALERT_MIRACLE_TIME,
     ALERT_NEWS,
     ALERT_SUNNY_DAY,
     ALERT_SUNNY_LIST,
+    EPIC_DUNGEON_BONUSES,
+    EPIC_DUNGEONS,
+    EXP_COUPON_BURNING_OPTIONS,
+    EXP_COUPONS,
+    GROWTH_POTIONS,
     HEXA_CORE_COSTS,
+    LEVEL_EXP,
+    calculate_epic_dungeon,
+    calculate_exp_coupons,
+    calculate_growth_potions,
     calculate_hexa_cost,
+    cash_shop_transfer_alert_command,
+    cash_shop_transfer_command,
+    channel_recommend_command,
+    cube_sale_alert_command,
+    cube_sale_command,
     current_sunny_sunday_entry,
+    epic_dungeon_command,
+    exp_coupon_command,
+    extreme_growth_potion_command,
+    extract_cash_shop_transfer,
+    extract_miracle_time,
     extract_sunny_sunday,
     format_sunny_sunday_date,
+    growth_potion_command,
+    help_command,
+    hot_week_command,
     html_to_text,
     is_patch_notes,
     known_sunny_sunday_translation,
     load_state,
+    merge_patch_events,
     migrate_sunny_sunday_state,
+    miracle_time_alert_command,
+    miracle_time_command,
     news_alert_command,
     normalize_alert_channels,
+    parse_pssb_rates,
     post_url,
+    pssb_command,
     save_state,
+    should_send_cash_shop_transfer,
+    should_send_miracle_time,
     sunny_day_alert_command,
     sunny_list_alert_command,
     sunny_sunday_entry_action,
     sunny_sunday_timestamp,
+    symbol_calculator_command,
     thumbnail_url,
     update_alert_channel,
+    utc_event_timestamp,
     visible_sunny_sunday_entries,
     watched_posts,
 )
 
 
 class NewsFilteringTests(unittest.TestCase):
+    def test_pssb_rates_keep_gender_pair_in_one_reward_slot(self) -> None:
+        source = """
+        <table><tbody>
+        <tr><th>Item Name</th><th>Gender</th><th>Rate</th></tr>
+        <tr><td>Shared Hat</td><td>All</td><td>2.00%</td></tr>
+        <tr><td>Captain (M)</td><td>Male</td><td rowspan="2">4.00%</td></tr>
+        <tr><td>Captain (F)</td><td>Female</td></tr>
+        <tr><td></td><td></td><td>100.00%</td></tr>
+        </tbody></table>
+        """
+
+        self.assertEqual(
+            parse_pssb_rates(source),
+            [("Shared Hat", 2.0), ("Captain (M) / Captain (F)", 4.0)],
+        )
+
+    def test_pssb_command_only_offers_one_or_five_draws(self) -> None:
+        self.assertEqual(
+            {choice.value for choice in pssb_command.parameters[0].choices},
+            {1, 5},
+        )
+
     def test_legacy_channels_are_migrated_only_when_no_saved_setting_exists(self) -> None:
         self.assertEqual(
             normalize_alert_channels(None, 111, 222),
@@ -43,11 +107,21 @@ class NewsFilteringTests(unittest.TestCase):
                 ALERT_NEWS: {111},
                 ALERT_SUNNY_DAY: {222},
                 ALERT_SUNNY_LIST: {222},
+                ALERT_MIRACLE_TIME: set(),
+                ALERT_CASH_TRANSFER: set(),
+                ALERT_CUBE_SALE: set(),
             },
         )
         self.assertEqual(
             normalize_alert_channels({}, 111, 222),
-            {ALERT_NEWS: set(), ALERT_SUNNY_DAY: set(), ALERT_SUNNY_LIST: set()},
+            {
+                ALERT_NEWS: set(),
+                ALERT_SUNNY_DAY: set(),
+                ALERT_SUNNY_LIST: set(),
+                ALERT_MIRACLE_TIME: set(),
+                ALERT_CASH_TRANSFER: set(),
+                ALERT_CUBE_SALE: set(),
+            },
         )
 
     def test_alert_channels_support_multiple_channels_and_idempotent_updates(self) -> None:
@@ -64,6 +138,9 @@ class NewsFilteringTests(unittest.TestCase):
             news_alert_command,
             sunny_day_alert_command,
             sunny_list_alert_command,
+            miracle_time_alert_command,
+            cash_shop_transfer_alert_command,
+            cube_sale_alert_command,
         ):
             self.assertTrue(command.guild_only)
             self.assertTrue(command.default_permissions.administrator)
@@ -104,12 +181,13 @@ class NewsFilteringTests(unittest.TestCase):
             maple_bot.STATE_PATH = Path(directory) / "state.json"
             maple_bot.STATE_PATH.write_text(json.dumps({"sent_ids": [1]}), encoding="utf-8")
 
-            sent_ids, categories, sunny_sunday, alert_channels = load_state()
+            sent_ids, categories, sunny_sunday, patch_events, alert_channels = load_state()
 
         maple_bot.STATE_PATH = original_state_path
         self.assertEqual(sent_ids, {1})
         self.assertEqual(categories, {"maintenance", "sale", "general", "update"})
         self.assertIsNone(sunny_sunday)
+        self.assertIsNone(patch_events)
         self.assertIsNone(alert_channels)
 
     def test_legacy_weekly_message_id_is_migrated_to_its_channel(self) -> None:
@@ -140,16 +218,27 @@ class NewsFilteringTests(unittest.TestCase):
             ALERT_NEWS: {111},
             ALERT_SUNNY_DAY: {222, 333},
             ALERT_SUNNY_LIST: {222},
+            ALERT_MIRACLE_TIME: set(),
+            ALERT_CASH_TRANSFER: set(),
+            ALERT_CUBE_SALE: set(),
         }
+        patch_events = {"post_id": 42415, "miracle_time": []}
         with tempfile.TemporaryDirectory() as directory:
             maple_bot.STATE_PATH = Path(directory) / "state.json"
-            save_state({1}, {"update"}, schedule, alert_channels)
-            sent_ids, categories, loaded_schedule, loaded_channels = load_state()
+            save_state({1}, {"update"}, schedule, alert_channels, patch_events)
+            (
+                sent_ids,
+                categories,
+                loaded_schedule,
+                loaded_patch_events,
+                loaded_channels,
+            ) = load_state()
 
         maple_bot.STATE_PATH = original_state_path
         self.assertEqual(sent_ids, {1})
         self.assertEqual(categories, {"update"})
         self.assertEqual(loaded_schedule, schedule)
+        self.assertEqual(loaded_patch_events, patch_events)
         self.assertEqual(
             normalize_alert_channels(loaded_channels, 999, 999), alert_channels
         )
@@ -171,6 +260,111 @@ class NewsFilteringTests(unittest.TestCase):
         )
         self.assertFalse(
             is_patch_notes({"category": "general", "name": "Patch Notes"})
+        )
+
+    def test_patch_event_sections_are_extracted_from_updated_patch_notes(self) -> None:
+        source = """
+        <a id="MiracleTime"></a><h2>Miracle Time</h2>
+        <table><tr><th>Equipment</th><th>Date</th></tr><tr>
+          <td>Emblem, Mechanical Heart, Ring, Accessory</td>
+          <td>August 14, 2026<br>12:00 AM UTC - 11:59 PM UTC</td>
+        </tr></table>
+        <a id="CashShopTransfer"></a><h2>Cash Shop Transfer</h2>
+        <p><strong>September 2, 2026 12:00 AM UTC - September 9, 2026 2:00 PM UTC</strong></p>
+        """
+
+        self.assertEqual(
+            extract_cash_shop_transfer(source),
+            {
+                "start_timestamp": utc_event_timestamp(
+                    "September 2, 2026 12:00 AM UTC"
+                ),
+                "end_timestamp": utc_event_timestamp(
+                    "September 9, 2026 2:00 PM UTC"
+                ),
+            },
+        )
+        self.assertEqual(
+            extract_miracle_time(source),
+            [
+                {
+                    "equipment": "엠블렘, 기계 심장, 반지, 장신구",
+                    "start_timestamp": utc_event_timestamp(
+                        "August 14, 2026 12:00 AM UTC"
+                    ),
+                    "end_timestamp": utc_event_timestamp(
+                        "August 14, 2026 11:59 PM UTC"
+                    ),
+                    "notified_channel_ids": [],
+                }
+            ],
+        )
+
+    def test_patch_note_refresh_keeps_sent_miracle_alerts(self) -> None:
+        current = {
+            "post_id": 42415,
+            "cash_shop_transfer": {
+                "start_timestamp": 50,
+                "notified_channel_ids": [222],
+            },
+            "miracle_time": [
+                {"start_timestamp": 100, "notified_channel_ids": [111]}
+            ],
+        }
+        updated = {
+            "post_id": 42415,
+            "cash_shop_transfer": {
+                "start_timestamp": 50,
+                "notified_channel_ids": [],
+            },
+            "miracle_time": [
+                {"start_timestamp": 100, "notified_channel_ids": []}
+            ],
+        }
+
+        self.assertEqual(
+            merge_patch_events(current, updated)["miracle_time"][0][
+                "notified_channel_ids"
+            ],
+            [111],
+        )
+        self.assertEqual(
+            merge_patch_events(current, updated)["cash_shop_transfer"][
+                "notified_channel_ids"
+            ],
+            [222],
+        )
+
+    def test_miracle_alert_is_sent_once_during_its_utc_day(self) -> None:
+        entry = {
+            "start_timestamp": 100,
+            "end_timestamp": 200,
+            "notified_channel_ids": [],
+        }
+        self.assertFalse(should_send_miracle_time(entry, 111, 99))
+        self.assertTrue(should_send_miracle_time(entry, 111, 100))
+        entry["notified_channel_ids"].append(111)
+        self.assertFalse(should_send_miracle_time(entry, 111, 101))
+        self.assertFalse(should_send_miracle_time(entry, 222, 201))
+
+    def test_patch_event_commands_have_requested_names(self) -> None:
+        self.assertEqual(cash_shop_transfer_command.name, "캐시이동")
+        self.assertEqual(miracle_time_command.name, "미라클큐브")
+        self.assertEqual(hot_week_command.name, "핫위크")
+        self.assertEqual(cube_sale_command.name, "큐브세일")
+
+    def test_cash_transfer_alert_is_sent_only_during_first_24_hours(self) -> None:
+        event = {
+            "start_timestamp": 100,
+            "end_timestamp": 1_000_000,
+            "notified_channel_ids": [],
+        }
+        self.assertFalse(should_send_cash_shop_transfer(event, 111, 99))
+        self.assertTrue(should_send_cash_shop_transfer(event, 111, 100))
+        event["notified_channel_ids"].append(111)
+        self.assertFalse(should_send_cash_shop_transfer(event, 111, 101))
+        self.assertFalse(
+            should_send_cash_shop_transfer(event, 222, 100 + 86_400)
         )
 
     def test_extract_sunny_sunday_reads_dates_special_label_and_perks(self) -> None:
@@ -270,6 +464,70 @@ class NewsFilteringTests(unittest.TestCase):
 
 
 class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_miracle_time_alert_is_sent_and_recorded_once(self) -> None:
+        class DummyTextChannel:
+            def __init__(self) -> None:
+                self.id = 111
+                self.send = AsyncMock()
+
+        channel = DummyTextChannel()
+        entry = {
+            "equipment": "모자",
+            "start_timestamp": 0,
+            "end_timestamp": 9_999_999_999,
+            "notified_channel_ids": [],
+        }
+        bot = SimpleNamespace(
+            patch_events={
+                "url": "https://example.com/patch",
+                "miracle_time": [entry],
+            },
+            sent_ids={1},
+            alert_channels={ALERT_MIRACLE_TIME: {111}},
+            get_channel=lambda channel_id: channel,
+            persist_state=Mock(),
+        )
+
+        with patch.object(maple_bot.discord, "TextChannel", DummyTextChannel):
+            await maple_bot.MapleNewsBot.check_miracle_time.coro(bot)
+
+        channel.send.assert_awaited_once()
+        self.assertEqual(entry["notified_channel_ids"], [111])
+        bot.persist_state.assert_called_once_with()
+
+    async def test_cash_transfer_alert_is_sent_and_recorded_once(self) -> None:
+        class DummyTextChannel:
+            def __init__(self) -> None:
+                self.id = 111
+                self.send = AsyncMock()
+
+        channel = DummyTextChannel()
+        event = {
+            "start_timestamp": 0,
+            "end_timestamp": 9_999_999_999,
+            "notified_channel_ids": [],
+        }
+        bot = SimpleNamespace(
+            patch_events={
+                "url": "https://example.com/patch",
+                "cash_shop_transfer": event,
+            },
+            sent_ids={1},
+            alert_channels={ALERT_CASH_TRANSFER: {111}},
+            get_channel=lambda channel_id: channel,
+            persist_state=Mock(),
+        )
+
+        with patch.object(maple_bot.discord, "TextChannel", DummyTextChannel), patch(
+            "maple_bot.datetime"
+        ) as mocked_datetime:
+            mocked_datetime.now.return_value.timestamp.return_value = 1
+            await maple_bot.MapleNewsBot.check_cash_shop_transfer.coro(bot)
+
+        channel.send.assert_awaited_once()
+        self.assertEqual(event["notified_channel_ids"], [111])
+        bot.persist_state.assert_called_once_with()
+
     async def test_one_translated_embed_is_sent_to_every_registered_channel(self) -> None:
         first_channel = SimpleNamespace(
             id=111, send=AsyncMock(return_value=SimpleNamespace(id=1001))
@@ -362,3 +620,405 @@ class HexaCostTests(unittest.TestCase):
     def test_target_level_must_be_higher_than_current_level(self) -> None:
         with self.assertRaises(ValueError):
             calculate_hexa_cost("강화 코어", 20, 20)
+
+
+class ExtremeGrowthPotionTests(unittest.TestCase):
+    def test_probability_table_covers_every_level_and_each_row_totals_100(self) -> None:
+        self.assertEqual(set(EXTREME_GROWTH_POTION_RATES), set(range(130, 200)))
+        for rates in EXTREME_GROWTH_POTION_RATES.values():
+            self.assertEqual(len(rates), 10)
+            self.assertEqual(sum(rates), 100)
+
+    def test_known_probability_rows_match_supplied_images(self) -> None:
+        self.assertEqual(
+            EXTREME_GROWTH_POTION_RATES[130],
+            (0, 0, 0, 0, 0, 0, 0, 5, 5, 90),
+        )
+        self.assertEqual(
+            EXTREME_GROWTH_POTION_RATES[131],
+            (0, 0, 0, 0, 0, 0, 5, 5, 10, 80),
+        )
+        self.assertEqual(
+            EXTREME_GROWTH_POTION_RATES[134],
+            (0, 0, 0, 5, 5, 5, 5, 10, 15, 55),
+        )
+        self.assertEqual(
+            EXTREME_GROWTH_POTION_RATES[135],
+            (0, 0, 0, 5, 5, 5, 5, 15, 20, 45),
+        )
+        self.assertEqual(
+            EXTREME_GROWTH_POTION_RATES[137],
+            (0, 0, 5, 5, 5, 5, 10, 15, 20, 35),
+        )
+        self.assertEqual(
+            EXTREME_GROWTH_POTION_RATES[139],
+            (0, 5, 5, 5, 5, 10, 10, 15, 20, 25),
+        )
+        self.assertEqual(
+            EXTREME_GROWTH_POTION_RATES[140],
+            (5, 5, 5, 5, 5, 5, 5, 20, 20, 25),
+        )
+        self.assertEqual(
+            EXTREME_GROWTH_POTION_RATES[141],
+            (5, 5, 5, 5, 5, 5, 10, 20, 20, 20),
+        )
+        self.assertEqual(
+            EXTREME_GROWTH_POTION_RATES[199],
+            (100, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        )
+
+    def test_simulation_stops_using_potions_at_level_200(self) -> None:
+        with patch("maple_calculators.random.choices", return_value=[10]) as choices:
+            self.assertEqual(simulate_extreme_growth_potions(195, 10), (200, [10]))
+
+        choices.assert_called_once()
+
+    def test_start_level_is_limited_to_130_through_199(self) -> None:
+        for invalid_level in (129, 200):
+            with self.assertRaises(ValueError):
+                simulate_extreme_growth_potions(invalid_level, 1)
+
+    def test_count_must_be_positive(self) -> None:
+        with self.assertRaises(ValueError):
+            simulate_extreme_growth_potions(130, 0)
+
+    def test_command_is_named_extreme_growth_potion(self) -> None:
+        self.assertEqual(extreme_growth_potion_command.name, "익성비")
+
+
+class GrowthPotionTests(unittest.TestCase):
+    def test_level_exp_table_covers_level_200_through_299(self) -> None:
+        self.assertEqual(len(LEVEL_EXP), 100)
+        self.assertEqual(LEVEL_EXP[0], 2_207_026_470)
+        self.assertEqual(LEVEL_EXP[-1], 1_737_759_854_037_637)
+
+    def test_existing_exp_carries_over_after_level_up(self) -> None:
+        self.assertEqual(
+            calculate_growth_potions("극성비 · 극한 성장의 비약", 200, 50, 1),
+            (201, 1_103_513_235, 2_207_026_470, 1),
+        )
+
+    def test_potion_above_its_range_gives_fixed_exp(self) -> None:
+        self.assertEqual(
+            calculate_growth_potions("극성비 · 극한 성장의 비약", 250, 0, 1),
+            (250, 156_334_978_019, 156_334_978_019, 1),
+        )
+
+    def test_extreme_potion_uses_its_fixed_exp_at_level_200(self) -> None:
+        self.assertEqual(
+            calculate_growth_potions("익성비 · 익스트림 성장의 비약", 200, 0, 1),
+            (200, 571_115_568, 571_115_568, 1),
+        )
+
+    def test_hyper_burning_stops_exactly_at_level_260(self) -> None:
+        self.assertEqual(
+            calculate_growth_potions(
+                "초성비 · 초월 성장의 비약", 257, 0, 1, hyper_burning=True
+            ),
+            (260, 0, LEVEL_EXP[57], 1),
+        )
+
+    def test_beyond_burning_stops_exactly_at_level_270(self) -> None:
+        self.assertEqual(
+            calculate_growth_potions(
+                "초성비 · 초월 성장의 비약", 269, 0, 1, beyond_burning=True
+            ),
+            (270, 0, LEVEL_EXP[69], 1),
+        )
+
+    def test_beyond_burning_does_not_apply_below_level_260(self) -> None:
+        self.assertEqual(
+            calculate_growth_potions(
+                "초성비 · 초월 성장의 비약", 259, 0, 1, beyond_burning=True
+            ),
+            (260, 0, LEVEL_EXP[59], 1),
+        )
+
+    def test_start_level_is_limited_to_200_through_299(self) -> None:
+        for invalid_level in (199, 300):
+            with self.assertRaises(ValueError):
+                calculate_growth_potions(
+                    "초성비 · 초월 성장의 비약", invalid_level, 0, 1
+                )
+
+    def test_remaining_potions_are_not_used_after_level_300(self) -> None:
+        result = calculate_growth_potions(
+            "전성비 · 전설 성장의 비약", 299, 99.999, 100
+        )
+
+        self.assertEqual(result[0], 300)
+        self.assertEqual(result[3], 1)
+
+    def test_command_offers_only_requested_potions(self) -> None:
+        self.assertEqual(
+            {choice.value for choice in growth_potion_command.parameters[0].choices},
+            set(GROWTH_POTIONS),
+        )
+
+    def test_command_is_named_growth_potion(self) -> None:
+        self.assertEqual(growth_potion_command.name, "성장의비약")
+
+
+class ExpCouponTests(unittest.TestCase):
+    def test_coupon_tables_match_supplied_html_boundaries(self) -> None:
+        normal_start, normal_exp = EXP_COUPONS["EXP 교환권"]
+        advanced_start, advanced_exp = EXP_COUPONS["상급 EXP 교환권"]
+
+        self.assertEqual((normal_start, len(normal_exp)), (200, 61))
+        self.assertEqual((normal_exp[0], normal_exp[-1]), (7_404_000, 76_572_000))
+        self.assertEqual((advanced_start, len(advanced_exp)), (260, 40))
+        self.assertEqual(
+            (advanced_exp[0], advanced_exp[-1]),
+            (388_229_000, 1_078_497_000),
+        )
+
+    def test_normal_coupon_levels_up_with_expected_remainder(self) -> None:
+        self.assertEqual(
+            calculate_exp_coupons("EXP 교환권", 200, 0, 299),
+            (201, 6_769_530, 2_213_796_000, 299),
+        )
+
+    def test_normal_coupon_stops_after_level_260(self) -> None:
+        result = calculate_exp_coupons("EXP 교환권", 260, 0, 100_000_000)
+
+        self.assertEqual(result[0], 261)
+        self.assertEqual(result[3], 22_619)
+
+    def test_advanced_coupon_can_reach_level_300(self) -> None:
+        result = calculate_exp_coupons("상급 EXP 교환권", 299, 0, 2_000_000)
+
+        self.assertEqual(result[0], 300)
+        self.assertEqual(result[3], 1_611_280)
+
+    def test_hyper_burning_stops_exactly_at_level_260(self) -> None:
+        coupon_exp = EXP_COUPONS["EXP 교환권"][1][59]
+        required_count = (LEVEL_EXP[59] + coupon_exp - 1) // coupon_exp
+        result = calculate_exp_coupons(
+            "EXP 교환권", 259, 0, required_count, "하이퍼버닝"
+        )
+
+        self.assertEqual(result[0], 260)
+
+    def test_beyond_burning_stops_exactly_at_level_270(self) -> None:
+        required_count = (
+            LEVEL_EXP[69] + EXP_COUPONS["상급 EXP 교환권"][1][9] - 1
+        ) // EXP_COUPONS["상급 EXP 교환권"][1][9]
+        result = calculate_exp_coupons(
+            "상급 EXP 교환권", 269, 0, required_count, "비욘드버닝"
+        )
+
+        self.assertEqual(result[0], 270)
+
+    def test_coupon_rejects_level_outside_its_table(self) -> None:
+        for coupon_name, level in (("EXP 교환권", 261), ("상급 EXP 교환권", 259)):
+            with self.assertRaises(ValueError):
+                calculate_exp_coupons(coupon_name, level, 0, 1)
+
+    def test_command_offers_both_coupon_types(self) -> None:
+        self.assertEqual(
+            {choice.value for choice in exp_coupon_command.parameters[0].choices},
+            set(EXP_COUPONS),
+        )
+
+    def test_command_offers_requested_burning_types(self) -> None:
+        self.assertEqual(
+            {choice.value for choice in exp_coupon_command.parameters[3].choices},
+            set(EXP_COUPON_BURNING_OPTIONS),
+        )
+
+
+class EpicDungeonTests(unittest.TestCase):
+    def test_supplied_tables_cover_each_minimum_level_through_294(self) -> None:
+        expected = {
+            "하이마운틴": (260, 35, 260_900_000_000, 759_600_000_000),
+            "앵글러컴퍼니": (270, 25, 554_700_000_000, 1_139_400_000_000),
+            "악몽선경": (280, 15, 1_039_200_000_000, 1_519_200_000_000),
+        }
+        for dungeon_name, (minimum, length, first, last) in expected.items():
+            dungeon = EPIC_DUNGEONS[dungeon_name]
+            self.assertEqual(dungeon["minimum_level"], minimum)
+            self.assertEqual(len(dungeon["experience"]), length)
+            self.assertEqual(
+                (dungeon["experience"][0], dungeon["experience"][-1]),
+                (first, last),
+            )
+
+    def test_bonus_is_applied_to_selected_dungeon_experience(self) -> None:
+        self.assertEqual(
+            calculate_epic_dungeon("하이마운틴", 260, 0, 1.5),
+            (260, 391_350_000_000, 260_900_000_000, 391_350_000_000),
+        )
+
+    def test_existing_experience_carries_over_after_level_up(self) -> None:
+        current_exp = int(LEVEL_EXP[60] * 90 / 100)
+        gained_exp = 260_900_000_000 * 2.5
+        self.assertEqual(
+            calculate_epic_dungeon("하이마운틴", 260, 90, 2.5),
+            (
+                261,
+                int(current_exp + gained_exp - LEVEL_EXP[60]),
+                260_900_000_000,
+                int(gained_exp),
+            ),
+        )
+
+    def test_dungeon_rejects_character_below_entry_level(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Lv.270"):
+            calculate_epic_dungeon("앵글러컴퍼니", 269, 0, 1.5)
+        with self.assertRaisesRegex(ValueError, "Lv.280"):
+            calculate_epic_dungeon("악몽선경", 279, 0, 1.5)
+
+    def test_level_294_and_above_use_last_table_value(self) -> None:
+        for level in (294, 299):
+            self.assertEqual(
+                calculate_epic_dungeon("악몽선경", level, 0, 2.0)[2],
+                1_519_200_000_000,
+            )
+
+    def test_command_offers_requested_dungeons_and_bonuses(self) -> None:
+        self.assertEqual(
+            {choice.value for choice in epic_dungeon_command.parameters[0].choices},
+            set(EPIC_DUNGEONS),
+        )
+        self.assertEqual(
+            {choice.value for choice in epic_dungeon_command.parameters[3].choices},
+            set(EPIC_DUNGEON_BONUSES),
+        )
+
+
+class SymbolCalculatorTests(unittest.TestCase):
+    def test_growth_and_meso_tables_match_supplied_totals(self) -> None:
+        self.assertEqual((sum(ARCANE_SYMBOL_GROWTH), sum(AUTHENTIC_SYMBOL_GROWTH)), (2679, 4565))
+        expected_meso_totals = {
+            "소멸의 여로": 252_470_000,
+            "츄츄 아일랜드": 306_050_000,
+            "레헬른": 359_630_000,
+            "아르카나": 413_210_000,
+            "모라스": 466_790_000,
+            "에스페라": 520_370_000,
+            "세르니움": 3_930_100_000,
+            "호텔 아르크스": 4_751_600_000,
+            "오디움": 5_573_300_000,
+            "도원경": 6_395_000_000,
+            "아르테리아": 7_216_900_000,
+            "카르시온": 8_038_600_000,
+            "탈라하트": 16_072_800_000,
+            "기어드락": 20_181_300_000,
+        }
+        self.assertEqual(
+            {
+                region: sum(info["meso_costs"])
+                for region, info in SYMBOL_REGIONS.items()
+            },
+            expected_meso_totals,
+        )
+
+    def test_arcane_calculation_applies_event_then_normal_daily_reward(self) -> None:
+        self.assertEqual(
+            calculate_symbol(
+                "아르카나", 1, 0, 20, 0, True, date(2026, 8, 10)
+            ),
+            (2679, 413_210_000, 20, 24, 128, date(2026, 12, 15)),
+        )
+
+    def test_authentic_potion_bonus_is_included_before_twenty_percent(self) -> None:
+        self.assertEqual(
+            calculate_symbol(
+                "세르니움", 1, 0, 11, 6, True, date(2026, 8, 10)
+            ),
+            (4565, 3_930_100_000, 10, 19, 430, date(2027, 10, 13)),
+        )
+
+    def test_current_growth_reduces_only_required_symbol_count(self) -> None:
+        self.assertEqual(
+            calculate_symbol(
+                "소멸의 여로", 1, 10, 2, 0, True, date(2026, 9, 9)
+            ),
+            (2, 970_000, 20, 24, 1, date(2026, 9, 9)),
+        )
+
+    def test_region_determines_symbol_type(self) -> None:
+        self.assertEqual(
+            calculate_symbol(
+                "세르니움", 1, 0, 2, 0, True, date(2026, 8, 10)
+            )[:4],
+            (29, 36_500_000, 10, 12),
+        )
+
+    def test_potion_bonus_applies_without_elanos_twenty_percent(self) -> None:
+        self.assertEqual(
+            calculate_symbol(
+                "세르니움", 1, 0, 2, 6, False, date(2026, 8, 10)
+            ),
+            (29, 36_500_000, 10, 16, 2, date(2026, 8, 11)),
+        )
+
+    def test_command_offers_regions_potion_levels_and_elanos_options(self) -> None:
+        self.assertEqual(symbol_calculator_command.name, "심볼계산기")
+        self.assertEqual(
+            {choice.value for choice in symbol_calculator_command.parameters[0].choices},
+            set(SYMBOL_REGIONS),
+        )
+        self.assertEqual(
+            {choice.value for choice in symbol_calculator_command.parameters[4].choices},
+            set(range(7)),
+        )
+        self.assertEqual(
+            {choice.value for choice in symbol_calculator_command.parameters[5].choices},
+            {"적용", "미적용"},
+        )
+
+
+class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_command_infers_type_and_shows_current_growth(self) -> None:
+        region = next(
+            choice
+            for choice in symbol_calculator_command.parameters[0].choices
+            if choice.value == "소멸의 여로"
+        )
+        potion = symbol_calculator_command.parameters[4].choices[0]
+        elanos = symbol_calculator_command.parameters[5].choices[0]
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await symbol_calculator_command.callback(
+            interaction, region, 1, 10, 2, potion, elanos
+        )
+
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertIn("아케인 심볼 · 소멸의 여로", embed.description)
+        self.assertIn("현재 성장치**　10 / 12", embed.description)
+        self.assertIn("엘라노스**　적용", embed.description)
+
+
+class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_help_is_private_and_lists_admin_commands(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await help_command.callback(interaction)
+
+        arguments = interaction.response.send_message.await_args
+        self.assertTrue(arguments.kwargs["ephemeral"])
+        field_text = "\n".join(field.value for field in arguments.kwargs["embed"].fields)
+        self.assertIn("/심볼계산기", field_text)
+        self.assertIn("/공지알림", field_text)
+
+
+class ChannelRecommendationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_command_uses_display_name_and_channel_between_1_and_40(self) -> None:
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(display_name="류*게이"),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+        # 무작위 결과를 27로 고정해 닉네임과 추천 채널이 메시지에 들어가는지 확인합니다.
+        with patch("maple_bot.random.randint", return_value=27) as randint:
+            await channel_recommend_command.callback(interaction)
+
+        randint.assert_called_once_with(1, 40)
+        message = interaction.response.send_message.await_args.args[0]
+        self.assertIn("류\\*게이", message)
+        self.assertIn("27채널", message)
