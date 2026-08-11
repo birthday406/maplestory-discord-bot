@@ -79,6 +79,19 @@ HEXA_EMOJI = "<:HEXA:1534436226751529031>"
 SOL_ERDA_EMOJI = "<:SolErda:1534436216139944108>"
 FRAGMENT_EMOJI = "<:Fragment:1534436205796790324>"
 ANIMATED_TWINKLE_EMOJI = "<a:Animated_Twinkle:1534436193276792873>"
+EGP_EMOJI = "<:EGP:1536685490789679104>"
+LADY_BLAIR_EMOJI = "<:ladyblair:1536691685017518110>"
+BONUS_CUBE_EMOJI = "<:BC:1536697424251330630>"
+PSSB_EMOJI = "<:SSB:1536697384011178015>"
+EXP_COUPON_EMOJIS = {
+    "EXP 교환권": "<:EV:1536691867293323274>",
+    "상급 EXP 교환권": "<:AEV:1536691857692565554>",
+}
+EPIC_DUNGEON_EMOJIS = {
+    "하이마운틴": "<:HMountain:1536686575558205540>",
+    "앵글러컴퍼니": "<:Angler:1536686640045756446>",
+    "악몽선경": "<:Nightmare:1536686565210722324>",
+}
 
 # 써니 선데이에서 자주 반복되는 영문은 사용자가 지정한 표현으로 고정 번역합니다.
 # 값이 빈 문자열인 주문의 흔적 항목은 Discord 안내에서 제외합니다.
@@ -100,6 +113,15 @@ SUNNY_SUNDAY_TRANSLATIONS = (
     ("chance to register a new monster", "몬스터 컬렉션 신규 몬스터 등록 확률 추가 100%"),
     ("mysterious monsterbloom", "의문의 모몽 (x3): 교환불가, 영구"),
     ("off spell trace enhancements", ""),
+)
+
+# Google 번역 결과와 기존 state.json에 남은 표현을 게임 내 공식 명칭으로 고칩니다.
+SUNNY_SUNDAY_LOCALIZATIONS = (
+    ("Spiegelette", "슈피겔라"),
+    ("슈피겔레트", "슈피겔라"),
+    ("스피겔레트", "슈피겔라"),
+    ("Haste Fever Time Booster", "헤이스트 피버 타임 부스터"),
+    ("가속 열풍 시간 부스터", "헤이스트 피버 타임 부스터"),
 )
 
 MIRACLE_TIME_EQUIPMENT_TRANSLATIONS = {
@@ -406,6 +428,13 @@ def known_sunny_sunday_translation(perk: str) -> str | None:
     return None
 
 
+def localize_sunny_sunday_text(text: str) -> str:
+    """번역기 표현을 메이플스토리에서 사용하는 명칭으로 바꿉니다."""
+    for translated_name, localized_name in SUNNY_SUNDAY_LOCALIZATIONS:
+        text = text.replace(translated_name, localized_name)
+    return text
+
+
 def sunny_sunday_timestamp(date: str) -> int:
     # 공식 표의 날짜는 UTC 자정 기준이므로 저장과 자동 알림에 사용할 Unix 시간으로 바꿉니다.
     moment = datetime.strptime(date, "%B %d, %Y").replace(tzinfo=timezone.utc)
@@ -464,7 +493,11 @@ def build_sunny_sunday_embed(
     )
     embed.set_author(name="MapleStory | SUNNY SUNDAY")
     for entry in entries:
-        embed.add_field(name=entry["name"], value=entry["value"], inline=False)
+        embed.add_field(
+            name=entry["name"],
+            value=localize_sunny_sunday_text(entry["value"]),
+            inline=False,
+        )
     embed.set_image(url=f"attachment://{SUNNY_SUNDAY_IMAGE_PATH.name}")
     return embed
 
@@ -474,7 +507,7 @@ def build_cash_shop_transfer_embed(schedule: dict) -> discord.Embed:
     start = event["start_timestamp"]
     end = event["end_timestamp"]
     embed = discord.Embed(
-        title="💸 캐시 보관함 이동 이벤트",
+        title=f"{LADY_BLAIR_EMOJI} 캐시 보관함 이동 이벤트",
         url=schedule["url"],
         description=(
             f"**시작**　<t:{start}:F> (<t:{start}:R>)\n"
@@ -491,7 +524,9 @@ def build_cash_shop_transfer_embed(schedule: dict) -> discord.Embed:
 
 
 def build_miracle_time_embed(
-    schedule: dict, entries: list[dict], title: str = "✨ 미라클 타임 일정"
+    schedule: dict,
+    entries: list[dict],
+    title: str = f"{BONUS_CUBE_EMOJI} 미라클 타임 일정",
 ) -> discord.Embed:
     embed = discord.Embed(
         title=title,
@@ -590,7 +625,7 @@ async def extreme_growth_potion_command(
         count_text += f" (Lv.200 도달로 {len(level_gains)}개 사용)"
 
     embed = discord.Embed(
-        title="🌱 익스트림 성장의 비약 시뮬레이터",
+        title=f"{EGP_EMOJI} 익스트림 성장의 비약 시뮬레이터",
         description=(
             f"**사용 전**　Lv.{current_level}\n"
             f"**입력 개수**　{count_text}\n\n"
@@ -598,9 +633,6 @@ async def extreme_growth_potion_command(
             + f"\n\n◆ **최종 결과**　Lv.{result_level}"
         ),
         color=0x57F287,
-    )
-    embed.set_footer(
-        text="Lv.130~199 확률은 제공받은 EGP 엑셀 표를 기준으로 계산합니다."
     )
     await interaction.response.send_message(embed=embed)
 
@@ -628,24 +660,33 @@ async def extreme_growth_potion_command(
     potion=[
         app_commands.Choice(name=potion_name, value=potion_name)
         for potion_name in GROWTH_POTIONS
-    ]
+    ],
+    hyper_burning=[
+        app_commands.Choice(name=name, value=name) for name in ("적용", "미적용")
+    ],
+    beyond_burning=[
+        app_commands.Choice(name=name, value=name) for name in ("적용", "미적용")
+    ],
 )
 async def growth_potion_command(
     interaction: discord.Interaction,
     potion: app_commands.Choice[str],
     current_level: app_commands.Range[int, 200, 299],
     current_exp_percent: app_commands.Range[float, 0.0, 99.999],
-    hyper_burning: bool,
-    beyond_burning: bool,
+    hyper_burning: app_commands.Choice[str],
+    beyond_burning: app_commands.Choice[str],
     count: app_commands.Range[int, 1, 100],
 ) -> None:
+    # Discord에는 한글 선택지를 보여주고 계산 함수에는 기존 bool 값으로 전달합니다.
+    hyper_burning_enabled = hyper_burning.value == "적용"
+    beyond_burning_enabled = beyond_burning.value == "적용"
     result_level, result_exp, gained_exp, used_count = calculate_growth_potions(
         potion.value,
         current_level,
         current_exp_percent,
         count,
-        hyper_burning,
-        beyond_burning,
+        hyper_burning_enabled,
+        beyond_burning_enabled,
     )
     result_text = "Lv.300 (MAX)"
     if result_level < 300:
@@ -661,8 +702,8 @@ async def growth_potion_command(
         description=(
             f"**비약**　{potion.name}\n"
             f"**사용 전**　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
-            f"**하이퍼 버닝**　{'ON' if hyper_burning else 'OFF'}\n"
-            f"**비욘드 버닝**　{'ON' if beyond_burning else 'OFF'}\n"
+            f"**하이퍼 버닝**　{hyper_burning.name}\n"
+            f"**비욘드 버닝**　{beyond_burning.name}\n"
             f"**사용 개수**　{count_text}\n\n"
             f"◆ **사용 후**　{result_text}\n"
             f"◆ **지급 경험치**　{gained_exp:,}"
@@ -687,7 +728,7 @@ async def growth_potion_command(
     coupon="EXP 교환권 종류",
     current_level="시작 캐릭터 레벨 (200~299)",
     current_exp_percent="현재 경험치 퍼센트 (0 이상 100 미만)",
-    burning="버닝 종류 선택",
+    burning="생략하면 마지막 선택 사용 (첫 사용은 X)",
     count="사용할 교환권 개수 (1~1억)",
 )
 @app_commands.choices(
@@ -705,12 +746,20 @@ async def exp_coupon_command(
     coupon: app_commands.Choice[str],
     current_level: app_commands.Range[int, 200, 299],
     current_exp_percent: app_commands.Range[float, 0.0, 99.999],
-    burning: app_commands.Choice[str],
     count: app_commands.Range[int, 1, 100_000_000],
+    burning: app_commands.Choice[str] | None = None,
 ) -> None:
+    # 버닝을 생략하면 이 사용자가 마지막으로 고른 값을 쓰고, 첫 사용은 X로 계산합니다.
+    user_id = str(interaction.user.id)
+    preferences = interaction.client.exp_coupon_burning_preferences
+    burning_name = preferences.get(user_id, "X") if burning is None else burning.value
+    if burning is not None and preferences.get(user_id) != burning_name:
+        preferences[user_id] = burning_name
+        interaction.client.persist_state()
+
     try:
         result_level, result_exp, gained_exp, used_count = calculate_exp_coupons(
-            coupon.value, current_level, current_exp_percent, count, burning.value
+            coupon.value, current_level, current_exp_percent, count, burning_name
         )
     except ValueError as error:
         await interaction.response.send_message(str(error), ephemeral=True)
@@ -727,11 +776,11 @@ async def exp_coupon_command(
         count_text += f" ({stop_reason}로 {used_count:,}개 적용)"
 
     embed = discord.Embed(
-        title="🎟️ EXP 교환권 계산기",
+        title=f"{EXP_COUPON_EMOJIS[coupon.value]} {coupon.name} 계산기",
         description=(
             f"**교환권**　{coupon.name}\n"
             f"**사용 전**　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
-            f"**버닝**　{burning.name}\n"
+            f"**버닝**　{burning_name}\n"
             f"**입력 개수**　{count_text}\n\n"
             f"◆ **사용 후**　{result_text}\n"
             f"◆ **지급 경험치**　{gained_exp:,}"
@@ -792,7 +841,10 @@ async def epic_dungeon_command(
 
     dungeon_info = EPIC_DUNGEONS[dungeon.value]
     embed = discord.Embed(
-        title="⚔️ 에픽 던전 경험치 계산기",
+        title=(
+            f"{EPIC_DUNGEON_EMOJIS[dungeon.value]} "
+            "에픽 던전 경험치 계산기"
+        ),
         description=(
             f"**던전**　{dungeon.name}\n"
             f"**사용 전**　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
@@ -827,8 +879,8 @@ async def epic_dungeon_command(
     current_level="현재 심볼 레벨",
     current_growth="현재 심볼에 누적된 성장치",
     target_level="도달하려는 심볼 레벨",
-    potion_level="일일 퀘스트 보약 레벨 (없으면 0)",
-    elanos="엘라노스 20% 추가 지급 적용 여부",
+    potion_level="생략하면 마지막 선택 사용 (첫 사용은 없음)",
+    elanos="생략하면 마지막 선택 사용 (첫 사용은 미적용)",
 )
 @app_commands.choices(
     region=[
@@ -848,9 +900,31 @@ async def symbol_calculator_command(
     current_level: app_commands.Range[int, 1, 20],
     current_growth: app_commands.Range[int, 0, 10_000],
     target_level: app_commands.Range[int, 2, 20],
-    potion_level: app_commands.Choice[int],
-    elanos: app_commands.Choice[str],
+    potion_level: app_commands.Choice[int] | None = None,
+    elanos: app_commands.Choice[str] | None = None,
 ) -> None:
+    # 생략한 항목은 이 사용자의 마지막 선택을 쓰고, 첫 사용은 보약 없음·엘라노스 미적용입니다.
+    user_id = str(interaction.user.id)
+    preferences = interaction.client.symbol_calculator_preferences
+    saved_preferences = preferences.get(user_id, {})
+    potion_level_value = (
+        saved_preferences.get("potion_level", 0)
+        if potion_level is None
+        else potion_level.value
+    )
+    elanos_name = (
+        saved_preferences.get("elanos", "미적용") if elanos is None else elanos.value
+    )
+    selected_preferences = {
+        "potion_level": potion_level_value,
+        "elanos": elanos_name,
+    }
+    if (potion_level is not None or elanos is not None) and (
+        saved_preferences != selected_preferences
+    ):
+        preferences[user_id] = selected_preferences
+        interaction.client.persist_state()
+
     start_date = datetime.now(timezone.utc).date()
     symbol_type = SYMBOL_REGIONS[region.value]["symbol_type"]
     try:
@@ -866,8 +940,8 @@ async def symbol_calculator_command(
             current_level,
             current_growth,
             target_level,
-            potion_level.value,
-            elanos.value == "적용",
+            potion_level_value,
+            elanos_name == "적용",
             start_date,
         )
     except ValueError as error:
@@ -875,7 +949,10 @@ async def symbol_calculator_command(
         return
 
     symbol = SYMBOL_TYPES[symbol_type]
-    potion_bonus = symbol["potion_bonus"][potion_level.value]
+    potion_bonus = symbol["potion_bonus"][potion_level_value]
+    potion_level_name = (
+        "없음" if potion_level_value == 0 else f"{potion_level_value}레벨"
+    )
     current_level_requirement = symbol["growth"][current_level - 1]
     event_end_timestamp = int(ELANOS_SYMBOL_BONUS_END.timestamp())
     completion_timestamp = int(
@@ -927,8 +1004,8 @@ async def symbol_calculator_command(
             f"**심볼**　{symbol_type} · {region.name}\n"
             f"**성장 구간**　Lv.{current_level} → Lv.{target_level}\n"
             f"**현재 성장치**　{current_growth:,} / {current_level_requirement:,}\n"
-            f"**보약**　{potion_level.name} (+{potion_bonus}개)\n\n"
-            f"**엘라노스**　{elanos.name}\n\n"
+            f"**보약**　{potion_level_name} (+{potion_bonus}개)\n\n"
+            f"**엘라노스**　{elanos_name}\n\n"
             f"◆ **추가 필요 심볼**　{required_symbols:,}개\n"
             f"◆ **강화 비용**　{meso_cost:,} 메소\n"
             f"◆ **일일퀘만 수행**　{completion_text}"
@@ -946,13 +1023,13 @@ async def symbol_calculator_command(
     await interaction.response.send_message(embed=embed)
 
 
-@app_commands.command(name="도움말", description="봇에서 사용할 수 있는 명령어를 안내합니다.")
+@app_commands.command(name="명령어", description="일반 사용자가 쓸 수 있는 명령어를 안내합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def help_command(interaction: discord.Interaction) -> None:
-    """현재 제공하는 명령어를 기능별로 나누어 한 화면에 보여줍니다."""
+    """일반 사용자가 쓸 수 있는 명령어를 기능별로 보여줍니다."""
     embed = discord.Embed(
-        title="📚 메이플스토리 봇 도움말",
+        title="📚 메이플스토리 봇 명령어",
         description="명령어를 입력하면 Discord가 필요한 선택 항목을 안내합니다.",
         color=0x5865F2,
     )
@@ -977,15 +1054,6 @@ async def help_command(interaction: discord.Interaction) -> None:
         ),
         inline=False,
     )
-    embed.add_field(
-        name="관리자 전용 알림 설정",
-        value=(
-            "`/공지알림` `/썬데이알림` `/썬데이목록알림`\n"
-            "`/캐시이동알림` `/미라클큐브알림` `/큐브세일알림`"
-        ),
-        inline=False,
-    )
-    embed.set_footer(text="알림 설정 명령어는 Discord 서버 관리자만 사용할 수 있습니다.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -1054,7 +1122,7 @@ async def pssb_command(
         for index, (name, rate) in enumerate(results, start=1)
     ]
     embed = discord.Embed(
-        title="🎁 Premium Surprise Style Box",
+        title=f"{PSSB_EMOJI} Premium Surprise Style Box",
         url=PSSB_RATES_PAGE_URL,
         description="\n".join(result_lines),
         color=0xFF69B4,
@@ -1063,7 +1131,7 @@ async def pssb_command(
     await interaction.followup.send(embed=embed)
 
 
-@app_commands.command(name="썬데이", description="이번 주 Sunny Sunday 일정을 보여줍니다.")
+@app_commands.command(name="썬데이", description="이번 주 썬데이 메이플 일정을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def sunny_sunday_command(interaction: discord.Interaction) -> None:
@@ -1071,26 +1139,26 @@ async def sunny_sunday_command(interaction: discord.Interaction) -> None:
     schedule = getattr(interaction.client, "sunny_sunday", None)
     if schedule is None:
         await interaction.response.send_message(
-            "저장된 Sunny Sunday 일정이 없습니다.", ephemeral=True
+            "저장된 썬데이 메이플 일정이 없습니다.", ephemeral=True
         )
         return
 
     entry = current_sunny_sunday_entry(schedule["entries"])
     if entry is None:
         await interaction.response.send_message(
-            "남아 있는 Sunny Sunday 일정이 없습니다.", ephemeral=True
+            "남아 있는 썬데이 메이플 일정이 없습니다.", ephemeral=True
         )
         return
 
     embed = build_sunny_sunday_embed(
-        f"☀️ 이번 주 Sunny Sunday ☀️", schedule["url"], [entry]
+        "☀️ 이번 주 썬데이 메이플 ☀️", schedule["url"], [entry]
     )
     await interaction.response.send_message(
         embed=embed, file=discord.File(SUNNY_SUNDAY_IMAGE_PATH)
     )
 
 
-@app_commands.command(name="썬데이목록", description="저장된 Sunny Sunday 전체 일정을 보여줍니다.")
+@app_commands.command(name="썬데이목록", description="남아 있는 썬데이 메이플 일정을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def sunny_sunday_list_command(interaction: discord.Interaction) -> None:
@@ -1098,12 +1166,18 @@ async def sunny_sunday_list_command(interaction: discord.Interaction) -> None:
     schedule = getattr(interaction.client, "sunny_sunday", None)
     if schedule is None:
         await interaction.response.send_message(
-            "저장된 Sunny Sunday 일정이 없습니다.", ephemeral=True
+            "저장된 썬데이 메이플 일정이 없습니다.", ephemeral=True
+        )
+        return
+    visible_entries = visible_sunny_sunday_entries(schedule["entries"])
+    if not visible_entries:
+        await interaction.response.send_message(
+            "남아 있는 썬데이 메이플 일정이 없습니다.", ephemeral=True
         )
         return
     await interaction.response.send_message(
         embed=build_sunny_sunday_embed(
-            f"☀️ {schedule['title']} ☀️", schedule["url"], schedule["entries"]
+            f"☀️ {schedule['title']} ☀️", schedule["url"], visible_entries
         ),
         file=discord.File(SUNNY_SUNDAY_IMAGE_PATH),
     )
@@ -1131,10 +1205,7 @@ async def hot_week_command(interaction: discord.Interaction) -> None:
     # 실제 패치노트 수집을 연결하기 전까지 가짜 날짜나 보상을 안내하지 않습니다.
     embed = discord.Embed(
         title="🔥 핫위크",
-        description=(
-            "**테스트용 명령어입니다.**\n"
-            "현재 저장된 핫위크 일정이 없습니다. 패치노트 수집은 다음 단계에서 연결됩니다."
-        ),
+        description="현재 진행 중인 핫위크 이벤트가 없습니다.",
         color=0xE67E22,
     )
     embed.set_author(name="MapleStory | HOT WEEK")
@@ -1148,10 +1219,7 @@ async def cube_sale_command(interaction: discord.Interaction) -> None:
     # 실제 일정 수집을 연결하기 전까지 가짜 날짜나 할인율을 안내하지 않습니다.
     embed = discord.Embed(
         title="🧊 큐브세일",
-        description=(
-            "**테스트용 명령어입니다.**\n"
-            "현재 저장된 큐브세일 일정이 없습니다. 패치노트 수집은 다음 단계에서 연결됩니다."
-        ),
+        description="현재 진행 중인 큐브세일 이벤트가 없습니다.",
         color=0x5DADE2,
     )
     embed.set_author(name="MapleStory | CUBE SALE")
@@ -1308,11 +1376,17 @@ async def cube_sale_alert_command(
 
 
 def load_state() -> tuple[
-    set[int] | None, set[str], dict | None, dict | None, dict | None
+    set[int] | None,
+    set[str],
+    dict | None,
+    dict | None,
+    dict | None,
+    dict[str, str],
+    dict[str, dict],
 ]:
     # 이전 실행에서 이미 알린 공지 번호를 불러와 같은 글을 다시 보내지 않습니다.
     if not STATE_PATH.exists():
-        return None, set(), None, None, None
+        return None, set(), None, None, None, {}, {}
     state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     stored_sent_ids = state.get("sent_ids")
     return (
@@ -1321,6 +1395,8 @@ def load_state() -> tuple[
         state.get("sunny_sunday"),
         state.get("patch_events"),
         state.get("alert_channels"),
+        state.get("exp_coupon_burning_preferences", {}),
+        state.get("symbol_calculator_preferences", {}),
     )
 
 
@@ -1330,6 +1406,8 @@ def save_state(
     sunny_sunday: dict | None,
     alert_channels: dict[str, set[int]],
     patch_events: dict | None = None,
+    exp_coupon_burning_preferences: dict[str, str] | None = None,
+    symbol_calculator_preferences: dict[str, dict] | None = None,
 ) -> None:
     # 봇을 껐다 켜도 중복 알림을 막을 수 있도록 공지 번호를 파일에 저장합니다.
     STATE_PATH.write_text(
@@ -1343,6 +1421,10 @@ def save_state(
                     alert_type: sorted(channel_ids)
                     for alert_type, channel_ids in alert_channels.items()
                 },
+                "exp_coupon_burning_preferences": (
+                    exp_coupon_burning_preferences or {}
+                ),
+                "symbol_calculator_preferences": symbol_calculator_preferences or {},
             },
             indent=2,
         ),
@@ -1363,6 +1445,8 @@ class MapleNewsBot(commands.Bot):
             self.sunny_sunday,
             self.patch_events,
             stored_alert_channels,
+            self.exp_coupon_burning_preferences,
+            self.symbol_calculator_preferences,
         ) = load_state()
         self.alert_channels = normalize_alert_channels(
             stored_alert_channels, channel_id, sunny_channel_id
@@ -1412,6 +1496,8 @@ class MapleNewsBot(commands.Bot):
             self.sunny_sunday,
             self.alert_channels,
             self.patch_events,
+            self.exp_coupon_burning_preferences,
+            self.symbol_calculator_preferences,
         )
 
     async def on_ready(self) -> None:
@@ -1517,7 +1603,7 @@ class MapleNewsBot(commands.Bot):
                 if translation is None:
                     translation = google_translations[perk]
                 if translation:
-                    lines.append(f"- {translation}")
+                    lines.append(f"- {localize_sunny_sunday_text(translation)}")
             stored_entries.append(
                 {
                     "timestamp": sunny_sunday_timestamp(date),
@@ -1928,7 +2014,7 @@ class MapleNewsBot(commands.Bot):
                         embed=build_miracle_time_embed(
                             self.patch_events,
                             [entry],
-                            "✨ 오늘의 미라클 타임 ✨",
+                            f"{BONUS_CUBE_EMOJI} 오늘의 미라클 타임",
                         )
                     )
                 except discord.HTTPException:

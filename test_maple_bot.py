@@ -55,6 +55,7 @@ from maple_bot import (
     html_to_text,
     is_patch_notes,
     known_sunny_sunday_translation,
+    localize_sunny_sunday_text,
     load_state,
     merge_patch_events,
     migrate_sunny_sunday_state,
@@ -70,7 +71,9 @@ from maple_bot import (
     should_send_miracle_time,
     sunny_day_alert_command,
     sunny_list_alert_command,
+    sunny_sunday_command,
     sunny_sunday_entry_action,
+    sunny_sunday_list_command,
     sunny_sunday_timestamp,
     symbol_calculator_command,
     thumbnail_url,
@@ -185,7 +188,15 @@ class NewsFilteringTests(unittest.TestCase):
             maple_bot.STATE_PATH = Path(directory) / "state.json"
             maple_bot.STATE_PATH.write_text(json.dumps({"sent_ids": [1]}), encoding="utf-8")
 
-            sent_ids, categories, sunny_sunday, patch_events, alert_channels = load_state()
+            (
+                sent_ids,
+                categories,
+                sunny_sunday,
+                patch_events,
+                alert_channels,
+                exp_coupon_preferences,
+                symbol_preferences,
+            ) = load_state()
 
         maple_bot.STATE_PATH = original_state_path
         self.assertEqual(sent_ids, {1})
@@ -193,6 +204,8 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertIsNone(sunny_sunday)
         self.assertIsNone(patch_events)
         self.assertIsNone(alert_channels)
+        self.assertEqual(exp_coupon_preferences, {})
+        self.assertEqual(symbol_preferences, {})
 
     def test_legacy_weekly_message_id_is_migrated_to_its_channel(self) -> None:
         schedule = {
@@ -227,15 +240,29 @@ class NewsFilteringTests(unittest.TestCase):
             ALERT_CUBE_SALE: set(),
         }
         patch_events = {"post_id": 42415, "miracle_time": []}
+        exp_coupon_preferences = {"123": "하이퍼버닝"}
+        symbol_preferences = {
+            "123": {"potion_level": 3, "elanos": "적용"}
+        }
         with tempfile.TemporaryDirectory() as directory:
             maple_bot.STATE_PATH = Path(directory) / "state.json"
-            save_state({1}, {"update"}, schedule, alert_channels, patch_events)
+            save_state(
+                {1},
+                {"update"},
+                schedule,
+                alert_channels,
+                patch_events,
+                exp_coupon_preferences,
+                symbol_preferences,
+            )
             (
                 sent_ids,
                 categories,
                 loaded_schedule,
                 loaded_patch_events,
                 loaded_channels,
+                loaded_exp_coupon_preferences,
+                loaded_symbol_preferences,
             ) = load_state()
 
         maple_bot.STATE_PATH = original_state_path
@@ -246,6 +273,8 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(
             normalize_alert_channels(loaded_channels, 999, 999), alert_channels
         )
+        self.assertEqual(loaded_exp_coupon_preferences, exp_coupon_preferences)
+        self.assertEqual(loaded_symbol_preferences, symbol_preferences)
 
     def test_html_to_text_removes_tags_and_script(self) -> None:
         source = "<h1>Patch</h1><script>ignore()</script><p>Notes</p>"
@@ -419,6 +448,14 @@ class NewsFilteringTests(unittest.TestCase):
 
         for source, translation in expected.items():
             self.assertEqual(known_sunny_sunday_translation(source), translation)
+
+    def test_sunny_sunday_names_use_game_localization(self) -> None:
+        self.assertEqual(
+            localize_sunny_sunday_text(
+                "슈피겔레트의 가속 열풍 시간 부스터와 Spiegelette"
+            ),
+            "슈피겔라의 헤이스트 피버 타임 부스터와 슈피겔라",
+        )
 
     def test_sunny_sunday_date_uses_discord_timestamp(self) -> None:
         self.assertEqual(
@@ -690,6 +727,22 @@ class ExtremeGrowthPotionTests(unittest.TestCase):
         self.assertEqual(extreme_growth_potion_command.name, "익성비")
 
 
+class ExtremeGrowthPotionCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_result_uses_custom_egp_emoji_without_table_footer(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        with patch(
+            "maple_bot.simulate_extreme_growth_potions", return_value=(200, [1])
+        ):
+            await extreme_growth_potion_command.callback(interaction, 199, 1)
+
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertIn("<:EGP:1536685490789679104>", embed.title)
+        self.assertNotIn("EGP 엑셀 표", str(embed.to_dict()))
+
+
 class GrowthPotionTests(unittest.TestCase):
     def test_level_exp_table_covers_level_200_through_299(self) -> None:
         self.assertEqual(len(LEVEL_EXP), 100)
@@ -758,9 +811,51 @@ class GrowthPotionTests(unittest.TestCase):
             {choice.value for choice in growth_potion_command.parameters[0].choices},
             set(GROWTH_POTIONS),
         )
+        for parameter_index in (3, 4):
+            self.assertEqual(
+                {
+                    choice.value
+                    for choice in growth_potion_command.parameters[
+                        parameter_index
+                    ].choices
+                },
+                {"적용", "미적용"},
+            )
 
     def test_command_is_named_growth_potion(self) -> None:
         self.assertEqual(growth_potion_command.name, "성장의비약")
+
+
+class GrowthPotionCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_korean_burning_choices_are_converted_to_boolean(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+        potion = SimpleNamespace(
+            name="극성비 · 극한 성장의 비약",
+            value="극성비 · 극한 성장의 비약",
+        )
+
+        with patch(
+            "maple_bot.calculate_growth_potions",
+            return_value=(245, 0, 0, 1),
+        ) as calculator:
+            await growth_potion_command.callback(
+                interaction,
+                potion,
+                245,
+                0,
+                SimpleNamespace(name="적용", value="적용"),
+                SimpleNamespace(name="미적용", value="미적용"),
+                1,
+            )
+
+        calculator.assert_called_once_with(
+            potion.value, 245, 0, 1, True, False
+        )
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertIn("하이퍼 버닝**　적용", embed.description)
+        self.assertIn("비욘드 버닝**　미적용", embed.description)
 
 
 class ExpCouponTests(unittest.TestCase):
@@ -825,10 +920,91 @@ class ExpCouponTests(unittest.TestCase):
         )
 
     def test_command_offers_requested_burning_types(self) -> None:
+        burning_parameter = next(
+            parameter
+            for parameter in exp_coupon_command.parameters
+            if parameter.name == "burning"
+        )
         self.assertEqual(
-            {choice.value for choice in exp_coupon_command.parameters[3].choices},
+            {choice.value for choice in burning_parameter.choices},
             set(EXP_COUPON_BURNING_OPTIONS),
         )
+        self.assertFalse(burning_parameter.required)
+
+
+class ExpCouponCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_result_uses_selected_coupon_emoji(self) -> None:
+        expected_emojis = {
+            "EXP 교환권": "<:EV:1536691867293323274>",
+            "상급 EXP 교환권": "<:AEV:1536691857692565554>",
+        }
+        for coupon_name, emoji in expected_emojis.items():
+            client = SimpleNamespace(
+                exp_coupon_burning_preferences={}, persist_state=Mock()
+            )
+            interaction = SimpleNamespace(
+                client=client,
+                user=SimpleNamespace(id=123),
+                response=SimpleNamespace(send_message=AsyncMock()),
+            )
+            with patch(
+                "maple_bot.calculate_exp_coupons",
+                return_value=(300, 0, 1, 1),
+            ):
+                await exp_coupon_command.callback(
+                    interaction,
+                    SimpleNamespace(name=coupon_name, value=coupon_name),
+                    260,
+                    0,
+                    1,
+                    SimpleNamespace(name="X", value="X"),
+                )
+
+            embed = interaction.response.send_message.await_args.kwargs["embed"]
+            self.assertEqual(embed.title, f"{emoji} {coupon_name} 계산기")
+
+    async def test_burning_defaults_to_x_then_saves_and_reuses_selection(self) -> None:
+        client = SimpleNamespace(
+            exp_coupon_burning_preferences={}, persist_state=Mock()
+        )
+        interactions = [
+            SimpleNamespace(
+                client=client,
+                user=SimpleNamespace(id=123),
+                response=SimpleNamespace(send_message=AsyncMock()),
+            )
+            for _ in range(3)
+        ]
+        coupon = SimpleNamespace(name="상급 EXP 교환권", value="상급 EXP 교환권")
+        with patch(
+            "maple_bot.calculate_exp_coupons",
+            return_value=(270, 0, 1, 1),
+        ) as calculate:
+            await exp_coupon_command.callback(
+                interactions[0], coupon, 269, 0, 1, None
+            )
+            await exp_coupon_command.callback(
+                interactions[1],
+                coupon,
+                269,
+                0,
+                1,
+                SimpleNamespace(name="비욘드버닝", value="비욘드버닝"),
+            )
+            await exp_coupon_command.callback(
+                interactions[2], coupon, 269, 0, 1, None
+            )
+
+        self.assertEqual(client.exp_coupon_burning_preferences, {"123": "비욘드버닝"})
+        client.persist_state.assert_called_once_with()
+        self.assertEqual(
+            [call.args[-1] for call in calculate.call_args_list],
+            ["X", "비욘드버닝", "비욘드버닝"],
+        )
+        first_embed = interactions[0].response.send_message.await_args.kwargs["embed"]
+        last_embed = interactions[2].response.send_message.await_args.kwargs["embed"]
+        self.assertIn("**버닝**　X", first_embed.description)
+        self.assertIn("**버닝**　비욘드버닝", last_embed.description)
 
 
 class EpicDungeonTests(unittest.TestCase):
@@ -888,6 +1064,33 @@ class EpicDungeonTests(unittest.TestCase):
             {choice.value for choice in epic_dungeon_command.parameters[3].choices},
             set(EPIC_DUNGEON_BONUSES),
         )
+
+
+class EpicDungeonCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_result_uses_selected_dungeon_emoji(self) -> None:
+        expected_emojis = {
+            "하이마운틴": "<:HMountain:1536686575558205540>",
+            "앵글러컴퍼니": "<:Angler:1536686640045756446>",
+            "악몽선경": "<:Nightmare:1536686565210722324>",
+        }
+        for dungeon_name, emoji in expected_emojis.items():
+            interaction = SimpleNamespace(
+                response=SimpleNamespace(send_message=AsyncMock())
+            )
+            with patch(
+                "maple_bot.calculate_epic_dungeon",
+                return_value=(300, 0, 1, 2),
+            ):
+                await epic_dungeon_command.callback(
+                    interaction,
+                    SimpleNamespace(name=dungeon_name, value=dungeon_name),
+                    280,
+                    0,
+                    SimpleNamespace(name="1.5배", value=1.5),
+                )
+
+            embed = interaction.response.send_message.await_args.kwargs["embed"]
+            self.assertIn(emoji, embed.title)
 
 
 class SymbolCalculatorTests(unittest.TestCase):
@@ -972,19 +1175,31 @@ class SymbolCalculatorTests(unittest.TestCase):
         )
 
     def test_command_offers_regions_potion_levels_and_elanos_options(self) -> None:
+        potion_parameter = next(
+            parameter
+            for parameter in symbol_calculator_command.parameters
+            if parameter.name == "potion_level"
+        )
+        elanos_parameter = next(
+            parameter
+            for parameter in symbol_calculator_command.parameters
+            if parameter.name == "elanos"
+        )
         self.assertEqual(symbol_calculator_command.name, "심볼계산기")
         self.assertEqual(
             {choice.value for choice in symbol_calculator_command.parameters[0].choices},
             set(SYMBOL_REGIONS),
         )
         self.assertEqual(
-            {choice.value for choice in symbol_calculator_command.parameters[4].choices},
+            {choice.value for choice in potion_parameter.choices},
             set(range(7)),
         )
         self.assertEqual(
-            {choice.value for choice in symbol_calculator_command.parameters[5].choices},
+            {choice.value for choice in elanos_parameter.choices},
             {"적용", "미적용"},
         )
+        self.assertFalse(potion_parameter.required)
+        self.assertFalse(elanos_parameter.required)
 
 
 class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -997,7 +1212,11 @@ class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
         potion = symbol_calculator_command.parameters[4].choices[0]
         elanos = symbol_calculator_command.parameters[5].choices[0]
         interaction = SimpleNamespace(
-            response=SimpleNamespace(send_message=AsyncMock())
+            client=SimpleNamespace(
+                symbol_calculator_preferences={}, persist_state=Mock()
+            ),
+            user=SimpleNamespace(id=123),
+            response=SimpleNamespace(send_message=AsyncMock()),
         )
 
         await symbol_calculator_command.callback(
@@ -1020,7 +1239,11 @@ class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
         potion = symbol_calculator_command.parameters[4].choices[0]
         elanos = symbol_calculator_command.parameters[5].choices[0]
         interaction = SimpleNamespace(
-            response=SimpleNamespace(send_message=AsyncMock())
+            client=SimpleNamespace(
+                symbol_calculator_preferences={}, persist_state=Mock()
+            ),
+            user=SimpleNamespace(id=123),
+            response=SimpleNamespace(send_message=AsyncMock()),
         )
 
         await symbol_calculator_command.callback(
@@ -1030,9 +1253,62 @@ class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
         embed = interaction.response.send_message.await_args.kwargs["embed"]
         self.assertNotIn("주간퀘", embed.description)
 
+    async def test_options_default_then_save_and_reuse_user_selection(self) -> None:
+        region = next(
+            choice
+            for choice in symbol_calculator_command.parameters[0].choices
+            if choice.value == "세르니움"
+        )
+        client = SimpleNamespace(
+            symbol_calculator_preferences={}, persist_state=Mock()
+        )
+        interactions = [
+            SimpleNamespace(
+                client=client,
+                user=SimpleNamespace(id=123),
+                response=SimpleNamespace(send_message=AsyncMock()),
+            )
+            for _ in range(3)
+        ]
+        with patch(
+            "maple_bot.calculate_symbol",
+            return_value=(10, 1_000_000, 10, 18, 1, date(2026, 8, 12)),
+        ) as calculate:
+            await symbol_calculator_command.callback(
+                interactions[0], region, 1, 0, 2, None, None
+            )
+            await symbol_calculator_command.callback(
+                interactions[1],
+                region,
+                1,
+                0,
+                2,
+                SimpleNamespace(name="4레벨", value=4),
+                SimpleNamespace(name="적용", value="적용"),
+            )
+            await symbol_calculator_command.callback(
+                interactions[2], region, 1, 0, 2, None, None
+            )
+
+        self.assertEqual(
+            client.symbol_calculator_preferences,
+            {"123": {"potion_level": 4, "elanos": "적용"}},
+        )
+        client.persist_state.assert_called_once_with()
+        self.assertEqual(
+            [(call.args[4], call.args[5]) for call in calculate.call_args_list],
+            [(0, False), (4, True), (4, True)],
+        )
+        first_embed = interactions[0].response.send_message.await_args.kwargs["embed"]
+        last_embed = interactions[2].response.send_message.await_args.kwargs["embed"]
+        self.assertIn("**보약**　없음", first_embed.description)
+        self.assertIn("**엘라노스**　미적용", first_embed.description)
+        self.assertIn("**보약**　4레벨", last_embed.description)
+        self.assertIn("**엘라노스**　적용", last_embed.description)
+
 
 class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
-    async def test_help_is_private_and_lists_admin_commands(self) -> None:
+    async def test_command_guide_is_private_and_lists_only_user_commands(self) -> None:
         interaction = SimpleNamespace(
             response=SimpleNamespace(send_message=AsyncMock())
         )
@@ -1040,10 +1316,61 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         await help_command.callback(interaction)
 
         arguments = interaction.response.send_message.await_args
+        self.assertEqual(help_command.name, "명령어")
         self.assertTrue(arguments.kwargs["ephemeral"])
         field_text = "\n".join(field.value for field in arguments.kwargs["embed"].fields)
         self.assertIn("/심볼계산기", field_text)
-        self.assertIn("/공지알림", field_text)
+        self.assertNotIn("/공지알림", field_text)
+
+
+class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sunny_commands_hide_past_entries_and_use_korean_title(self) -> None:
+        schedule = {
+            "title": "v.270 Sunny Sunday",
+            "url": "https://example.com/patch",
+            "entries": [
+                {"timestamp": 0, "name": "지난 일정", "value": "지난 보상"},
+                {
+                    "timestamp": 9_999_999_999,
+                    "name": "남은 일정",
+                    "value": "남은 보상",
+                },
+            ],
+        }
+        list_interaction = SimpleNamespace(
+            client=SimpleNamespace(sunny_sunday=schedule),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+        current_interaction = SimpleNamespace(
+            client=SimpleNamespace(sunny_sunday=schedule),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+        with patch("maple_bot.discord.File", return_value=Mock()):
+            await sunny_sunday_list_command.callback(list_interaction)
+            await sunny_sunday_command.callback(current_interaction)
+
+        list_embed = list_interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertEqual([field.name for field in list_embed.fields], ["남은 일정"])
+        current_embed = current_interaction.response.send_message.await_args.kwargs[
+            "embed"
+        ]
+        self.assertEqual(current_embed.title, "☀️ 이번 주 썬데이 메이플 ☀️")
+
+    async def test_placeholder_events_report_no_active_event(self) -> None:
+        for command, event_name in (
+            (hot_week_command, "핫위크"),
+            (cube_sale_command, "큐브세일"),
+        ):
+            interaction = SimpleNamespace(
+                response=SimpleNamespace(send_message=AsyncMock())
+            )
+            await command.callback(interaction)
+            embed = interaction.response.send_message.await_args.kwargs["embed"]
+            self.assertEqual(
+                embed.description,
+                f"현재 진행 중인 {event_name} 이벤트가 없습니다.",
+            )
 
 
 class ChannelRecommendationTests(unittest.IsolatedAsyncioTestCase):
