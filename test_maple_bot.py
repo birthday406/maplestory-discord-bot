@@ -65,6 +65,8 @@ from maple_bot import (
     html_to_text,
     is_cash_shop_update,
     is_patch_notes,
+    item_search_autocomplete,
+    item_search_command,
     known_sunny_sunday_translation,
     localize_sunny_sunday_text,
     load_state,
@@ -77,8 +79,10 @@ from maple_bot import (
     parse_pssb_rates,
     parse_server_status,
     post_url,
+    pssb_cash_item,
     pssb_command,
     save_state,
+    search_cash_items,
     server_status_alert_command,
     server_status_command,
     should_send_cash_shop_transfer,
@@ -1738,7 +1742,116 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/우르스", field_text)
         self.assertIn("/서버", field_text)
         self.assertIn("/캐샵", field_text)
+        self.assertIn("/아이템검색", field_text)
         self.assertNotIn("/공지알림", field_text)
+
+
+class ItemSearchTests(unittest.IsolatedAsyncioTestCase):
+    def test_search_finds_same_item_by_english_and_korean_name(self) -> None:
+        english_result = search_cash_items("Red Steed Mask", limit=1)
+        korean_result = search_cash_items("붉은 말의 탈", limit=1)
+
+        self.assertEqual(english_result[0]["id"], "1007104")
+        self.assertEqual(korean_result[0]["id"], "1007104")
+
+    async def test_autocomplete_shows_both_names(self) -> None:
+        choices = await item_search_autocomplete(None, "붉은 말")
+
+        self.assertEqual(choices[0].value, "1007104")
+        self.assertIn("Red Steed Mask", choices[0].name)
+        self.assertIn("붉은 말의 탈", choices[0].name)
+
+    async def test_item_command_attaches_available_icon(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await item_search_command.callback(interaction, "1007104")
+
+        arguments = interaction.response.send_message.await_args
+        self.assertIn("Red Steed Mask", arguments.kwargs["embed"].description)
+        self.assertIn("붉은 말의 탈", arguments.kwargs["embed"].description)
+        self.assertEqual(arguments.kwargs["file"].filename, "cash-item-1007104.png")
+
+    async def test_item_command_keeps_name_only_items_searchable(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await item_search_command.callback(interaction, "20000")
+
+        arguments = interaction.response.send_message.await_args
+        self.assertNotIn("file", arguments.kwargs)
+        self.assertIn("독립 아이콘", arguments.kwargs["embed"].footer.text)
+
+    async def test_gms_only_item_explains_missing_kms_id(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await item_search_command.callback(interaction, "1007254")
+
+        description = interaction.response.send_message.await_args.kwargs["embed"].description
+        self.assertIn("Sweet Apple Fox Mask", description)
+        self.assertIn("KMS 동일 ID 없음", description)
+
+
+class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def interaction(rates: list[tuple[str, float]]) -> SimpleNamespace:
+        return SimpleNamespace(
+            client=SimpleNamespace(fetch_pssb_rates=AsyncMock(return_value=rates)),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+    async def test_one_draw_sends_matching_item_icon(self) -> None:
+        result = ("Roaring Green Rain Hood", 5.0)
+        interaction = self.interaction([result])
+
+        with patch("maple_bot.random.choices", return_value=[result]):
+            await pssb_command.callback(interaction, SimpleNamespace(value=1))
+
+        message = interaction.followup.send.await_args.kwargs
+        self.assertEqual(len(message["embeds"]), 1)
+        self.assertEqual(len(message["files"]), 1)
+        self.assertEqual(message["files"][0].filename, "pssb-1-1006264.png")
+        self.assertEqual(
+            message["embeds"][0].thumbnail.url,
+            "attachment://pssb-1-1006264.png",
+        )
+
+    async def test_five_draws_send_five_embeds_and_icons(self) -> None:
+        result = ("Roaring Green Rain Hood", 5.0)
+        interaction = self.interaction([result])
+
+        with patch("maple_bot.random.choices", return_value=[result] * 5):
+            await pssb_command.callback(interaction, SimpleNamespace(value=5))
+
+        message = interaction.followup.send.await_args.kwargs
+        self.assertEqual(len(message["embeds"]), 5)
+        self.assertEqual(len(message["files"]), 5)
+        self.assertEqual(
+            [file.filename for file in message["files"]],
+            [f"pssb-{index}-1006264.png" for index in range(1, 6)],
+        )
+
+    async def test_draw_without_database_match_stays_text_only(self) -> None:
+        result = ("Future PSSB Item", 1.0)
+        interaction = self.interaction([result])
+
+        with patch("maple_bot.random.choices", return_value=[result]):
+            await pssb_command.callback(interaction, SimpleNamespace(value=1))
+
+        message = interaction.followup.send.await_args.kwargs
+        self.assertNotIn("files", message)
+        self.assertIn("Future PSSB Item", message["embeds"][0].description)
+
+    def test_gender_suffix_uses_the_shared_item_name(self) -> None:
+        item = pssb_cash_item("Oh My Captain (M) / Oh My Captain (F)")
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item["gms_name"], "Oh My Captain")
 
 
 class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):

@@ -1,9 +1,12 @@
+import csv
 import html
+import io
 import json
 import logging
 import os
 import random
 import re
+import zipfile
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -69,6 +72,8 @@ CASH_SHOP_TRANSFER_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-tr
 CASH_SHOP_UPDATE_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-update.png"
 URSUS_ACTIVE_IMAGE_PATH = Path(__file__).parent / "assets" / "ursus-golden-time.jpg"
 URSUS_INACTIVE_IMAGE_PATH = Path(__file__).parent / "assets" / "ursus-golden-time-inactive.jpg"
+ITEM_DATA_PATH = Path(__file__).parent / "data" / "cash-items.tsv"
+ITEM_ICON_ARCHIVE_PATH = Path(__file__).parent / "data" / "cash-item-icons.zip"
 URSUS_TIMEZONE = ZoneInfo("America/Los_Angeles")
 POLL_INTERVAL_MINUTES = 5
 SUNNY_SUNDAY_DURATION_SECONDS = 24 * 60 * 60
@@ -91,6 +96,76 @@ ALERT_TYPES = (
     ALERT_URSUS,
     ALERT_SERVER,
 )
+
+ITEM_CATEGORY_NAMES = {
+    "Accessory": "장신구",
+    "Cap": "모자",
+    "Cape": "망토",
+    "Coat": "상의",
+    "Face": "성형",
+    "Glove": "장갑",
+    "Hair": "헤어",
+    "Longcoat": "한벌옷",
+    "Pants": "하의",
+    "PetEquip": "펫장비",
+    "Ring": "반지",
+    "Shield": "방패·보조무기",
+    "Shoes": "신발",
+    "Taming": "라이딩",
+    "Weapon": "무기",
+}
+
+
+def load_cash_items(path: Path = ITEM_DATA_PATH) -> list[dict[str, str]]:
+    """WZ 파일에서 미리 추출한 영문·한글 캐시 아이템 목록을 읽습니다."""
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8", newline="") as item_file:
+        return list(csv.DictReader(item_file, delimiter="\t"))
+
+
+CASH_ITEMS = load_cash_items()
+CASH_ITEMS_BY_ID = {item["id"]: item for item in CASH_ITEMS}
+CASH_ITEMS_BY_GMS_NAME = {
+    item["gms_name"].casefold(): item for item in CASH_ITEMS
+}
+
+
+def pssb_cash_item(name: str) -> dict[str, str] | None:
+    """공식 PSSB 이름과 같은 GMS 아이템을 찾습니다."""
+    for part in name.split(" / "):
+        # 공식 표의 성별 표시만 제거합니다. 비슷한 다른 이름을 억지로 연결하지 않습니다.
+        normalized_name = re.sub(r"\s+\([MF]\)$", "", part.strip(), flags=re.IGNORECASE)
+        item = CASH_ITEMS_BY_GMS_NAME.get(normalized_name.casefold())
+        if item:
+            return item
+    return None
+
+
+def search_cash_items(query: str, limit: int = 25) -> list[dict[str, str]]:
+    """영문명·한글명·아이템 ID에서 검색어와 가까운 항목부터 찾습니다."""
+    normalized_query = query.strip().casefold()
+    if not normalized_query:
+        return []
+
+    def match_rank(item: dict[str, str]) -> tuple[int, str]:
+        values = (item["id"].casefold(), item["gms_name"].casefold(), item["kms_name"].casefold())
+        if normalized_query in values:
+            rank = 0
+        elif any(value.startswith(normalized_query) for value in values):
+            rank = 1
+        else:
+            rank = 2
+        return rank, item["gms_name"].casefold()
+
+    matches = [
+        item
+        for item in CASH_ITEMS
+        if normalized_query in item["id"].casefold()
+        or normalized_query in item["gms_name"].casefold()
+        or normalized_query in item["kms_name"].casefold()
+    ]
+    return sorted(matches, key=match_rank)[:limit]
 
 # Discord 애플리케이션에 등록한 HEXA 계산기용 일반 이모지입니다.
 HEXA_EMOJI = "<:HEXA:1534436226751529031>"
@@ -1211,6 +1286,82 @@ async def symbol_calculator_command(
     await interaction.response.send_message(embed=embed)
 
 
+async def item_search_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    """사용자가 입력한 영문·한글 이름과 가까운 아이템을 선택 목록에 보여줍니다."""
+    del interaction
+    choices = []
+    for item in search_cash_items(current):
+        label = item["gms_name"]
+        if item["kms_name"]:
+            label += f' / {item["kms_name"]}'
+        if len(label) > 84:
+            label = label[:81] + "..."
+        choices.append(
+            app_commands.Choice(name=f'{label} ({item["id"]})', value=item["id"])
+        )
+    return choices
+
+
+@app_commands.command(
+    name="아이템검색", description="캐시 아이템의 GMS·KMS 이름과 아이콘을 검색합니다."
+)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.rename(item_id="아이템")
+@app_commands.describe(item_id="영문명·한글명 또는 아이템 ID를 입력한 뒤 목록에서 선택")
+@app_commands.autocomplete(item_id=item_search_autocomplete)
+async def item_search_command(
+    interaction: discord.Interaction, item_id: str
+) -> None:
+    """선택한 캐시 아이템의 양쪽 서버 이름과 아이콘을 보여줍니다."""
+    item = CASH_ITEMS_BY_ID.get(item_id)
+    if item is None:
+        exact_matches = [
+            match
+            for match in search_cash_items(item_id)
+            if item_id.casefold()
+            in (match["gms_name"].casefold(), match["kms_name"].casefold())
+        ]
+        if len(exact_matches) == 1:
+            item = exact_matches[0]
+        else:
+            await interaction.response.send_message(
+                "검색 목록에서 아이템을 하나 선택해주세요.", ephemeral=True
+            )
+            return
+
+    category_name = ITEM_CATEGORY_NAMES.get(item["category"], item["category"])
+    kms_name = item["kms_name"] or "KMS 동일 ID 없음"
+    embed = discord.Embed(
+        title="캐시 아이템 검색",
+        description=(
+            f'**GMS 이름**　{item["gms_name"]}\n'
+            f"**KMS 이름**　{kms_name}\n"
+            f'**분류**　{category_name}\n'
+            f'**아이템 ID**　`{item["id"]}`'
+        ),
+        color=0x9B59B6,
+    )
+
+    icon_name = item.get("icon")
+    if icon_name and ITEM_ICON_ARCHIVE_PATH.exists():
+        try:
+            with zipfile.ZipFile(ITEM_ICON_ARCHIVE_PATH) as archive:
+                icon_data = archive.read(icon_name)
+            filename = f'cash-item-{item["id"]}.png'
+            file = discord.File(io.BytesIO(icon_data), filename=filename)
+            embed.set_thumbnail(url=f"attachment://{filename}")
+            await interaction.response.send_message(embed=embed, file=file)
+            return
+        except (KeyError, OSError, zipfile.BadZipFile):
+            logging.exception("Cash item icon could not be read: %s", icon_name)
+
+    embed.set_footer(text="헤어·성형 등 독립 아이콘이 없는 항목은 이름만 표시됩니다.")
+    await interaction.response.send_message(embed=embed)
+
+
 @app_commands.command(name="명령어", description="일반 사용자가 쓸 수 있는 명령어를 안내합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -1240,6 +1391,11 @@ async def help_command(interaction: discord.Interaction) -> None:
             "`/썬데이` `/썬데이목록` `/캐시이동` `/우르스` `/서버`\n"
             "`/캐샵` `/미라클큐브` `/핫위크` `/큐브세일`"
         ),
+        inline=False,
+    )
+    embed.add_field(
+        name="아이템",
+        value="`/아이템검색`",
         inline=False,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1362,18 +1518,41 @@ async def pssb_command(
         weights=[rate for _, rate in rates],
         k=count.value,
     )
-    result_lines = [
-        f"**{index}.** {name}　`{rate:.2f}%`"
-        for index, (name, rate) in enumerate(results, start=1)
-    ]
-    embed = discord.Embed(
-        title=f"{PSSB_EMOJI} Premium Surprise Style Box",
-        url=PSSB_RATES_PAGE_URL,
-        description="\n".join(result_lines),
-        color=0xFF69B4,
+    embeds = []
+    files = []
+    for index, (name, rate) in enumerate(results, start=1):
+        embed = discord.Embed(
+            title=(
+                f"{PSSB_EMOJI} Premium Surprise Style Box"
+                if index == 1
+                else None
+            ),
+            url=PSSB_RATES_PAGE_URL,
+            description=f"**{index}.** {name}　`{rate:.2f}%`",
+            color=0xFF69B4,
+        )
+
+        # 남녀 한 쌍으로 표시된 보상은 DB에서 먼저 찾은 이름의 아이콘을 사용합니다.
+        item = pssb_cash_item(name)
+        icon_name = item.get("icon") if item else None
+        if icon_name and ITEM_ICON_ARCHIVE_PATH.exists():
+            try:
+                with zipfile.ZipFile(ITEM_ICON_ARCHIVE_PATH) as archive:
+                    icon_data = archive.read(icon_name)
+                filename = f'pssb-{index}-{item["id"]}.png'
+                files.append(discord.File(io.BytesIO(icon_data), filename=filename))
+                embed.set_thumbnail(url=f"attachment://{filename}")
+            except (KeyError, OSError, zipfile.BadZipFile):
+                logging.exception("PSSB item icon could not be read: %s", icon_name)
+        embeds.append(embed)
+
+    embeds[-1].set_footer(
+        text="공식 페이지에 표시된 반올림 확률 기준 · 실제 게임 결과와 무관"
     )
-    embed.set_footer(text="공식 페이지에 표시된 반올림 확률 기준 · 실제 게임 결과와 무관")
-    await interaction.followup.send(embed=embed)
+    message = {"embeds": embeds}
+    if files:
+        message["files"] = files
+    await interaction.followup.send(**message)
 
 
 @app_commands.command(name="캐샵", description="최신 캐시샵 업데이트 링크를 보여줍니다.")
@@ -1830,6 +2009,7 @@ class MapleNewsBot(commands.Bot):
             exp_coupon_command,
             epic_dungeon_command,
             symbol_calculator_command,
+            item_search_command,
             traffic_light_command,
             channel_recommend_command,
             pssb_command,

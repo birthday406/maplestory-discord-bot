@@ -1,0 +1,2 @@
+# TSV의 빈 마지막 열은 줄 끝 탭으로 표현되므로 정상 데이터로 취급합니다.
+*.tsv whitespace=-trailing-space
