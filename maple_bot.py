@@ -533,6 +533,118 @@ def parse_server_status(payload: dict) -> dict[str, bool]:
     return statuses
 
 
+def is_server_maintenance_post(post: dict) -> bool:
+    """일반 공지 중 실제 GMS 게임 서버 점검 글만 고릅니다."""
+    title = post.get("name", "").lower()
+    return (
+        post.get("category") == "maintenance"
+        and not post.get("isMSCW", False)
+        and any(
+            keyword in title
+            for keyword in ("maintenance", "scheduled game update", "scheduled minor patch")
+        )
+        and "channel maintenance" not in title
+        and "cash shop maintenance" not in title
+    )
+
+
+def _maintenance_datetime(date_text: str, time_text: str, utc_offset: int) -> datetime:
+    """공식 공지의 영문 날짜와 시각을 UTC 시각으로 바꿉니다."""
+    normalized_date = re.sub(r"^[A-Z][a-z]+,\s*", "", date_text.strip())
+    normalized_date = re.sub(r"(\d{1,2}),?\s+(\d{4})$", r"\1, \2", normalized_date)
+    local_time = datetime.strptime(
+        f"{normalized_date} {time_text.strip()}", "%B %d, %Y %I:%M %p"
+    )
+    return local_time.replace(tzinfo=timezone(timedelta(hours=utc_offset))).astimezone(
+        timezone.utc
+    )
+
+
+def extract_maintenance_watch(post: dict, source: str) -> dict | None:
+    """점검 본문에서 자동 서버 확인에 필요한 시작·종료 시각을 꺼냅니다."""
+    if not is_server_maintenance_post(post):
+        return None
+
+    text = html_to_text(source)
+    title = post.get("name", "")
+    # 봇이 처음 본 시점에 이미 완료된 공지는 새 감시 대상으로 등록하지 않습니다.
+    if "[completed]" in title.lower() or "maintenance has been completed" in text.lower():
+        return None
+
+    row = re.search(
+        r"(?P<date>(?:[A-Z][a-z]+,\s*)?[A-Z][a-z]+\s+\d{1,2},?\s+\d{4})"
+        r".*?P(?:D|S)T\s*\(UTC\s*(?P<offset>[+-]\s*\d{1,2})\)\s*:"
+        r"\s*(?P<start>\d{1,2}:\d{2}\s+[AP]M)\s*-\s*"
+        r"(?P<end>\d{1,2}:\d{2}\s+[AP]M)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    start_timestamp = None
+    end_timestamp = None
+    if row is not None:
+        offset = int(row.group("offset").replace(" ", ""))
+        start = _maintenance_datetime(row.group("date"), row.group("start"), offset)
+        end = _maintenance_datetime(row.group("date"), row.group("end"), offset)
+        if end <= start:
+            end += timedelta(days=1)
+        start_timestamp = int(start.timestamp())
+        end_timestamp = int(end.timestamp())
+    else:
+        # 종료 시각이 없는 긴급점검도 명시된 시작 시각이 있으면 함께 저장합니다.
+        start_match = re.search(
+            r"(?:today,?\s*)?(?P<date>[A-Z][a-z]+\s+\d{1,2},?\s+\d{4})"
+            r"\s+at\s+(?P<start>\d{1,2}:\d{2}\s+[AP]M)\s+"
+            r"(?P<zone>PDT|PST)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if start_match is not None:
+            offset = -7 if start_match.group("zone").upper() == "PDT" else -8
+            start_timestamp = int(
+                _maintenance_datetime(
+                    start_match.group("date"), start_match.group("start"), offset
+                ).timestamp()
+            )
+
+    if start_timestamp is None:
+        start_timestamp = int(
+            datetime.fromisoformat(post["liveDate"].replace("Z", "+00:00")).timestamp()
+        )
+    monitor_from = (
+        max(start_timestamp, end_timestamp - 3_600)
+        if end_timestamp is not None
+        else int(datetime.fromisoformat(post["liveDate"].replace("Z", "+00:00")).timestamp())
+    )
+    return {
+        "post_id": post["id"],
+        "title": title,
+        "url": post_url(post),
+        "start_timestamp": start_timestamp,
+        "end_timestamp": end_timestamp,
+        "monitor_from_timestamp": monitor_from,
+        "saw_down": False,
+        "completed": False,
+    }
+
+
+def merge_maintenance_watch(current: dict | None, updated: dict) -> dict:
+    """같은 점검 공지가 수정되면 새 시간과 기존 확인 기록을 합칩니다."""
+    if current is None or current.get("post_id") != updated["post_id"]:
+        return updated
+    updated["saw_down"] = current.get("saw_down", False)
+    updated["completed"] = current.get("completed", False)
+    return updated
+
+
+def should_check_server_status(watch: dict | None, now_timestamp: int) -> bool:
+    """점검 감시 시간이 되었고 아직 오픈 확인을 마치지 않았는지 반환합니다."""
+    return bool(
+        watch
+        and not watch.get("completed", False)
+        and now_timestamp >= watch["monitor_from_timestamp"]
+    )
+
+
 def migrate_sunny_sunday_state(schedule: dict | None, channel_id: int) -> bool:
     # 단일 채널 시절의 message_id를 채널별 message_ids 구조로 한 번 변환합니다.
     if schedule is None:
@@ -2124,16 +2236,26 @@ async def ursus_alert_command(
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
-@app_commands.rename(channel="채널", action="동작")
-@app_commands.describe(channel="알림을 받을 텍스트 채널", action="알림 ON 또는 OFF")
+@app_commands.rename(channel="채널", action="동작", role="역할")
+@app_commands.describe(
+    channel="알림을 받을 텍스트 채널",
+    action="알림 ON 또는 OFF",
+    role="서버가 열렸을 때 멘션할 역할(ON일 때 필수)",
+)
 @app_commands.choices(action=ALERT_ACTION_CHOICES)
 async def server_status_alert_command(
     interaction: discord.Interaction,
     channel: discord.TextChannel,
     action: app_commands.Choice[str],
+    role: discord.Role | None = None,
 ) -> None:
-    await run_alert_setting_command(
-        interaction, channel, action, ALERT_SERVER, "서버 오픈 알림"
+    await interaction.client.configure_alert_channel(
+        interaction,
+        channel,
+        action.value == "on",
+        ALERT_SERVER,
+        "서버 오픈 알림",
+        role,
     )
 
 
@@ -2206,10 +2328,12 @@ def load_state() -> tuple[
     dict | None,
     str | None,
     dict | None,
+    dict[str, int],
+    dict | None,
 ]:
     # 이전 실행에서 이미 알린 공지 번호를 불러와 같은 글을 다시 보내지 않습니다.
     if not STATE_PATH.exists():
-        return None, set(), None, None, None, {}, {}, {}, None, None, None
+        return None, set(), None, None, None, {}, {}, {}, None, None, None, {}, None
     state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     stored_sent_ids = state.get("sent_ids")
     return (
@@ -2224,6 +2348,8 @@ def load_state() -> tuple[
         state.get("latest_cash_shop"),
         state.get("server_status"),
         state.get("exchange_log"),
+        state.get("server_alert_roles", {}),
+        state.get("maintenance_watch"),
     )
 
 
@@ -2239,6 +2365,8 @@ def save_state(
     latest_cash_shop: dict | None = None,
     server_status: str | None = None,
     exchange_log: dict | None = None,
+    server_alert_roles: dict[str, int] | None = None,
+    maintenance_watch: dict | None = None,
 ) -> None:
     # 봇을 껐다 켜도 중복 알림을 막을 수 있도록 공지 번호를 파일에 저장합니다.
     STATE_PATH.write_text(
@@ -2260,6 +2388,8 @@ def save_state(
                 "latest_cash_shop": latest_cash_shop,
                 "server_status": server_status,
                 "exchange_log": exchange_log,
+                "server_alert_roles": server_alert_roles or {},
+                "maintenance_watch": maintenance_watch,
             },
             indent=2,
         ),
@@ -2286,6 +2416,8 @@ class MapleNewsBot(commands.Bot):
             self.latest_cash_shop,
             self.server_status,
             self.exchange_log,
+            self.server_alert_roles,
+            self.maintenance_watch,
         ) = load_state()
         self.alert_channels = normalize_alert_channels(
             stored_alert_channels, channel_id, sunny_channel_id
@@ -2350,6 +2482,8 @@ class MapleNewsBot(commands.Bot):
             self.latest_cash_shop,
             self.server_status,
             self.exchange_log,
+            self.server_alert_roles,
+            self.maintenance_watch,
         )
 
     async def on_ready(self) -> None:
@@ -2573,6 +2707,21 @@ class MapleNewsBot(commands.Bot):
                 sent_message_ids[channel.id] = message.id
         return sent_message_ids
 
+    async def send_server_open_alert(self, embed: discord.Embed) -> None:
+        """채널마다 관리자가 고른 역할을 멘션해 서버 오픈을 알립니다."""
+        for channel in self.alert_text_channels(ALERT_SERVER):
+            role_id = self.server_alert_roles.get(str(channel.id))
+            try:
+                await channel.send(
+                    content=f"<@&{role_id}>" if role_id is not None else None,
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=False, users=False, roles=True
+                    ),
+                )
+            except discord.HTTPException:
+                logging.exception("Failed to send server alert to %s.", channel.id)
+
     async def delete_sunny_day_message(self, channel: discord.TextChannel) -> None:
         # 당일 알림을 끄면 그 채널에 남아 있는 임시 주간 메시지도 함께 제거합니다.
         if self.sunny_sunday is None:
@@ -2672,6 +2821,7 @@ class MapleNewsBot(commands.Bot):
         enabled: bool,
         alert_type: str,
         alert_name: str,
+        role: discord.Role | None = None,
     ) -> None:
         # Discord 명령 표시 권한과 별개로 실행 순간의 실제 관리자 권한도 검사합니다.
         if interaction.guild is None or not interaction.permissions.administrator:
@@ -2685,8 +2835,25 @@ class MapleNewsBot(commands.Bot):
             )
             return
 
+        if alert_type == ALERT_SERVER and enabled:
+            if role is None:
+                await interaction.response.send_message(
+                    "서버 오픈 알림을 켤 때는 멘션할 역할을 선택해주세요.", ephemeral=True
+                )
+                return
+            if role.guild.id != interaction.guild.id or role.is_default():
+                await interaction.response.send_message(
+                    "현재 서버의 일반 역할만 선택할 수 있습니다.", ephemeral=True
+                )
+                return
+
         already_enabled = channel.id in self.alert_channels[alert_type]
-        if enabled == already_enabled:
+        same_server_role = (
+            alert_type != ALERT_SERVER
+            or not enabled
+            or self.server_alert_roles.get(str(channel.id)) == role.id
+        )
+        if enabled == already_enabled and same_server_role:
             state = "이미 켜져" if enabled else "이미 꺼져"
             await interaction.response.send_message(
                 f"{channel.mention}의 {alert_name}이 {state} 있습니다.", ephemeral=True
@@ -2769,9 +2936,15 @@ class MapleNewsBot(commands.Bot):
             await self.delete_sunny_day_message(channel)
 
         update_alert_channel(self.alert_channels, alert_type, channel.id, enabled)
+        if alert_type == ALERT_SERVER:
+            if enabled:
+                self.server_alert_roles[str(channel.id)] = role.id
+            else:
+                self.server_alert_roles.pop(str(channel.id), None)
         self.persist_state()
+        role_text = f" ({role.mention} 멘션)" if enabled and role is not None else ""
         await interaction.followup.send(
-            f"{channel.mention}의 {alert_name}을 {'켰습니다' if enabled else '껐습니다'}.",
+            f"{channel.mention}의 {alert_name}을 {'켰습니다' if enabled else '껐습니다'}{role_text}.",
             ephemeral=True,
         )
 
@@ -2782,6 +2955,55 @@ class MapleNewsBot(commands.Bot):
         current_ids = {post["id"] for post in posts}
         latest_patch = next((post for post in posts if is_patch_notes(post)), None)
         latest_patch_detail = None
+
+        # 새 기능을 처음 배포해도 이미 읽은 최신 점검 공지에서 감시 일정을 한 번 복원합니다.
+        latest_maintenance = next(
+            (
+                post
+                for post in posts
+                if is_server_maintenance_post(post)
+                and "[completed]" not in post.get("name", "").lower()
+            ),
+            None,
+        )
+        if latest_maintenance is not None and (
+            self.maintenance_watch is None
+            or self.maintenance_watch.get("post_id") != latest_maintenance["id"]
+        ):
+            maintenance_detail = await self.fetch_post_detail(latest_maintenance["id"])
+            maintenance_watch = extract_maintenance_watch(
+                latest_maintenance, maintenance_detail["body"]
+            )
+            if maintenance_watch is not None:
+                self.maintenance_watch = maintenance_watch
+                if self.sent_ids is not None:
+                    self.persist_state()
+
+        # 진행 중인 점검 공지가 수정되면 연장된 종료 시각도 5분 안에 반영합니다.
+        if self.maintenance_watch is not None and not self.maintenance_watch.get(
+            "completed", False
+        ):
+            maintenance_post = next(
+                (
+                    post
+                    for post in posts
+                    if post["id"] == self.maintenance_watch.get("post_id")
+                ),
+                None,
+            )
+            if maintenance_post is not None:
+                maintenance_detail = await self.fetch_post_detail(maintenance_post["id"])
+                updated_watch = extract_maintenance_watch(
+                    maintenance_post, maintenance_detail["body"]
+                )
+                if updated_watch is not None:
+                    merged_watch = merge_maintenance_watch(
+                        self.maintenance_watch, updated_watch
+                    )
+                    if merged_watch != self.maintenance_watch:
+                        self.maintenance_watch = merged_watch
+                        if self.sent_ids is not None:
+                            self.persist_state()
 
         # 목록은 최신순이므로 첫 Cash Shop Update가 현재 공식 캐시샵 공지입니다.
         latest_cash_shop_post = next(
@@ -2876,14 +3098,21 @@ class MapleNewsBot(commands.Bot):
 
         for post in sorted(new_posts, key=lambda item: item["liveDate"]):
             is_sunny_patch = is_patch_notes(post)
+            is_maintenance = is_server_maintenance_post(post)
             sends_news = bool(self.alert_channels[ALERT_NEWS])
-            if not sends_news and not is_sunny_patch:
+            if not sends_news and not is_sunny_patch and not is_maintenance:
                 # 알림 채널이 없으면 불필요한 요약·번역 API를 호출하지 않고 기준점만 저장합니다.
                 self.sent_ids.add(post["id"])
                 self.persist_state()
                 continue
 
             detail = await self.fetch_post_detail(post["id"])
+            if is_maintenance:
+                maintenance_watch = extract_maintenance_watch(post, detail["body"])
+                if maintenance_watch is not None:
+                    self.maintenance_watch = merge_maintenance_watch(
+                        self.maintenance_watch, maintenance_watch
+                    )
             if sends_news:
                 # 새 공지 한 건을 요약·번역한 뒤 등록된 모든 공지 채널에 같은 임베드를 보냅니다.
                 korean_summary = (
@@ -3107,7 +3336,12 @@ class MapleNewsBot(commands.Bot):
 
     @tasks.loop(minutes=1)
     async def check_server_status(self) -> None:
-        # API 오류는 점검으로 저장하지 않습니다. 정상 응답의 상태 변화만 기록합니다.
+        # 평상시에는 시간만 확인하고 API를 호출하지 않습니다.
+        now_timestamp = int(datetime.now(timezone.utc).timestamp())
+        if not should_check_server_status(self.maintenance_watch, now_timestamp):
+            return
+
+        # API 오류는 점검으로 저장하지 않고 다음 1분 확인 때 다시 시도합니다.
         try:
             statuses = await self.fetch_server_status()
         except (aiohttp.ClientError, TimeoutError, ValueError) as error:
@@ -3115,18 +3349,30 @@ class MapleNewsBot(commands.Bot):
             return
 
         current_status = "up" if all(statuses.values()) else "down"
-        previous_status = self.server_status
-        if current_status == previous_status:
-            return
-
-        # 첫 실행은 현재 상태만 기준점으로 저장하고, 점검 중→정상 전환에만 알립니다.
-        if previous_status == "down" and current_status == "up":
-            await self.send_alert_embed(
-                ALERT_SERVER,
-                build_server_status_embed(statuses, opened=True),
-            )
+        state_changed = current_status != self.server_status
         self.server_status = current_status
-        self.persist_state()
+        if current_status == "down":
+            if not self.maintenance_watch.get("saw_down", False):
+                self.maintenance_watch["saw_down"] = True
+                state_changed = True
+        elif (
+            self.maintenance_watch.get("saw_down", False)
+            or (
+                self.maintenance_watch.get("end_timestamp") is not None
+                and now_timestamp >= self.maintenance_watch["end_timestamp"]
+            )
+        ):
+            # 점검 시작 직후 서버가 잠깐 정상으로 잡히는 경우를 종료로 오인하지 않습니다.
+            # 실제 점검 중 상태를 봤거나 예정 종료 시각이 지난 뒤 정상일 때만 알립니다.
+            await self.send_server_open_alert(
+                build_server_status_embed(statuses, opened=True)
+            )
+            # 오픈을 확인한 점검은 완료 처리해 다음 점검까지 API 요청을 멈춥니다.
+            self.maintenance_watch["completed"] = True
+            state_changed = True
+
+        if state_changed:
+            self.persist_state()
 
     async def rename_info_channels(self, info_type: str, name: str) -> None:
         """등록된 음성 채널 이름이 달라졌을 때만 변경합니다."""

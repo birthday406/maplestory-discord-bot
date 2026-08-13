@@ -65,6 +65,7 @@ from maple_bot import (
     extract_cash_shop_transfer,
     extract_cash_shop_sections,
     extract_miracle_time,
+    extract_maintenance_watch,
     extract_sunny_sunday,
     format_exchange_channel_name,
     format_time_channel_name,
@@ -77,6 +78,7 @@ from maple_bot import (
     info_channel_command,
     is_cash_shop_update,
     is_patch_notes,
+    is_server_maintenance_post,
     item_search_autocomplete,
     item_search_command,
     known_sunny_sunday_translation,
@@ -99,6 +101,7 @@ from maple_bot import (
     search_cash_items,
     server_status_alert_command,
     server_status_command,
+    should_check_server_status,
     should_send_cash_shop_transfer,
     should_send_miracle_time,
     sunny_day_alert_command,
@@ -339,6 +342,60 @@ class NewsFilteringTests(unittest.TestCase):
             "https://g.nexonstatic.com/media/example/thumbnail.png",
         )
 
+    def test_scheduled_maintenance_starts_checking_one_hour_before_end(self) -> None:
+        post = {
+            "id": 43961,
+            "name": "Scheduled Minor Patch Maintenance - August 13, 2026",
+            "category": "maintenance",
+            "isMSCW": False,
+            "liveDate": "2026-08-11T12:00:00Z",
+        }
+        body = (
+            "<p>Times:</p><p>Thursday, August 13, 2026<br>"
+            "PDT (UTC -7): 6:00 AM - 12:00 PM</p>"
+        )
+
+        watch = extract_maintenance_watch(post, body)
+
+        self.assertTrue(is_server_maintenance_post(post))
+        self.assertIsNotNone(watch)
+        self.assertEqual(watch["end_timestamp"] - watch["monitor_from_timestamp"], 3600)
+        self.assertFalse(
+            should_check_server_status(watch, watch["monitor_from_timestamp"] - 1)
+        )
+        self.assertTrue(
+            should_check_server_status(watch, watch["monitor_from_timestamp"])
+        )
+
+    def test_emergency_maintenance_without_end_starts_at_publish_time(self) -> None:
+        post = {
+            "id": 42252,
+            "name": "Emergency Maintenance - June 20, 2026",
+            "category": "maintenance",
+            "isMSCW": False,
+            "liveDate": "2026-06-20T18:30:00Z",
+        }
+        body = "<p>We are experiencing an unexpected issue and will provide updates.</p>"
+
+        watch = extract_maintenance_watch(post, body)
+
+        self.assertIsNotNone(watch)
+        self.assertIsNone(watch["end_timestamp"])
+        self.assertEqual(watch["monitor_from_timestamp"], 1781980200)
+
+    def test_completed_and_classic_world_maintenance_are_not_watched(self) -> None:
+        completed = {
+            "id": 1,
+            "name": "[Completed] Unscheduled Maintenance",
+            "category": "maintenance",
+            "isMSCW": False,
+            "liveDate": "2026-08-10T14:00:00Z",
+        }
+        classic = {**completed, "id": 2, "name": "Unscheduled Maintenance", "isMSCW": True}
+
+        self.assertIsNone(extract_maintenance_watch(completed, "<p>maintenance</p>"))
+        self.assertFalse(is_server_maintenance_post(classic))
+
     def test_load_state_treats_legacy_state_as_pre_events_categories(self) -> None:
         original_state_path = maple_bot.STATE_PATH
         with tempfile.TemporaryDirectory() as directory:
@@ -357,6 +414,8 @@ class NewsFilteringTests(unittest.TestCase):
                 latest_cash_shop,
                 server_status,
                 exchange_log,
+                server_alert_roles,
+                maintenance_watch,
             ) = load_state()
 
         maple_bot.STATE_PATH = original_state_path
@@ -371,6 +430,8 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertIsNone(latest_cash_shop)
         self.assertIsNone(server_status)
         self.assertIsNone(exchange_log)
+        self.assertEqual(server_alert_roles, {})
+        self.assertIsNone(maintenance_watch)
 
     def test_legacy_weekly_message_id_is_migrated_to_its_channel(self) -> None:
         schedule = {
@@ -427,6 +488,13 @@ class NewsFilteringTests(unittest.TestCase):
             "entries": [],
             "message_ids": {"111": 444},
         }
+        server_alert_roles = {"111": 555}
+        maintenance_watch = {
+            "post_id": 43961,
+            "monitor_from_timestamp": 1_786_639_600,
+            "saw_down": True,
+            "completed": False,
+        }
         with tempfile.TemporaryDirectory() as directory:
             maple_bot.STATE_PATH = Path(directory) / "state.json"
             save_state(
@@ -441,6 +509,8 @@ class NewsFilteringTests(unittest.TestCase):
                 latest_cash_shop,
                 "down",
                 exchange_log,
+                server_alert_roles,
+                maintenance_watch,
             )
             (
                 sent_ids,
@@ -454,6 +524,8 @@ class NewsFilteringTests(unittest.TestCase):
                 loaded_latest_cash_shop,
                 loaded_server_status,
                 loaded_exchange_log,
+                loaded_server_alert_roles,
+                loaded_maintenance_watch,
             ) = load_state()
 
         maple_bot.STATE_PATH = original_state_path
@@ -470,6 +542,8 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(loaded_latest_cash_shop, latest_cash_shop)
         self.assertEqual(loaded_server_status, "down")
         self.assertEqual(loaded_exchange_log, exchange_log)
+        self.assertEqual(loaded_server_alert_roles, server_alert_roles)
+        self.assertEqual(loaded_maintenance_watch, maintenance_watch)
 
     def test_ursus_schedule_matches_fixed_utc_windows(self) -> None:
         summer_start = datetime(2026, 8, 11, 18, 0, tzinfo=timezone.utc)
@@ -791,12 +865,27 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({field.name for field in embed.fields}, set(statuses))
         self.assertIn("점검 중", next(field.value for field in embed.fields if field.name == "Kronos"))
 
+    async def test_server_status_is_not_requested_outside_maintenance_window(self) -> None:
+        bot = SimpleNamespace(
+            maintenance_watch=None,
+            fetch_server_status=AsyncMock(),
+        )
+
+        await maple_bot.MapleNewsBot.check_server_status.coro(bot)
+
+        bot.fetch_server_status.assert_not_awaited()
+
     async def test_server_open_alert_is_sent_once_after_down_to_up_transition(self) -> None:
         statuses = {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")}
         bot = SimpleNamespace(
             server_status="down",
+            maintenance_watch={
+                "monitor_from_timestamp": 0,
+                "saw_down": True,
+                "completed": False,
+            },
             fetch_server_status=AsyncMock(return_value=statuses),
-            send_alert_embed=AsyncMock(),
+            send_server_open_alert=AsyncMock(),
             persist_state=Mock(),
         )
 
@@ -804,23 +893,105 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
         await maple_bot.MapleNewsBot.check_server_status.coro(bot)
 
         self.assertEqual(bot.server_status, "up")
-        bot.send_alert_embed.assert_awaited_once()
-        self.assertEqual(bot.send_alert_embed.await_args.args[0], ALERT_SERVER)
+        self.assertTrue(bot.maintenance_watch["completed"])
+        bot.send_server_open_alert.assert_awaited_once()
         bot.persist_state.assert_called_once_with()
+
+    async def test_scheduled_maintenance_does_not_alert_before_down_or_end(self) -> None:
+        statuses = {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")}
+        bot = SimpleNamespace(
+            server_status=None,
+            maintenance_watch={
+                "monitor_from_timestamp": 0,
+                "end_timestamp": 9_999_999_999,
+                "saw_down": False,
+                "completed": False,
+            },
+            fetch_server_status=AsyncMock(return_value=statuses),
+            send_server_open_alert=AsyncMock(),
+            persist_state=Mock(),
+        )
+
+        await maple_bot.MapleNewsBot.check_server_status.coro(bot)
+
+        bot.send_server_open_alert.assert_not_awaited()
+        self.assertFalse(bot.maintenance_watch["completed"])
+
+    async def test_scheduled_maintenance_alerts_after_planned_end(self) -> None:
+        statuses = {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")}
+        bot = SimpleNamespace(
+            server_status=None,
+            maintenance_watch={
+                "monitor_from_timestamp": 0,
+                "end_timestamp": 0,
+                "saw_down": False,
+                "completed": False,
+            },
+            fetch_server_status=AsyncMock(return_value=statuses),
+            send_server_open_alert=AsyncMock(),
+            persist_state=Mock(),
+        )
+
+        await maple_bot.MapleNewsBot.check_server_status.coro(bot)
+
+        bot.send_server_open_alert.assert_awaited_once()
+        self.assertTrue(bot.maintenance_watch["completed"])
+
+    async def test_emergency_maintenance_waits_until_down_was_observed(self) -> None:
+        statuses = {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")}
+        bot = SimpleNamespace(
+            server_status=None,
+            maintenance_watch={
+                "monitor_from_timestamp": 0,
+                "end_timestamp": None,
+                "saw_down": False,
+                "completed": False,
+            },
+            fetch_server_status=AsyncMock(return_value=statuses),
+            send_server_open_alert=AsyncMock(),
+            persist_state=Mock(),
+        )
+
+        await maple_bot.MapleNewsBot.check_server_status.coro(bot)
+
+        bot.send_server_open_alert.assert_not_awaited()
+        self.assertFalse(bot.maintenance_watch["completed"])
 
     async def test_server_api_error_does_not_change_saved_status(self) -> None:
         bot = SimpleNamespace(
             server_status="up",
+            maintenance_watch={
+                "monitor_from_timestamp": 0,
+                "saw_down": False,
+                "completed": False,
+            },
             fetch_server_status=AsyncMock(side_effect=ValueError("bad response")),
-            send_alert_embed=AsyncMock(),
+            send_server_open_alert=AsyncMock(),
             persist_state=Mock(),
         )
 
         await maple_bot.MapleNewsBot.check_server_status.coro(bot)
 
         self.assertEqual(bot.server_status, "up")
-        bot.send_alert_embed.assert_not_awaited()
+        bot.send_server_open_alert.assert_not_awaited()
         bot.persist_state.assert_not_called()
+
+    async def test_server_alert_mentions_configured_role_per_channel(self) -> None:
+        first = SimpleNamespace(id=111, send=AsyncMock())
+        second = SimpleNamespace(id=222, send=AsyncMock())
+        bot = SimpleNamespace(
+            server_alert_roles={"111": 555, "222": 666},
+            alert_text_channels=lambda alert_type: [first, second],
+        )
+        embed = build_server_status_embed(
+            {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")},
+            opened=True,
+        )
+
+        await maple_bot.MapleNewsBot.send_server_open_alert(bot, embed)
+
+        self.assertEqual(first.send.await_args.kwargs["content"], "<@&555>")
+        self.assertEqual(second.send.await_args.kwargs["content"], "<@&666>")
 
     def test_server_open_embed_uses_green_color(self) -> None:
         statuses = {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")}
@@ -1915,6 +2086,7 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
             translate_texts=AsyncMock(return_value=["프리미엄 서프라이즈 스타일 박스"]),
             sent_ids={post["id"]},
             latest_cash_shop=None,
+            maintenance_watch=None,
             sunny_sunday={},
             saved_categories=set(maple_bot.WATCHED_CATEGORIES),
             persist_state=Mock(),
