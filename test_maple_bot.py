@@ -969,6 +969,18 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
     def test_boss_choices_match_all_provided_health_values(self) -> None:
         self.assertEqual(len(BOSS_TRAFFIC_LIGHTS), 18)
         self.assertEqual(
+            [choice.value for choice in traffic_light_command.parameters[0].choices][-7:],
+            [
+                "칼로스",
+                "최초의 대적자",
+                "카링",
+                "찬란한 흉성",
+                "림보",
+                "발드릭스",
+                "유피테르",
+            ],
+        )
+        self.assertEqual(
             {choice.value for choice in traffic_light_command.parameters[0].choices},
             set(BOSS_TRAFFIC_LIGHTS),
         )
@@ -989,6 +1001,20 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([choice.value for choice in choices], ["노말", "하드"])
 
+    async def test_all_boss_difficulties_are_available_with_choice_object(self) -> None:
+        for boss, difficulties in BOSS_TRAFFIC_LIGHTS.items():
+            interaction = SimpleNamespace(
+                namespace=SimpleNamespace(boss=SimpleNamespace(value=boss))
+            )
+
+            choices = await traffic_light_difficulty_autocomplete(interaction, "")
+
+            self.assertEqual(
+                [choice.value for choice in choices],
+                list(difficulties),
+                boss,
+            )
+
     async def test_command_shows_selected_boss_five_percent_requirement(self) -> None:
         interaction = SimpleNamespace(
             response=SimpleNamespace(send_message=AsyncMock())
@@ -1002,7 +1028,7 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
             )
 
         embed = interaction.response.send_message.await_args.kwargs["embed"]
-        self.assertEqual(embed.title, "🚦 하드발드릭스 5%")
+        self.assertEqual(embed.title, "🚦 하드 발드릭스 5%")
         self.assertIn("**총 체력**　20,270,000,000,000K", embed.description)
         self.assertIn("**5% 최소 피해량**　1,010,000,000,000K", embed.description)
         self.assertNotIn("전투력 분석", embed.description)
@@ -1017,11 +1043,11 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
             await traffic_light_command.callback(
                 interaction,
                 SimpleNamespace(value="헬럭스"),
-                "해당 없음",
+                "일반",
             )
 
         embed = interaction.response.send_message.await_args.kwargs["embed"]
-        self.assertEqual(embed.title, "🚦 헬럭스 5%")
+        self.assertEqual(embed.title, "🚦 일반 헬럭스 5%")
 
     async def test_lucid_result_attaches_boss_thumbnail(self) -> None:
         interaction = SimpleNamespace(
@@ -1908,6 +1934,7 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
             message["embed"].image.url,
             "attachment://pssb-1-results.png",
         )
+        self.assertIsNone(message["embed"].footer.text)
         with Image.open(message["file"].fp) as result_image:
             self.assertEqual(result_image.size, (664, 591))
 
@@ -1942,6 +1969,14 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(item)
         self.assertEqual(item["gms_name"], "Oh My Captain")
 
+    def test_only_two_percent_or_lower_uses_purple_slot(self) -> None:
+        self.assertEqual(maple_bot.pssb_slot_path(2.0), maple_bot.PSSB_ADVANCED_SLOT_PATH)
+        self.assertEqual(maple_bot.pssb_slot_path(4.0), maple_bot.PSSB_COMMON_SLOT_PATH)
+
+    def test_two_percent_result_has_purple_marker(self) -> None:
+        self.assertIn("🟪 **Rare Item**", maple_bot.format_pssb_result(1, "Rare Item", 2.0))
+        self.assertNotIn("🟪", maple_bot.format_pssb_result(1, "Common Item", 4.0))
+
 
 class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_cash_shop_command_uses_saved_latest_link_and_thumbnail(self) -> None:
@@ -1965,6 +2000,7 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "[ 캐시샵 업데이트 ]")
         self.assertIn("https://example.com/latest-cash-shop", embed.description)
         self.assertIn("https://masonym.dev/cash-shop", embed.description)
+        self.assertIn("cash-shop)\n\n· 블랙 프라이데이", embed.description)
         self.assertIn("· 블랙 프라이데이 기념 아이템 출시", embed.description)
         self.assertIn("· 불프 스스비", embed.description)
         self.assertEqual(embed.thumbnail.url, "attachment://cash-shop-update.png")

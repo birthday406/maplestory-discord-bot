@@ -98,6 +98,7 @@ ITEM_ICON_ARCHIVE_PATH = Path(__file__).parent / "data" / "cash-item-icons.zip"
 PSSB_BACK_EFFECT_PATH = Path(__file__).parent / "assets" / "pssb-backeffect.png"
 PSSB_COMMON_SLOT_PATH = Path(__file__).parent / "assets" / "pssb-slot-common.png"
 PSSB_ADVANCED_SLOT_PATH = Path(__file__).parent / "assets" / "pssb-slot-advanced.png"
+PSSB_ADVANCED_RATE_THRESHOLD = 2.0
 URSUS_TIMEZONE = ZoneInfo("America/Los_Angeles")
 POLL_INTERVAL_MINUTES = 5
 SUNNY_SUNDAY_DURATION_SECONDS = 24 * 60 * 60
@@ -166,9 +167,22 @@ def pssb_cash_item(name: str) -> dict[str, str] | None:
     return None
 
 
-def create_pssb_result_image(
-    results: list[tuple[str, float]], common_rate: float
-) -> io.BytesIO:
+def pssb_slot_path(rate: float) -> Path:
+    """PSSB 결과 확률에 맞는 실제 GMS 슬롯 이미지를 반환합니다."""
+    return (
+        PSSB_ADVANCED_SLOT_PATH
+        if rate <= PSSB_ADVANCED_RATE_THRESHOLD
+        else PSSB_COMMON_SLOT_PATH
+    )
+
+
+def format_pssb_result(index: int, name: str, rate: float) -> str:
+    """Discord가 부분 글자색을 지원하지 않아 보라 등급은 보라 표식으로 구분합니다."""
+    rarity = "🟪 " if rate <= PSSB_ADVANCED_RATE_THRESHOLD else ""
+    return f"**{index}.** {rarity}**{name}**　`{rate:.2f}%`"
+
+
+def create_pssb_result_image(results: list[tuple[str, float]]) -> io.BytesIO:
     """실제 GMS SSB 화면 리소스에 추첨 아이콘을 합쳐 PNG 한 장을 만듭니다."""
     # 1회는 아이템을 크게, 5회는 실제 게임처럼 다섯 슬롯을 가로로 배치합니다.
     width, height = (664, 591) if len(results) == 1 else (664, 336)
@@ -201,10 +215,8 @@ def create_pssb_result_image(
     start_x = (width - total_width) // 2
     slot_y = (height - slot_size) // 2
     for index, (name, rate) in enumerate(results):
-        # 공식 표에서 가장 흔한 아이템은 회색, 더 희귀한 아이템은 보라 슬롯입니다.
-        slot_path = (
-            PSSB_COMMON_SLOT_PATH if rate == common_rate else PSSB_ADVANCED_SLOT_PATH
-        )
+        # 실제 화면을 기준으로 2% 이하는 보라색, 2% 초과는 회색 슬롯으로 표시합니다.
+        slot_path = pssb_slot_path(rate)
         with Image.open(slot_path) as source:
             slot = source.convert("RGBA").resize(
                 (slot_size, slot_size), Image.Resampling.LANCZOS
@@ -1529,6 +1541,8 @@ async def traffic_light_difficulty_autocomplete(
 ) -> list[app_commands.Choice[str]]:
     """먼저 선택한 보스에 실제로 존재하는 난이도만 보여줍니다."""
     boss = getattr(interaction.namespace, "boss", None)
+    # Discord가 선택값을 Choice 객체로 넘기는 경우에도 실제 문자열로 조회합니다.
+    boss = getattr(boss, "value", boss)
     difficulties = BOSS_TRAFFIC_LIGHTS.get(boss, {})
     return [
         app_commands.Choice(name=name, value=name)
@@ -1566,14 +1580,8 @@ async def traffic_light_command(
     total_hp, minimum_damage = boss_difficulties[difficulty]
     total_hp_k = format_boss_hp_as_k(total_hp)
     minimum_damage_k = format_boss_hp_as_k(minimum_damage)
-    boss_name = (
-        boss.value
-        if difficulty == "해당 없음"
-        else f"{difficulty} {boss.value}"
-    )
-    title_boss_name = (
-        boss.value if difficulty == "해당 없음" else f"{difficulty}{boss.value}"
-    )
+    boss_name = boss.value if difficulty == "일반" else f"{difficulty} {boss.value}"
+    title_boss_name = f"{difficulty} {boss.value}"
     embed = discord.Embed(
         title=f"🚦 {title_boss_name} 5%",
         description=(
@@ -1657,20 +1665,13 @@ async def pssb_command(
         title=f"{PSSB_EMOJI} Premium Surprise Style Box",
         url=PSSB_RATES_PAGE_URL,
         description="\n".join(
-            f"**{index}.** {name}　`{rate:.2f}%`"
+            format_pssb_result(index, name, rate)
             for index, (name, rate) in enumerate(results, start=1)
         ),
         color=0xFF69B4,
     )
-    embed.set_footer(text="공식 페이지에 표시된 반올림 확률 기준 · 실제 게임 결과와 무관")
-
     try:
-        # 선택된 결과가 모두 희귀 아이템이어도 등급을 올바르게 정하도록 전체 확률표의
-        # 최고 확률을 회색 슬롯 기준으로 사용합니다.
-        result_image = create_pssb_result_image(
-            results,
-            common_rate=max(rate for _, rate in rates),
-        )
+        result_image = create_pssb_result_image(results)
         filename = f"pssb-{count.value}-results.png"
         file = discord.File(result_image, filename=filename)
         embed.set_image(url=f"attachment://{filename}")
@@ -1700,7 +1701,7 @@ async def cash_shop_command(interaction: discord.Interaction) -> None:
             f"[공식 캐시샵 업데이트]({latest['url']})　"
             f"[캐시샵 데이터 마이닝]({CASH_SHOP_MINING_URL})"
             + (
-                "\n" + "\n".join(f"· {item}" for item in latest.get("items", []))
+                "\n\n" + "\n".join(f"· {item}" for item in latest.get("items", []))
                 if latest.get("items")
                 else ""
             )
