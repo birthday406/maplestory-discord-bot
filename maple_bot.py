@@ -18,6 +18,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+from PIL import Image
 
 from maple_calculators import (
     calculate_arcane_symbol_completion,
@@ -72,8 +73,31 @@ CASH_SHOP_TRANSFER_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-tr
 CASH_SHOP_UPDATE_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-update.png"
 URSUS_ACTIVE_IMAGE_PATH = Path(__file__).parent / "assets" / "ursus-golden-time.jpg"
 URSUS_INACTIVE_IMAGE_PATH = Path(__file__).parent / "assets" / "ursus-golden-time-inactive.jpg"
+BOSS_THUMBNAIL_PATHS = {
+    "헬럭스": Path(__file__).parent / "assets" / "boss-gollux.webp",
+    "스우": Path(__file__).parent / "assets" / "boss-lotus.webp",
+    "데미안": Path(__file__).parent / "assets" / "boss-damien.webp",
+    "가엔슬": Path(__file__).parent / "assets" / "boss-guardian-angel-slime.webp",
+    "루시드": Path(__file__).parent / "assets" / "boss-lucid.webp",
+    "윌": Path(__file__).parent / "assets" / "boss-will.webp",
+    "더스크": Path(__file__).parent / "assets" / "boss-dusk.webp",
+    "듄켈": Path(__file__).parent / "assets" / "boss-dunkel.webp",
+    "진 힐라": Path(__file__).parent / "assets" / "boss-verus-hilla.webp",
+    "세렌": Path(__file__).parent / "assets" / "boss-seren.webp",
+    "검마": Path(__file__).parent / "assets" / "boss-black-mage.webp",
+    "칼로스": Path(__file__).parent / "assets" / "boss-kalos.webp",
+    "발드릭스": Path(__file__).parent / "assets" / "boss-baldrix.webp",
+    "카링": Path(__file__).parent / "assets" / "boss-kaling.webp",
+    "최초의 대적자": Path(__file__).parent / "assets" / "boss-first-adversary.webp",
+    "찬란한 흉성": Path(__file__).parent / "assets" / "boss-baleful-star.webp",
+    "유피테르": Path(__file__).parent / "assets" / "boss-jupiter.webp",
+    "림보": Path(__file__).parent / "assets" / "boss-limbo.webp",
+}
 ITEM_DATA_PATH = Path(__file__).parent / "data" / "cash-items.tsv"
 ITEM_ICON_ARCHIVE_PATH = Path(__file__).parent / "data" / "cash-item-icons.zip"
+PSSB_BACK_EFFECT_PATH = Path(__file__).parent / "assets" / "pssb-backeffect.png"
+PSSB_COMMON_SLOT_PATH = Path(__file__).parent / "assets" / "pssb-slot-common.png"
+PSSB_ADVANCED_SLOT_PATH = Path(__file__).parent / "assets" / "pssb-slot-advanced.png"
 URSUS_TIMEZONE = ZoneInfo("America/Los_Angeles")
 POLL_INTERVAL_MINUTES = 5
 SUNNY_SUNDAY_DURATION_SECONDS = 24 * 60 * 60
@@ -140,6 +164,73 @@ def pssb_cash_item(name: str) -> dict[str, str] | None:
         if item:
             return item
     return None
+
+
+def create_pssb_result_image(
+    results: list[tuple[str, float]], common_rate: float
+) -> io.BytesIO:
+    """실제 GMS SSB 화면 리소스에 추첨 아이콘을 합쳐 PNG 한 장을 만듭니다."""
+    # 1회는 아이템을 크게, 5회는 실제 게임처럼 다섯 슬롯을 가로로 배치합니다.
+    width, height = (664, 591) if len(results) == 1 else (664, 336)
+    slot_size = 150 if len(results) == 1 else 98
+    gap = 14
+    canvas = Image.new("RGBA", (width, height), (24, 40, 48, 255))
+
+    # GMS 클라이언트에서 추출한 흰 광원 효과를 어두운 배경 위에 먼저 올립니다.
+    with Image.open(PSSB_BACK_EFFECT_PATH) as source:
+        effect = source.convert("RGBA").resize(
+            (width, height), Image.Resampling.LANCZOS
+        )
+    canvas.alpha_composite(effect)
+
+    # 압축 파일은 한 번만 열어 다섯 결과의 아이콘을 모두 읽습니다.
+    icon_data_by_name: dict[str, bytes] = {}
+    if ITEM_ICON_ARCHIVE_PATH.exists():
+        with zipfile.ZipFile(ITEM_ICON_ARCHIVE_PATH) as archive:
+            for name, _ in results:
+                item = pssb_cash_item(name)
+                icon_name = item.get("icon") if item else None
+                if not icon_name:
+                    continue
+                try:
+                    icon_data_by_name[name] = archive.read(icon_name)
+                except KeyError:
+                    logging.warning("PSSB item icon is missing from archive: %s", icon_name)
+
+    total_width = len(results) * slot_size + (len(results) - 1) * gap
+    start_x = (width - total_width) // 2
+    slot_y = (height - slot_size) // 2
+    for index, (name, rate) in enumerate(results):
+        # 공식 표에서 가장 흔한 아이템은 회색, 더 희귀한 아이템은 보라 슬롯입니다.
+        slot_path = (
+            PSSB_COMMON_SLOT_PATH if rate == common_rate else PSSB_ADVANCED_SLOT_PATH
+        )
+        with Image.open(slot_path) as source:
+            slot = source.convert("RGBA").resize(
+                (slot_size, slot_size), Image.Resampling.LANCZOS
+            )
+        slot_x = start_x + index * (slot_size + gap)
+        canvas.alpha_composite(slot, (slot_x, slot_y))
+
+        icon_data = icon_data_by_name.get(name)
+        if not icon_data:
+            continue
+        with Image.open(io.BytesIO(icon_data)) as source:
+            icon = source.convert("RGBA")
+        max_icon_size = int(slot_size * 0.62)
+        scale = min(max_icon_size / icon.width, max_icon_size / icon.height)
+        icon = icon.resize(
+            (max(1, round(icon.width * scale)), max(1, round(icon.height * scale))),
+            Image.Resampling.NEAREST if scale >= 1 else Image.Resampling.LANCZOS,
+        )
+        icon_x = slot_x + (slot_size - icon.width) // 2
+        icon_y = slot_y + (slot_size - icon.height) // 2
+        canvas.alpha_composite(icon, (icon_x, icon_y))
+
+    output = io.BytesIO()
+    canvas.convert("RGB").save(output, format="PNG", optimize=True)
+    output.seek(0)
+    return output
 
 
 def search_cash_items(query: str, limit: int = 25) -> list[dict[str, str]]:
@@ -410,6 +501,19 @@ def is_cash_shop_update(post: dict) -> bool:
     )
 
 
+def extract_cash_shop_sections(source: str) -> list[str]:
+    """최신 캐시샵 공지에서 이번에 새로 추가된 상위 항목만 꺼냅니다."""
+    sections = []
+    for heading in re.findall(r"<h1\b[^>]*>(.*?)</h1>", source, re.IGNORECASE | re.DOTALL):
+        name = html.unescape(html_to_text(heading))
+        normalized_name = name.upper()
+        if normalized_name == "ONGOING SALES":
+            break
+        if normalized_name not in {"DAILY DEALS", "SALES ENDING THIS WEEK"}:
+            sections.append(name)
+    return sections[:5]
+
+
 def extract_sunny_sunday(source: str) -> list[tuple[str, bool, list[str]]]:
     # 공식 패치노트의 SunnySunday 앵커 다음 표에서 날짜와 혜택 목록만 꺼냅니다.
     section = re.search(
@@ -570,10 +674,11 @@ def ursus_daily_windows(
     local_noon = datetime(
         local_now.year, local_now.month, local_now.day, 12, tzinfo=URSUS_TIMEZONE
     )
+    # 공식 골든타임은 UTC 18:00~22:00, 다음 날 01:00~05:00로 고정되어 있습니다.
     hours = (
-        ((10, 14), (18, 22))
+        ((11, 15), (18, 22))
         if local_noon.dst() != timedelta(0)
-        else ((9, 13), (17, 21))
+        else ((10, 14), (17, 21))
     )
     return [
         (
@@ -753,7 +858,6 @@ def build_ursus_embed(
         color=color,
     )
     embed.set_author(name="MapleStory | URSUS")
-    embed.set_footer(text="미국 서부시간 기준 · Discord 현지시간으로 자동 변환")
     embed.set_image(url=f"attachment://{image_path.name}")
     return embed, image_path
 
@@ -977,6 +1081,21 @@ async def growth_potion_command(
     await interaction.response.send_message(embed=embed)
 
 
+async def exp_coupon_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    """입력한 시작 레벨에서 실제 사용할 수 있는 EXP 교환권만 보여줍니다."""
+    level = getattr(interaction.namespace, "current_level", None)
+    if not isinstance(level, int):
+        return []
+    available = ["EXP 교환권"] if level < 260 else EXP_COUPONS
+    return [
+        app_commands.Choice(name=name, value=name)
+        for name in available
+        if current.casefold() in name.casefold()
+    ]
+
+
 @app_commands.command(name="exp쿠폰", description="EXP 교환권 사용 결과를 계산합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -995,19 +1114,16 @@ async def growth_potion_command(
     count="사용할 교환권 개수 (1~1억)",
 )
 @app_commands.choices(
-    coupon=[
-        app_commands.Choice(name=coupon_name, value=coupon_name)
-        for coupon_name in EXP_COUPONS
-    ],
     burning=[
         app_commands.Choice(name=burning_name, value=burning_name)
         for burning_name in EXP_COUPON_BURNING_OPTIONS
     ],
 )
+@app_commands.autocomplete(coupon=exp_coupon_autocomplete)
 async def exp_coupon_command(
     interaction: discord.Interaction,
-    coupon: app_commands.Choice[str],
     current_level: app_commands.Range[int, 200, 299],
+    coupon: str,
     current_exp_percent: app_commands.Range[float, 0.0, 99.999],
     count: app_commands.Range[int, 1, 100_000_000],
     burning: app_commands.Choice[str] | None = None,
@@ -1022,7 +1138,7 @@ async def exp_coupon_command(
 
     try:
         result_level, result_exp, gained_exp, used_count = calculate_exp_coupons(
-            coupon.value, current_level, current_exp_percent, count, burning_name
+            coupon, current_level, current_exp_percent, count, burning_name
         )
     except ValueError as error:
         await interaction.response.send_message(str(error), ephemeral=True)
@@ -1039,9 +1155,9 @@ async def exp_coupon_command(
         count_text += f" ({stop_reason}로 {used_count:,}개 적용)"
 
     embed = discord.Embed(
-        title=f"{EXP_COUPON_EMOJIS[coupon.value]} {coupon.name} 계산기",
+        title=f"{EXP_COUPON_EMOJIS[coupon]} {coupon} 계산기",
         description=(
-            f"**교환권**　{coupon.name}\n"
+            f"**교환권**　{coupon}\n"
             f"**사용 전**　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
             f"**버닝**　{burning_name}\n"
             f"**입력 개수**　{count_text}\n\n"
@@ -1408,6 +1524,19 @@ def format_boss_hp_as_k(value: str) -> str:
     return f"{int(Decimal(value[:-1]) * multiplier[value[-1]]):,}K"
 
 
+async def traffic_light_difficulty_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    """먼저 선택한 보스에 실제로 존재하는 난이도만 보여줍니다."""
+    boss = getattr(interaction.namespace, "boss", None)
+    difficulties = BOSS_TRAFFIC_LIGHTS.get(boss, {})
+    return [
+        app_commands.Choice(name=name, value=name)
+        for name in difficulties
+        if current.casefold() in name.casefold()
+    ]
+
+
 @app_commands.command(name="5퍼", description="글로벌 리부트 보스의 5% 최소 피해량을 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -1418,18 +1547,15 @@ def format_boss_hp_as_k(value: str) -> str:
 )
 @app_commands.choices(
     boss=[app_commands.Choice(name=name, value=name) for name in BOSS_TRAFFIC_LIGHTS],
-    difficulty=[
-        app_commands.Choice(name=name, value=name)
-        for name in ("해당 없음", "이지", "노말", "하드", "카오스", "익스트림")
-    ],
 )
+@app_commands.autocomplete(difficulty=traffic_light_difficulty_autocomplete)
 async def traffic_light_command(
     interaction: discord.Interaction,
     boss: app_commands.Choice[str],
-    difficulty: app_commands.Choice[str],
+    difficulty: str,
 ) -> None:
     boss_difficulties = BOSS_TRAFFIC_LIGHTS[boss.value]
-    if difficulty.value not in boss_difficulties:
+    if difficulty not in boss_difficulties:
         available = ", ".join(boss_difficulties)
         await interaction.response.send_message(
             f"{boss.value}에서 선택 가능한 난이도: **{available}**",
@@ -1437,25 +1563,34 @@ async def traffic_light_command(
         )
         return
 
-    total_hp, minimum_damage = boss_difficulties[difficulty.value]
+    total_hp, minimum_damage = boss_difficulties[difficulty]
     total_hp_k = format_boss_hp_as_k(total_hp)
     minimum_damage_k = format_boss_hp_as_k(minimum_damage)
     boss_name = (
         boss.value
-        if difficulty.value == "해당 없음"
-        else f"{difficulty.value} {boss.value}"
+        if difficulty == "해당 없음"
+        else f"{difficulty} {boss.value}"
+    )
+    title_boss_name = (
+        boss.value if difficulty == "해당 없음" else f"{difficulty}{boss.value}"
     )
     embed = discord.Embed(
-        title="🚦 글로벌 리부트 보스 5%",
+        title=f"🚦 {title_boss_name} 5%",
         description=(
             f"**{boss_name}**\n\n"
             f"**총 체력**　{total_hp_k}\n"
-            f"**5% 최소 피해량**　{minimum_damage_k}\n\n"
-            f"전투력 분석에 **{minimum_damage_k} 이상** 기록해야 보상을 받을 수 있습니다."
+            f"**5% 최소 피해량**　{minimum_damage_k}"
         ),
         color=0x57F287,
     )
-    embed.set_footer(text="K = 1,000 HP")
+    thumbnail_path = BOSS_THUMBNAIL_PATHS.get(boss.value)
+    if thumbnail_path is not None:
+        embed.set_thumbnail(url=f"attachment://{thumbnail_path.name}")
+        await interaction.response.send_message(
+            embed=embed,
+            file=discord.File(thumbnail_path),
+        )
+        return
     await interaction.response.send_message(embed=embed)
 
 
@@ -1518,41 +1653,32 @@ async def pssb_command(
         weights=[rate for _, rate in rates],
         k=count.value,
     )
-    embeds = []
-    files = []
-    for index, (name, rate) in enumerate(results, start=1):
-        embed = discord.Embed(
-            title=(
-                f"{PSSB_EMOJI} Premium Surprise Style Box"
-                if index == 1
-                else None
-            ),
-            url=PSSB_RATES_PAGE_URL,
-            description=f"**{index}.** {name}　`{rate:.2f}%`",
-            color=0xFF69B4,
-        )
-
-        # 남녀 한 쌍으로 표시된 보상은 DB에서 먼저 찾은 이름의 아이콘을 사용합니다.
-        item = pssb_cash_item(name)
-        icon_name = item.get("icon") if item else None
-        if icon_name and ITEM_ICON_ARCHIVE_PATH.exists():
-            try:
-                with zipfile.ZipFile(ITEM_ICON_ARCHIVE_PATH) as archive:
-                    icon_data = archive.read(icon_name)
-                filename = f'pssb-{index}-{item["id"]}.png'
-                files.append(discord.File(io.BytesIO(icon_data), filename=filename))
-                embed.set_thumbnail(url=f"attachment://{filename}")
-            except (KeyError, OSError, zipfile.BadZipFile):
-                logging.exception("PSSB item icon could not be read: %s", icon_name)
-        embeds.append(embed)
-
-    embeds[-1].set_footer(
-        text="공식 페이지에 표시된 반올림 확률 기준 · 실제 게임 결과와 무관"
+    embed = discord.Embed(
+        title=f"{PSSB_EMOJI} Premium Surprise Style Box",
+        url=PSSB_RATES_PAGE_URL,
+        description="\n".join(
+            f"**{index}.** {name}　`{rate:.2f}%`"
+            for index, (name, rate) in enumerate(results, start=1)
+        ),
+        color=0xFF69B4,
     )
-    message = {"embeds": embeds}
-    if files:
-        message["files"] = files
-    await interaction.followup.send(**message)
+    embed.set_footer(text="공식 페이지에 표시된 반올림 확률 기준 · 실제 게임 결과와 무관")
+
+    try:
+        # 선택된 결과가 모두 희귀 아이템이어도 등급을 올바르게 정하도록 전체 확률표의
+        # 최고 확률을 회색 슬롯 기준으로 사용합니다.
+        result_image = create_pssb_result_image(
+            results,
+            common_rate=max(rate for _, rate in rates),
+        )
+        filename = f"pssb-{count.value}-results.png"
+        file = discord.File(result_image, filename=filename)
+        embed.set_image(url=f"attachment://{filename}")
+        await interaction.followup.send(embed=embed, file=file)
+    except (OSError, ValueError, zipfile.BadZipFile):
+        # 리소스 파일에 문제가 생겨도 추첨 결과 이름까지 잃지는 않게 텍스트는 보냅니다.
+        logging.exception("PSSB result image could not be created.")
+        await interaction.followup.send(embed=embed)
 
 
 @app_commands.command(name="캐샵", description="최신 캐시샵 업데이트 링크를 보여줍니다.")
@@ -1573,6 +1699,11 @@ async def cash_shop_command(interaction: discord.Interaction) -> None:
         description=(
             f"[공식 캐시샵 업데이트]({latest['url']})　"
             f"[캐시샵 데이터 마이닝]({CASH_SHOP_MINING_URL})"
+            + (
+                "\n" + "\n".join(f"· {item}" for item in latest.get("items", []))
+                if latest.get("items")
+                else ""
+            )
         ),
         color=0x4E5058,
     )
@@ -2386,6 +2517,16 @@ class MapleNewsBot(commands.Bot):
                 "title": latest_cash_shop_post["name"],
                 "url": post_url(latest_cash_shop_post),
             }
+            if (
+                self.latest_cash_shop is None
+                or self.latest_cash_shop.get("post_id") != latest_cash_shop_post["id"]
+                or "items" not in self.latest_cash_shop
+            ):
+                detail = await self.fetch_post_detail(latest_cash_shop_post["id"])
+                sections = extract_cash_shop_sections(detail["body"])
+                latest_cash_shop["items"] = await self.translate_texts(sections)
+            else:
+                latest_cash_shop["items"] = self.latest_cash_shop["items"]
             if latest_cash_shop != self.latest_cash_shop:
                 self.latest_cash_shop = latest_cash_shop
                 # 기존 설치의 state.json에 새 항목을 추가할 때도 바로 저장합니다.

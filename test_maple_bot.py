@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import maple_bot
+from PIL import Image
 from maple_calculators import (
     calculate_arcane_symbol_completion,
     calculate_symbol,
@@ -53,8 +54,10 @@ from maple_bot import (
     current_ursus_window,
     epic_dungeon_command,
     exp_coupon_command,
+    exp_coupon_autocomplete,
     extreme_growth_potion_command,
     extract_cash_shop_transfer,
+    extract_cash_shop_sections,
     extract_miracle_time,
     extract_sunny_sunday,
     format_sunny_sunday_date,
@@ -96,6 +99,7 @@ from maple_bot import (
     symbol_calculator_command,
     thumbnail_url,
     traffic_light_command,
+    traffic_light_difficulty_autocomplete,
     update_alert_channel,
     utc_event_timestamp,
     ursus_alert_command,
@@ -370,30 +374,41 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(loaded_latest_cash_shop, latest_cash_shop)
         self.assertEqual(loaded_server_status, "down")
 
-    def test_ursus_schedule_follows_pacific_daylight_saving_time(self) -> None:
-        summer_start = datetime(2026, 8, 11, 17, 0, tzinfo=timezone.utc)
+    def test_ursus_schedule_matches_fixed_utc_windows(self) -> None:
+        summer_start = datetime(2026, 8, 11, 18, 0, tzinfo=timezone.utc)
         summer_window = current_ursus_window(summer_start)
         self.assertIsNotNone(summer_window)
-        self.assertEqual((summer_window[0].hour, summer_window[1].hour), (10, 14))
+        self.assertEqual((summer_window[0].hour, summer_window[1].hour), (11, 15))
         self.assertEqual(ursus_boundary_event(summer_start)[0], "start")
         self.assertEqual(
-            ursus_boundary_event(datetime(2026, 8, 11, 21, 0, tzinfo=timezone.utc))[0],
+            ursus_boundary_event(datetime(2026, 8, 11, 22, 0, tzinfo=timezone.utc))[0],
             "end",
         )
         self.assertIsNone(
-            current_ursus_window(datetime(2026, 8, 11, 21, 0, tzinfo=timezone.utc))
+            current_ursus_window(datetime(2026, 8, 11, 22, 0, tzinfo=timezone.utc))
         )
         self.assertIsNone(
-            ursus_boundary_event(datetime(2026, 8, 11, 17, 1, tzinfo=timezone.utc))
+            ursus_boundary_event(datetime(2026, 8, 11, 18, 1, tzinfo=timezone.utc))
         )
 
-        winter_start = datetime(2026, 1, 15, 17, 0, tzinfo=timezone.utc)
+        summer_evening = current_ursus_window(
+            datetime(2026, 8, 12, 1, 0, tzinfo=timezone.utc)
+        )
+        self.assertEqual(
+            (
+                summer_evening[0].astimezone(timezone.utc).hour,
+                summer_evening[1].astimezone(timezone.utc).hour,
+            ),
+            (1, 5),
+        )
+
+        winter_start = datetime(2026, 1, 15, 18, 0, tzinfo=timezone.utc)
         winter_window = current_ursus_window(winter_start)
         self.assertIsNotNone(winter_window)
-        self.assertEqual((winter_window[0].hour, winter_window[1].hour), (9, 13))
+        self.assertEqual((winter_window[0].hour, winter_window[1].hour), (10, 14))
 
     def test_ursus_embed_uses_discord_timestamps_and_state_image(self) -> None:
-        now = datetime(2026, 8, 11, 17, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 8, 11, 18, 0, tzinfo=timezone.utc)
         window = current_ursus_window(now)
         embed, image_path = build_ursus_embed("active", window, now)
 
@@ -401,6 +416,7 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertIn("진행 중입니다", embed.description)
         self.assertIn(f"<t:{int(window[0].timestamp())}:T>", embed.description)
         self.assertEqual(embed.image.url, "attachment://ursus-golden-time.jpg")
+        self.assertIsNone(embed.footer.text)
 
         inactive_embed, inactive_path = build_ursus_embed("inactive", now=now)
         self.assertEqual(inactive_path, maple_bot.URSUS_INACTIVE_IMAGE_PATH)
@@ -936,6 +952,15 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
+    def test_supplied_boss_thumbnail_files_exist(self) -> None:
+        self.assertEqual(
+            set(maple_bot.BOSS_THUMBNAIL_PATHS),
+            set(BOSS_TRAFFIC_LIGHTS),
+        )
+        self.assertTrue(
+            all(path.is_file() for path in maple_bot.BOSS_THUMBNAIL_PATHS.values())
+        )
+
     def test_boss_hp_units_are_converted_to_ingame_k_unit(self) -> None:
         self.assertEqual(format_boss_hp_as_k("38.5B"), "38,500,000K")
         self.assertEqual(format_boss_hp_as_k("24.175T"), "24,175,000,000K")
@@ -954,21 +979,67 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(BOSS_TRAFFIC_LIGHTS["림보"]["하드"], ("12.55Q", "627.65T"))
         self.assertEqual(BOSS_TRAFFIC_LIGHTS["발드릭스"]["노말"], ("8.90Q", "445T"))
         self.assertEqual(BOSS_TRAFFIC_LIGHTS["발드릭스"]["하드"], ("20.27Q", "1.01Q"))
+        self.assertIn("찬란한 흉성", BOSS_TRAFFIC_LIGHTS)
+        self.assertNotIn("말레픽 스타", BOSS_TRAFFIC_LIGHTS)
+
+    async def test_difficulty_autocomplete_only_shows_selected_boss_modes(self) -> None:
+        interaction = SimpleNamespace(namespace=SimpleNamespace(boss="유피테르"))
+
+        choices = await traffic_light_difficulty_autocomplete(interaction, "")
+
+        self.assertEqual([choice.value for choice in choices], ["노말", "하드"])
 
     async def test_command_shows_selected_boss_five_percent_requirement(self) -> None:
         interaction = SimpleNamespace(
             response=SimpleNamespace(send_message=AsyncMock())
         )
 
-        await traffic_light_command.callback(
-            interaction,
-            SimpleNamespace(value="발드릭스"),
-            SimpleNamespace(value="하드"),
-        )
+        with patch("maple_bot.discord.File", return_value=Mock()):
+            await traffic_light_command.callback(
+                interaction,
+                SimpleNamespace(value="발드릭스"),
+                "하드",
+            )
 
         embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "🚦 하드발드릭스 5%")
         self.assertIn("**총 체력**　20,270,000,000,000K", embed.description)
         self.assertIn("**5% 최소 피해량**　1,010,000,000,000K", embed.description)
+        self.assertNotIn("전투력 분석", embed.description)
+        self.assertIsNone(embed.footer.text)
+
+    async def test_command_title_omits_missing_difficulty(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        with patch("maple_bot.discord.File", return_value=Mock()):
+            await traffic_light_command.callback(
+                interaction,
+                SimpleNamespace(value="헬럭스"),
+                "해당 없음",
+            )
+
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "🚦 헬럭스 5%")
+
+    async def test_lucid_result_attaches_boss_thumbnail(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+        image_file = Mock()
+
+        with patch("maple_bot.discord.File", return_value=image_file) as file_class:
+            await traffic_light_command.callback(
+                interaction,
+                SimpleNamespace(value="루시드"),
+                "하드",
+            )
+
+        message = interaction.response.send_message.await_args.kwargs
+        self.assertEqual(message["embed"].thumbnail.url, "attachment://boss-lucid.webp")
+        self.assertIs(message["file"], image_file)
+        file_class.assert_called_once_with(maple_bot.BOSS_THUMBNAIL_PATHS["루시드"])
 
     async def test_command_explains_invalid_boss_difficulty_combination(self) -> None:
         interaction = SimpleNamespace(
@@ -978,7 +1049,7 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
         await traffic_light_command.callback(
             interaction,
             SimpleNamespace(value="림보"),
-            SimpleNamespace(value="카오스"),
+            "카오스",
         )
 
         interaction.response.send_message.assert_awaited_once_with(
@@ -1243,7 +1314,7 @@ class GrowthPotionCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("비욘드 버닝**　미적용", embed.description)
 
 
-class ExpCouponTests(unittest.TestCase):
+class ExpCouponTests(unittest.IsolatedAsyncioTestCase):
     def test_coupon_tables_match_supplied_html_boundaries(self) -> None:
         normal_start, normal_exp = EXP_COUPONS["EXP 교환권"]
         advanced_start, advanced_exp = EXP_COUPONS["상급 EXP 교환권"]
@@ -1298,11 +1369,18 @@ class ExpCouponTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 calculate_exp_coupons(coupon_name, level, 0, 1)
 
-    def test_command_offers_both_coupon_types(self) -> None:
-        self.assertEqual(
-            {choice.value for choice in exp_coupon_command.parameters[0].choices},
-            set(EXP_COUPONS),
-        )
+    async def test_coupon_autocomplete_filters_advanced_coupon_by_level(self) -> None:
+        missing_level = SimpleNamespace(namespace=SimpleNamespace(current_level=None))
+        low_level = SimpleNamespace(namespace=SimpleNamespace(current_level=259))
+        high_level = SimpleNamespace(namespace=SimpleNamespace(current_level=260))
+
+        missing_choices = await exp_coupon_autocomplete(missing_level, "")
+        low_choices = await exp_coupon_autocomplete(low_level, "")
+        high_choices = await exp_coupon_autocomplete(high_level, "")
+
+        self.assertEqual(missing_choices, [])
+        self.assertEqual([choice.value for choice in low_choices], ["EXP 교환권"])
+        self.assertEqual({choice.value for choice in high_choices}, set(EXP_COUPONS))
 
     def test_command_offers_requested_burning_types(self) -> None:
         burning_parameter = next(
@@ -1338,8 +1416,8 @@ class ExpCouponCommandTests(unittest.IsolatedAsyncioTestCase):
             ):
                 await exp_coupon_command.callback(
                     interaction,
-                    SimpleNamespace(name=coupon_name, value=coupon_name),
                     260,
+                    coupon_name,
                     0,
                     1,
                     SimpleNamespace(name="X", value="X"),
@@ -1360,24 +1438,24 @@ class ExpCouponCommandTests(unittest.IsolatedAsyncioTestCase):
             )
             for _ in range(3)
         ]
-        coupon = SimpleNamespace(name="상급 EXP 교환권", value="상급 EXP 교환권")
+        coupon = "상급 EXP 교환권"
         with patch(
             "maple_bot.calculate_exp_coupons",
             return_value=(270, 0, 1, 1),
         ) as calculate:
             await exp_coupon_command.callback(
-                interactions[0], coupon, 269, 0, 1, None
+                interactions[0], 269, coupon, 0, 1, None
             )
             await exp_coupon_command.callback(
                 interactions[1],
-                coupon,
                 269,
+                coupon,
                 0,
                 1,
                 SimpleNamespace(name="비욘드버닝", value="비욘드버닝"),
             )
             await exp_coupon_command.callback(
-                interactions[2], coupon, 269, 0, 1, None
+                interactions[2], 269, coupon, 0, 1, None
             )
 
         self.assertEqual(client.exp_coupon_burning_preferences, {"123": "비욘드버닝"})
@@ -1513,12 +1591,18 @@ class SymbolCalculatorTests(unittest.TestCase):
             (2679, 413_210_000, 20, 24, 128, date(2026, 12, 15)),
         )
 
-    def test_authentic_potion_bonus_is_included_before_twenty_percent(self) -> None:
+    def test_elanos_applies_only_to_base_daily_reward(self) -> None:
+        self.assertEqual(
+            calculate_symbol(
+                "아르카나", 1, 0, 2, 6, True, date(2026, 8, 10)
+            )[:4],
+            (12, 1_690_000, 20, 34),
+        )
         self.assertEqual(
             calculate_symbol(
                 "세르니움", 1, 0, 11, 6, True, date(2026, 8, 10)
-            ),
-            (4565, 3_930_100_000, 10, 19, 430, date(2027, 10, 13)),
+            )[:4],
+            (4565, 3_930_100_000, 10, 18),
         )
 
     def test_current_growth_reduces_only_required_symbol_count(self) -> None:
@@ -1702,6 +1786,10 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
         }
         bot = SimpleNamespace(
             fetch_posts=AsyncMock(return_value=[post]),
+            fetch_post_detail=AsyncMock(
+                return_value={"body": "<h1>Premium Surprise Style Box</h1><h1>ONGOING SALES</h1>"}
+            ),
+            translate_texts=AsyncMock(return_value=["프리미엄 서프라이즈 스타일 박스"]),
             sent_ids={post["id"]},
             latest_cash_shop=None,
             sunny_sunday={},
@@ -1720,6 +1808,7 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
                     "https://www.nexon.com/maplestory/news/sale/42853/"
                     "cash-shop-update-for-august-11"
                 ),
+                "items": ["프리미엄 서프라이즈 스타일 박스"],
             },
         )
         bot.persist_state.assert_called_once_with()
@@ -1805,7 +1894,7 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
             followup=SimpleNamespace(send=AsyncMock()),
         )
 
-    async def test_one_draw_sends_matching_item_icon(self) -> None:
+    async def test_one_draw_sends_one_composite_image(self) -> None:
         result = ("Roaring Green Rain Hood", 5.0)
         interaction = self.interaction([result])
 
@@ -1813,15 +1902,16 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
             await pssb_command.callback(interaction, SimpleNamespace(value=1))
 
         message = interaction.followup.send.await_args.kwargs
-        self.assertEqual(len(message["embeds"]), 1)
-        self.assertEqual(len(message["files"]), 1)
-        self.assertEqual(message["files"][0].filename, "pssb-1-1006264.png")
+        self.assertEqual(interaction.followup.send.await_count, 1)
+        self.assertEqual(message["file"].filename, "pssb-1-results.png")
         self.assertEqual(
-            message["embeds"][0].thumbnail.url,
-            "attachment://pssb-1-1006264.png",
+            message["embed"].image.url,
+            "attachment://pssb-1-results.png",
         )
+        with Image.open(message["file"].fp) as result_image:
+            self.assertEqual(result_image.size, (664, 591))
 
-    async def test_five_draws_send_five_embeds_and_icons(self) -> None:
+    async def test_five_draws_send_one_message_with_five_results(self) -> None:
         result = ("Roaring Green Rain Hood", 5.0)
         interaction = self.interaction([result])
 
@@ -1829,14 +1919,13 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
             await pssb_command.callback(interaction, SimpleNamespace(value=5))
 
         message = interaction.followup.send.await_args.kwargs
-        self.assertEqual(len(message["embeds"]), 5)
-        self.assertEqual(len(message["files"]), 5)
-        self.assertEqual(
-            [file.filename for file in message["files"]],
-            [f"pssb-{index}-1006264.png" for index in range(1, 6)],
-        )
+        self.assertEqual(interaction.followup.send.await_count, 1)
+        self.assertEqual(message["file"].filename, "pssb-5-results.png")
+        self.assertEqual(message["embed"].description.count("Roaring Green Rain Hood"), 5)
+        with Image.open(message["file"].fp) as result_image:
+            self.assertEqual(result_image.size, (664, 336))
 
-    async def test_draw_without_database_match_stays_text_only(self) -> None:
+    async def test_draw_without_database_match_keeps_empty_slot_and_name(self) -> None:
         result = ("Future PSSB Item", 1.0)
         interaction = self.interaction([result])
 
@@ -1844,8 +1933,8 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
             await pssb_command.callback(interaction, SimpleNamespace(value=1))
 
         message = interaction.followup.send.await_args.kwargs
-        self.assertNotIn("files", message)
-        self.assertIn("Future PSSB Item", message["embeds"][0].description)
+        self.assertEqual(message["file"].filename, "pssb-1-results.png")
+        self.assertIn("Future PSSB Item", message["embed"].description)
 
     def test_gender_suffix_uses_the_shared_item_name(self) -> None:
         item = pssb_cash_item("Oh My Captain (M) / Oh My Captain (F)")
@@ -1862,6 +1951,7 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
                     "post_id": 42853,
                     "title": "Cash Shop Update for August 11",
                     "url": "https://example.com/latest-cash-shop",
+                    "items": ["블랙 프라이데이 기념 아이템 출시", "불프 스스비"],
                 }
             ),
             response=SimpleNamespace(send_message=AsyncMock()),
@@ -1875,10 +1965,26 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "[ 캐시샵 업데이트 ]")
         self.assertIn("https://example.com/latest-cash-shop", embed.description)
         self.assertIn("https://masonym.dev/cash-shop", embed.description)
+        self.assertIn("· 블랙 프라이데이 기념 아이템 출시", embed.description)
+        self.assertIn("· 불프 스스비", embed.description)
         self.assertEqual(embed.thumbnail.url, "attachment://cash-shop-update.png")
         discord_file.assert_called_once_with(
             maple_bot.CASH_SHOP_UPDATE_IMAGE_PATH,
             filename="cash-shop-update.png",
+        )
+
+    def test_cash_shop_sections_stop_before_ongoing_sales(self) -> None:
+        source = """
+        <h1><strong>The Atelier Reliquary</strong></h1>
+        <h1>DAILY DEALS</h1>
+        <h1>Coloring Prism and Prism Color Restore</h1>
+        <h1>ONGOING SALES</h1>
+        <h1>Premium Surprise Style Box</h1>
+        """
+
+        self.assertEqual(
+            extract_cash_shop_sections(source),
+            ["The Atelier Reliquary", "Coloring Prism and Prism Color Restore"],
         )
 
     async def test_sunny_commands_hide_past_entries_and_use_korean_title(self) -> None:

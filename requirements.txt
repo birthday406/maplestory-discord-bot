@@ -2,3 +2,4 @@ discord.py>=2.4,<3
 aiohttp>=3.10,<4
 openai>=2,<3
 python-dotenv>=1,<2
+Pillow>=10,<12

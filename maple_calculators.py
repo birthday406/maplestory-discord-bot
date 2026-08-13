@@ -241,8 +241,8 @@ def calculate_symbol(
     potion_bonus = symbol["potion_bonus"][potion_level]
     selected_daily_symbols = base_daily_symbols + potion_bonus
     if elanos_applied:
-        # 게임 보상은 정수이므로 (기본 지급량 + 보약) × 120%의 소수점은 버립니다.
-        selected_daily_symbols = selected_daily_symbols * 120 // 100
+        # 엘라노스 20%는 일일 미션 기본 보상에만 적용되고 보약 보너스는 별도로 더해집니다.
+        selected_daily_symbols = base_daily_symbols * 120 // 100 + potion_bonus
 
     current_date = start_date or date.today()
     completion_date = current_date
