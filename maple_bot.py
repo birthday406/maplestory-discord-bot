@@ -1658,7 +1658,9 @@ async def traffic_light_difficulty_autocomplete(
     interaction: discord.Interaction, current: str
 ) -> list[app_commands.Choice[str]]:
     """먼저 선택한 보스에 실제로 존재하는 난이도만 보여줍니다."""
-    boss = getattr(interaction.namespace, "boss", None)
+    boss = vars(interaction.namespace).get(
+        "보스", getattr(interaction.namespace, "boss", None)
+    )
     # Discord가 선택값을 Choice 객체로 넘기는 경우에도 실제 문자열로 조회합니다.
     boss = getattr(boss, "value", boss)
     difficulties = BOSS_TRAFFIC_LIGHTS.get(boss, {})

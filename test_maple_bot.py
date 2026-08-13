@@ -1092,7 +1092,7 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("말레픽 스타", BOSS_TRAFFIC_LIGHTS)
 
     async def test_difficulty_autocomplete_only_shows_selected_boss_modes(self) -> None:
-        interaction = SimpleNamespace(namespace=SimpleNamespace(boss="유피테르"))
+        interaction = SimpleNamespace(namespace=SimpleNamespace(**{"보스": "유피테르"}))
 
         choices = await traffic_light_difficulty_autocomplete(interaction, "")
 
@@ -1101,7 +1101,7 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_boss_difficulties_are_available_with_choice_object(self) -> None:
         for boss, difficulties in BOSS_TRAFFIC_LIGHTS.items():
             interaction = SimpleNamespace(
-                namespace=SimpleNamespace(boss=SimpleNamespace(value=boss))
+                namespace=SimpleNamespace(**{"보스": SimpleNamespace(value=boss)})
             )
 
             choices = await traffic_light_difficulty_autocomplete(interaction, "")
