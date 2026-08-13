@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -23,12 +24,15 @@ from maple_data import (
 from maple_bot import (
     ALERT_CASH_TRANSFER,
     ALERT_CUBE_SALE,
+    ALERT_EXCHANGE_LOG,
     ALERT_MIRACLE_TIME,
     ALERT_NEWS,
     ALERT_SERVER,
     ALERT_SUNNY_DAY,
     ALERT_SUNNY_LIST,
     ALERT_URSUS,
+    INFO_EXCHANGE,
+    INFO_TIME,
     EPIC_DUNGEON_BONUSES,
     EPIC_DUNGEONS,
     EXP_COUPON_BURNING_OPTIONS,
@@ -38,6 +42,7 @@ from maple_bot import (
     HEXA_CORE_COSTS,
     LEVEL_EXP,
     build_miracle_time_embed,
+    build_exchange_rate_log_embed,
     build_server_status_embed,
     build_ursus_embed,
     calculate_epic_dungeon,
@@ -54,18 +59,22 @@ from maple_bot import (
     current_ursus_window,
     epic_dungeon_command,
     exp_coupon_command,
+    exchange_log_alert_command,
     exp_coupon_autocomplete,
     extreme_growth_potion_command,
     extract_cash_shop_transfer,
     extract_cash_shop_sections,
     extract_miracle_time,
     extract_sunny_sunday,
+    format_exchange_channel_name,
+    format_time_channel_name,
     format_sunny_sunday_date,
     format_boss_hp_as_k,
     growth_potion_command,
     help_command,
     hot_week_command,
     html_to_text,
+    info_channel_command,
     is_cash_shop_update,
     is_patch_notes,
     item_search_autocomplete,
@@ -81,9 +90,11 @@ from maple_bot import (
     normalize_alert_channels,
     parse_pssb_rates,
     parse_server_status,
+    parse_usd_exchange_rate,
     post_url,
     pssb_cash_item,
     pssb_command,
+    record_exchange_rate,
     save_state,
     search_cash_items,
     server_status_alert_command,
@@ -145,6 +156,9 @@ class NewsFilteringTests(unittest.TestCase):
                 ALERT_CUBE_SALE: set(),
                 ALERT_URSUS: set(),
                 ALERT_SERVER: set(),
+                ALERT_EXCHANGE_LOG: set(),
+                INFO_TIME: set(),
+                INFO_EXCHANGE: set(),
             },
         )
         self.assertEqual(
@@ -158,6 +172,9 @@ class NewsFilteringTests(unittest.TestCase):
                 ALERT_CUBE_SALE: set(),
                 ALERT_URSUS: set(),
                 ALERT_SERVER: set(),
+                ALERT_EXCHANGE_LOG: set(),
+                INFO_TIME: set(),
+                INFO_EXCHANGE: set(),
             },
         )
 
@@ -180,6 +197,7 @@ class NewsFilteringTests(unittest.TestCase):
             cube_sale_alert_command,
             ursus_alert_command,
             server_status_alert_command,
+            exchange_log_alert_command,
         ):
             self.assertTrue(command.guild_only)
             self.assertTrue(command.default_permissions.administrator)
@@ -187,6 +205,17 @@ class NewsFilteringTests(unittest.TestCase):
                 {choice.value for choice in command.parameters[1].choices},
                 {"on", "off"},
             )
+
+        self.assertTrue(info_channel_command.guild_only)
+        self.assertTrue(info_channel_command.default_permissions.administrator)
+        self.assertEqual(
+            {choice.value for choice in info_channel_command.parameters[0].choices},
+            {INFO_TIME, INFO_EXCHANGE},
+        )
+        self.assertEqual(
+            {choice.value for choice in info_channel_command.parameters[2].choices},
+            {"on", "off"},
+        )
 
     def test_server_status_requires_all_logins_and_one_game_channel(self) -> None:
         payload = {
@@ -210,6 +239,59 @@ class NewsFilteringTests(unittest.TestCase):
     def test_server_status_rejects_missing_world_data(self) -> None:
         with self.assertRaises(ValueError):
             parse_server_status({"servers": []})
+
+    def test_info_channel_names_use_korea_time_and_naver_usd_rate(self) -> None:
+        self.assertEqual(
+            format_time_channel_name(
+                datetime(2026, 8, 13, 23, 2, tzinfo=timezone.utc)
+            ),
+            "08월 14일 08시 00분",
+        )
+        self.assertEqual(
+            format_time_channel_name(
+                datetime(2026, 8, 13, 23, 7, tzinfo=timezone.utc)
+            ),
+            "08월 14일 08시 05분",
+        )
+        source = """
+        <table class="tbl_exchange"><tbody>
+          <tr><td class="tit"><a>일본 JPY</a></td><td class="sale">9.50</td></tr>
+          <tr><td class="tit"><a>미국 USD</a></td><td class="sale">1,423.80</td></tr>
+        </tbody></table>
+        """
+        rate = parse_usd_exchange_rate(source)
+        self.assertEqual(rate, Decimal("1423.80"))
+        self.assertEqual(format_exchange_channel_name(rate), "USD-1,423.80")
+
+    def test_missing_naver_usd_rate_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_usd_exchange_rate("<table><tr><td>일본 JPY</td></tr></table>")
+
+    def test_exchange_log_keeps_only_five_latest_changes(self) -> None:
+        exchange_log = None
+        rates = ["1415.80", "1415.50", "1415.00", "1418.20", "1423.80", "1420.00"]
+        for index, rate in enumerate(rates):
+            exchange_log, changed = record_exchange_rate(
+                exchange_log,
+                Decimal(rate),
+                datetime(2026, 8, 14, index, 0, tzinfo=timezone.utc),
+            )
+            self.assertTrue(changed)
+
+        self.assertEqual(len(exchange_log["entries"]), 5)
+        self.assertEqual(exchange_log["entries"][0]["rate"], "1415.50")
+        self.assertEqual(exchange_log["entries"][-1]["change"], "-3.80")
+        embed = build_exchange_rate_log_embed(exchange_log)
+        self.assertIn("🔵 ▼ 3.80원", embed.description)
+        self.assertIn("🔴 ▲ 5.60원", embed.description)
+
+        same_log, changed = record_exchange_rate(
+            exchange_log,
+            Decimal("1420.00"),
+            datetime(2026, 8, 14, 7, 0, tzinfo=timezone.utc),
+        )
+        self.assertFalse(changed)
+        self.assertIs(same_log, exchange_log)
 
     def test_watched_posts_includes_events_and_excludes_other_categories(self) -> None:
         posts = [
@@ -274,6 +356,7 @@ class NewsFilteringTests(unittest.TestCase):
                 ursus_alert_events,
                 latest_cash_shop,
                 server_status,
+                exchange_log,
             ) = load_state()
 
         maple_bot.STATE_PATH = original_state_path
@@ -287,6 +370,7 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(ursus_alert_events, {})
         self.assertIsNone(latest_cash_shop)
         self.assertIsNone(server_status)
+        self.assertIsNone(exchange_log)
 
     def test_legacy_weekly_message_id_is_migrated_to_its_channel(self) -> None:
         schedule = {
@@ -321,6 +405,9 @@ class NewsFilteringTests(unittest.TestCase):
             ALERT_CUBE_SALE: set(),
             ALERT_URSUS: set(),
             ALERT_SERVER: set(),
+            ALERT_EXCHANGE_LOG: set(),
+            INFO_TIME: set(),
+            INFO_EXCHANGE: set(),
         }
         patch_events = {"post_id": 42415, "miracle_time": []}
         exp_coupon_preferences = {"123": "하이퍼버닝"}
@@ -332,6 +419,13 @@ class NewsFilteringTests(unittest.TestCase):
             "post_id": 42853,
             "title": "Cash Shop Update for August 11",
             "url": "https://example.com/cash-shop-update",
+        }
+        exchange_log = {
+            "date": "2026-08-14",
+            "opening_rate": "1415.80",
+            "current_rate": "1423.80",
+            "entries": [],
+            "message_ids": {"111": 444},
         }
         with tempfile.TemporaryDirectory() as directory:
             maple_bot.STATE_PATH = Path(directory) / "state.json"
@@ -346,6 +440,7 @@ class NewsFilteringTests(unittest.TestCase):
                 ursus_alert_events,
                 latest_cash_shop,
                 "down",
+                exchange_log,
             )
             (
                 sent_ids,
@@ -358,6 +453,7 @@ class NewsFilteringTests(unittest.TestCase):
                 loaded_ursus_alert_events,
                 loaded_latest_cash_shop,
                 loaded_server_status,
+                loaded_exchange_log,
             ) = load_state()
 
         maple_bot.STATE_PATH = original_state_path
@@ -373,6 +469,7 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(loaded_ursus_alert_events, ursus_alert_events)
         self.assertEqual(loaded_latest_cash_shop, latest_cash_shop)
         self.assertEqual(loaded_server_status, "down")
+        self.assertEqual(loaded_exchange_log, exchange_log)
 
     def test_ursus_schedule_matches_fixed_utc_windows(self) -> None:
         summer_start = datetime(2026, 8, 11, 18, 0, tzinfo=timezone.utc)

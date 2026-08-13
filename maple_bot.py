@@ -47,6 +47,7 @@ from maple_data import (
 NEWS_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news"
 NEWS_DETAIL_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news/{post_id}"
 SERVER_STATUS_API_URL = "https://www.nexon.com/api/maplestory/no-auth/v1/server-status/na"
+USD_EXCHANGE_RATE_URL = "https://finance.naver.com/marketindex/exchangeList.naver"
 SERVER_STATUS_PAGE_URL = (
     "https://www.nexon.com/maplestory/support/server-status/north-america/scania"
 )
@@ -100,6 +101,7 @@ PSSB_COMMON_SLOT_PATH = Path(__file__).parent / "assets" / "pssb-slot-common.png
 PSSB_ADVANCED_SLOT_PATH = Path(__file__).parent / "assets" / "pssb-slot-advanced.png"
 PSSB_ADVANCED_RATE_THRESHOLD = 2.0
 URSUS_TIMEZONE = ZoneInfo("America/Los_Angeles")
+INFO_CHANNEL_TIMEZONE = ZoneInfo("Asia/Seoul")
 POLL_INTERVAL_MINUTES = 5
 SUNNY_SUNDAY_DURATION_SECONDS = 24 * 60 * 60
 MODEL = "gpt-5.6-luna"
@@ -111,6 +113,9 @@ ALERT_CASH_TRANSFER = "cash_transfer"
 ALERT_CUBE_SALE = "cube_sale"
 ALERT_URSUS = "ursus"
 ALERT_SERVER = "server"
+ALERT_EXCHANGE_LOG = "exchange_log"
+INFO_TIME = "info_time"
+INFO_EXCHANGE = "info_exchange"
 ALERT_TYPES = (
     ALERT_NEWS,
     ALERT_SUNNY_DAY,
@@ -120,6 +125,9 @@ ALERT_TYPES = (
     ALERT_CUBE_SALE,
     ALERT_URSUS,
     ALERT_SERVER,
+    ALERT_EXCHANGE_LOG,
+    INFO_TIME,
+    INFO_EXCHANGE,
 )
 
 ITEM_CATEGORY_NAMES = {
@@ -342,6 +350,113 @@ def watched_posts(posts: list[dict]) -> list[dict]:
     return [post for post in posts if post.get("category") in WATCHED_CATEGORIES]
 
 
+def format_time_channel_name(now: datetime) -> str:
+    """한국 현재 시각을 직전 5분 단위의 채널 이름으로 만듭니다."""
+    local_now = now.astimezone(INFO_CHANNEL_TIMEZONE)
+    display_minute = local_now.minute - local_now.minute % 5
+    return (
+        f"{local_now.month:02d}월 {local_now.day:02d}일 "
+        f"{local_now.hour:02d}시 {display_minute:02d}분"
+    )
+
+
+def parse_usd_exchange_rate(source: str) -> Decimal:
+    """네이버 금융 환율표에서 미국 USD의 매매기준율을 꺼냅니다."""
+    for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", source, re.IGNORECASE | re.DOTALL):
+        text = html.unescape(re.sub(r"<[^>]+>", " ", row))
+        if not re.search(r"미국\s*USD", text):
+            continue
+        match = re.search(
+            r'<td\b[^>]*class=["\'][^"\']*\bsale\b[^"\']*["\'][^>]*>'
+            r"\s*([\d,.]+)",
+            row,
+            re.IGNORECASE,
+        )
+        if match:
+            return Decimal(match.group(1).replace(",", ""))
+    raise ValueError("Naver USD/KRW exchange rate is missing")
+
+
+def format_exchange_channel_name(rate: Decimal) -> str:
+    """USD/KRW 환율을 음성 채널 이름 형식으로 만듭니다."""
+    return f"USD-{rate:,.2f}"
+
+
+def record_exchange_rate(
+    exchange_log: dict | None,
+    rate: Decimal,
+    now: datetime,
+) -> tuple[dict, bool]:
+    """한국시간 날짜별 환율 변동을 최근 5개까지만 기록합니다."""
+    local_now = now.astimezone(INFO_CHANNEL_TIMEZONE)
+    date_key = local_now.date().isoformat()
+    time_text = f"{local_now.hour:02d}:{local_now.minute - local_now.minute % 10:02d}"
+    rate_text = f"{rate:.2f}"
+    if exchange_log is None or exchange_log.get("date") != date_key:
+        return {
+            "date": date_key,
+            "opening_rate": rate_text,
+            "current_rate": rate_text,
+            "entries": [{"time": time_text, "rate": rate_text, "change": None}],
+            "message_ids": {},
+        }, True
+
+    previous_rate = Decimal(exchange_log["current_rate"])
+    if rate == previous_rate:
+        return exchange_log, False
+
+    exchange_log["current_rate"] = rate_text
+    exchange_log["entries"].append(
+        {
+            "time": time_text,
+            "rate": rate_text,
+            "change": f"{rate - previous_rate:.2f}",
+        }
+    )
+    exchange_log["entries"] = exchange_log["entries"][-5:]
+    return exchange_log, True
+
+
+def exchange_change_text(change: Decimal) -> str:
+    """Discord에서 안정적으로 보이는 이모지로 상승·하락을 구분합니다."""
+    if change > 0:
+        return f"🔴 ▲ {change:,.2f}원"
+    if change < 0:
+        return f"🔵 ▼ {abs(change):,.2f}원"
+    return "⚪ ─ 0.00원"
+
+
+def build_exchange_rate_log_embed(exchange_log: dict) -> discord.Embed:
+    """하루 환율의 최근 변동 5개와 시가 대비 변동을 표시합니다."""
+    date_value = datetime.strptime(exchange_log["date"], "%Y-%m-%d")
+    lines = []
+    for entry in exchange_log["entries"]:
+        suffix = (
+            "(시작)"
+            if entry["change"] is None
+            else exchange_change_text(Decimal(entry["change"]))
+        )
+        lines.append(
+            f"`{entry['time']}`  **{Decimal(entry['rate']):,.2f}원**  {suffix}"
+        )
+
+    current_rate = Decimal(exchange_log["current_rate"])
+    daily_change = current_rate - Decimal(exchange_log["opening_rate"])
+    description = "\n".join(lines)
+    description += (
+        f"\n\n**현재 환율:** {current_rate:,.2f}원"
+        f"\n**오늘 변동:** {exchange_change_text(daily_change)}"
+    )
+    return discord.Embed(
+        title=(
+            f"[ {date_value.year}년 {date_value.month}월 {date_value.day}일 "
+            "환율 변동 기록 ]"
+        ),
+        description=description,
+        color=0x5865F2,
+    )
+
+
 def normalize_alert_channels(
     stored_channels: dict | None,
     news_channel_id: int,
@@ -358,6 +473,9 @@ def normalize_alert_channels(
             ALERT_CUBE_SALE: set(),
             ALERT_URSUS: set(),
             ALERT_SERVER: set(),
+            ALERT_EXCHANGE_LOG: set(),
+            INFO_TIME: set(),
+            INFO_EXCHANGE: set(),
         }
     return {
         alert_type: {
@@ -1879,6 +1997,10 @@ ALERT_ACTION_CHOICES = [
     app_commands.Choice(name="ON", value="on"),
     app_commands.Choice(name="OFF", value="off"),
 ]
+INFO_CHANNEL_TYPE_CHOICES = [
+    app_commands.Choice(name="시간", value=INFO_TIME),
+    app_commands.Choice(name="환율", value=INFO_EXCHANGE),
+]
 
 
 async def run_alert_setting_command(
@@ -2031,6 +2153,45 @@ async def cube_sale_alert_command(
     )
 
 
+@app_commands.command(name="환율기록알림", description="USD/KRW 환율 변동 기록 채널을 설정합니다.")
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+@app_commands.rename(channel="채널", action="동작")
+@app_commands.describe(channel="환율 변동 기록을 표시할 텍스트 채널", action="기록 ON 또는 OFF")
+@app_commands.choices(action=ALERT_ACTION_CHOICES)
+async def exchange_log_alert_command(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    action: app_commands.Choice[str],
+) -> None:
+    await run_alert_setting_command(
+        interaction, channel, action, ALERT_EXCHANGE_LOG, "환율 기록 알림"
+    )
+
+
+@app_commands.command(name="정보채널", description="시간·환율 음성 채널의 자동 갱신을 설정합니다.")
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+@app_commands.rename(kind="종류", channel="채널", action="동작")
+@app_commands.describe(
+    kind="시간 또는 USD/KRW 환율",
+    channel="이름을 자동으로 바꿀 음성 채널",
+    action="자동 갱신 ON 또는 OFF",
+)
+@app_commands.choices(kind=INFO_CHANNEL_TYPE_CHOICES, action=ALERT_ACTION_CHOICES)
+async def info_channel_command(
+    interaction: discord.Interaction,
+    kind: app_commands.Choice[str],
+    channel: discord.VoiceChannel,
+    action: app_commands.Choice[str],
+) -> None:
+    await interaction.client.configure_info_channel(
+        interaction, channel, kind.value, action.value == "on"
+    )
+
+
 def load_state() -> tuple[
     set[int] | None,
     set[str],
@@ -2042,10 +2203,11 @@ def load_state() -> tuple[
     dict[str, str],
     dict | None,
     str | None,
+    dict | None,
 ]:
     # 이전 실행에서 이미 알린 공지 번호를 불러와 같은 글을 다시 보내지 않습니다.
     if not STATE_PATH.exists():
-        return None, set(), None, None, None, {}, {}, {}, None, None
+        return None, set(), None, None, None, {}, {}, {}, None, None, None
     state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     stored_sent_ids = state.get("sent_ids")
     return (
@@ -2059,6 +2221,7 @@ def load_state() -> tuple[
         state.get("ursus_alert_events", {}),
         state.get("latest_cash_shop"),
         state.get("server_status"),
+        state.get("exchange_log"),
     )
 
 
@@ -2073,6 +2236,7 @@ def save_state(
     ursus_alert_events: dict[str, str] | None = None,
     latest_cash_shop: dict | None = None,
     server_status: str | None = None,
+    exchange_log: dict | None = None,
 ) -> None:
     # 봇을 껐다 켜도 중복 알림을 막을 수 있도록 공지 번호를 파일에 저장합니다.
     STATE_PATH.write_text(
@@ -2093,6 +2257,7 @@ def save_state(
                 "ursus_alert_events": ursus_alert_events or {},
                 "latest_cash_shop": latest_cash_shop,
                 "server_status": server_status,
+                "exchange_log": exchange_log,
             },
             indent=2,
         ),
@@ -2118,6 +2283,7 @@ class MapleNewsBot(commands.Bot):
             self.ursus_alert_events,
             self.latest_cash_shop,
             self.server_status,
+            self.exchange_log,
         ) = load_state()
         self.alert_channels = normalize_alert_channels(
             stored_alert_channels, channel_id, sunny_channel_id
@@ -2162,6 +2328,8 @@ class MapleNewsBot(commands.Bot):
             ursus_alert_command,
             server_status_alert_command,
             cube_sale_alert_command,
+            exchange_log_alert_command,
+            info_channel_command,
         ):
             self.tree.add_command(command)
         await self.tree.sync()
@@ -2179,6 +2347,7 @@ class MapleNewsBot(commands.Bot):
             self.ursus_alert_events,
             self.latest_cash_shop,
             self.server_status,
+            self.exchange_log,
         )
 
     async def on_ready(self) -> None:
@@ -2196,6 +2365,10 @@ class MapleNewsBot(commands.Bot):
             self.check_ursus.start()
         if not self.check_server_status.is_running():
             self.check_server_status.start()
+        if not self.update_time_channels.is_running():
+            self.update_time_channels.start()
+        if not self.update_exchange_channels.is_running():
+            self.update_exchange_channels.start()
 
     async def close(self) -> None:
         if self.session is not None:
@@ -2218,6 +2391,17 @@ class MapleNewsBot(commands.Bot):
         ) as response:
             response.raise_for_status()
             return parse_server_status(await response.json())
+
+    async def fetch_usd_exchange_rate(self) -> Decimal:
+        # 네이버 금융 환율표는 JSON API가 아니므로 HTML에서 미국 USD 행만 읽습니다.
+        assert self.session is not None
+        async with self.session.get(
+            USD_EXCHANGE_RATE_URL,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as response:
+            response.raise_for_status()
+            return parse_usd_exchange_rate(await response.text())
 
     async def fetch_post_detail(self, post_id: int) -> dict:
         # 목록에는 본문이 없으므로, 새 공지의 본문을 별도로 가져옵니다.
@@ -2406,6 +2590,79 @@ class MapleNewsBot(commands.Bot):
                 continue
             del entry["message_ids"][str(channel.id)]
 
+    async def configure_info_channel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.VoiceChannel,
+        info_type: str,
+        enabled: bool,
+    ) -> None:
+        """관리자가 고른 음성 채널을 시간 또는 환율 표시 채널로 설정합니다."""
+        if interaction.guild is None or not interaction.permissions.administrator:
+            await interaction.response.send_message(
+                "이 설정은 서버 관리자만 변경할 수 있습니다.", ephemeral=True
+            )
+            return
+        if channel.guild.id != interaction.guild.id:
+            await interaction.response.send_message(
+                "현재 서버의 음성 채널만 선택할 수 있습니다.", ephemeral=True
+            )
+            return
+
+        label = "시간 채널" if info_type == INFO_TIME else "환율 채널"
+        already_enabled = channel.id in self.alert_channels[info_type]
+        if enabled == already_enabled:
+            state = "이미 켜져" if enabled else "이미 꺼져"
+            await interaction.response.send_message(
+                f"{channel.mention}의 {label} 자동 갱신이 {state} 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        if enabled:
+            other_type = INFO_EXCHANGE if info_type == INFO_TIME else INFO_TIME
+            if channel.id in self.alert_channels[other_type]:
+                await interaction.response.send_message(
+                    "같은 채널에 시간과 환율을 동시에 표시할 수 없습니다.", ephemeral=True
+                )
+                return
+            bot_member = channel.guild.me
+            permissions = channel.permissions_for(bot_member) if bot_member else None
+            if permissions is None or not (
+                permissions.view_channel and permissions.manage_channels
+            ):
+                await interaction.response.send_message(
+                    "선택한 채널에서 봇의 채널 보기·채널 관리 권한을 확인해주세요.",
+                    ephemeral=True,
+                )
+                return
+
+        await interaction.response.defer(ephemeral=True)
+        if enabled:
+            try:
+                if info_type == INFO_TIME:
+                    name = format_time_channel_name(datetime.now(timezone.utc))
+                else:
+                    name = format_exchange_channel_name(
+                        await self.fetch_usd_exchange_rate()
+                    )
+                await channel.edit(name=name, reason=f"{label} 자동 갱신 ON")
+            except (aiohttp.ClientError, discord.HTTPException, TimeoutError, ValueError):
+                logging.exception("Failed to enable %s for channel %s.", label, channel.id)
+                await interaction.followup.send(
+                    "채널 이름을 갱신하지 못했습니다. 권한이나 환율 페이지 상태를 확인해주세요.",
+                    ephemeral=True,
+                )
+                return
+
+        update_alert_channel(self.alert_channels, info_type, channel.id, enabled)
+        self.persist_state()
+        await interaction.followup.send(
+            f"{channel.mention}의 {label} 자동 갱신을 "
+            f"{'켰습니다' if enabled else '껐습니다'}.",
+            ephemeral=True,
+        )
+
     async def configure_alert_channel(
         self,
         interaction: discord.Interaction,
@@ -2487,6 +2744,23 @@ class MapleNewsBot(commands.Bot):
             except discord.HTTPException:
                 await interaction.followup.send(
                     "선택한 채널에 테스트 알림을 보내지 못했습니다.", ephemeral=True
+                )
+                return
+        elif enabled and alert_type == ALERT_EXCHANGE_LOG:
+            try:
+                self.exchange_log, _ = record_exchange_rate(
+                    self.exchange_log,
+                    await self.fetch_usd_exchange_rate(),
+                    datetime.now(timezone.utc),
+                )
+                message = await channel.send(
+                    embed=build_exchange_rate_log_embed(self.exchange_log)
+                )
+                self.exchange_log["message_ids"][str(channel.id)] = message.id
+            except (aiohttp.ClientError, discord.HTTPException, TimeoutError, ValueError):
+                logging.exception("Failed to enable exchange log for %s.", channel.id)
+                await interaction.followup.send(
+                    "선택한 채널에 환율 기록을 보내지 못했습니다.", ephemeral=True
                 )
                 return
         elif not enabled and alert_type == ALERT_SUNNY_DAY:
@@ -2852,6 +3126,76 @@ class MapleNewsBot(commands.Bot):
         self.server_status = current_status
         self.persist_state()
 
+    async def rename_info_channels(self, info_type: str, name: str) -> None:
+        """등록된 음성 채널 이름이 달라졌을 때만 변경합니다."""
+        for channel_id in sorted(self.alert_channels[info_type]):
+            channel = self.get_channel(channel_id)
+            if not isinstance(channel, discord.VoiceChannel):
+                logging.warning("Info voice channel %s is not accessible.", channel_id)
+                continue
+            if channel.name == name:
+                continue
+            try:
+                await channel.edit(name=name, reason="정보 채널 자동 갱신")
+            except discord.HTTPException:
+                logging.exception("Failed to rename info channel %s.", channel_id)
+
+    async def update_exchange_log_messages(self) -> None:
+        """등록 채널마다 하루 한 메시지만 만들고 이후에는 그 메시지를 수정합니다."""
+        assert self.exchange_log is not None
+        embed = build_exchange_rate_log_embed(self.exchange_log)
+        for channel in self.alert_text_channels(ALERT_EXCHANGE_LOG):
+            message_id = self.exchange_log["message_ids"].get(str(channel.id))
+            try:
+                if message_id is None:
+                    message = await channel.send(embed=embed)
+                    self.exchange_log["message_ids"][str(channel.id)] = message.id
+                else:
+                    await channel.get_partial_message(message_id).edit(embed=embed)
+            except discord.NotFound:
+                message = await channel.send(embed=embed)
+                self.exchange_log["message_ids"][str(channel.id)] = message.id
+            except discord.HTTPException:
+                logging.exception("Failed to update exchange log in %s.", channel.id)
+
+    @tasks.loop(minutes=5)
+    async def update_time_channels(self) -> None:
+        # 한국 현재 시각을 등록된 음성 채널에 5분마다 표시합니다.
+        if not self.alert_channels[INFO_TIME]:
+            return
+        await self.rename_info_channels(
+            INFO_TIME, format_time_channel_name(datetime.now(timezone.utc))
+        )
+
+    @tasks.loop(minutes=10)
+    async def update_exchange_channels(self) -> None:
+        # 네이버 금융의 USD/KRW 환율을 한 번 읽어 모든 등록 채널에 표시합니다.
+        if not (
+            self.alert_channels[INFO_EXCHANGE]
+            or self.alert_channels[ALERT_EXCHANGE_LOG]
+        ):
+            return
+        try:
+            rate = await self.fetch_usd_exchange_rate()
+        except (aiohttp.ClientError, TimeoutError, ValueError) as error:
+            logging.warning("USD/KRW exchange rate check failed: %s", error)
+            return
+        if self.alert_channels[INFO_EXCHANGE]:
+            await self.rename_info_channels(
+                INFO_EXCHANGE, format_exchange_channel_name(rate)
+            )
+        if self.alert_channels[ALERT_EXCHANGE_LOG]:
+            self.exchange_log, changed = record_exchange_rate(
+                self.exchange_log, rate, datetime.now(timezone.utc)
+            )
+            missing_message = any(
+                str(channel.id) not in self.exchange_log["message_ids"]
+                for channel in self.alert_text_channels(ALERT_EXCHANGE_LOG)
+            )
+            if changed or missing_message:
+                await self.update_exchange_log_messages()
+                self.persist_state()
+
     @check_news.error
     async def check_news_error(self, error: Exception) -> None:
         # API나 전송 단계의 오류를 서버 로그에 남겨 원인을 확인할 수 있게 합니다.
@@ -2878,6 +3222,14 @@ class MapleNewsBot(commands.Bot):
     async def check_server_status_error(self, error: Exception) -> None:
         logging.exception("MapleStory server status task failed.", exc_info=error)
 
+    @update_time_channels.error
+    async def update_time_channels_error(self, error: Exception) -> None:
+        logging.exception("Time channel update failed.", exc_info=error)
+
+    @update_exchange_channels.error
+    async def update_exchange_channels_error(self, error: Exception) -> None:
+        logging.exception("Exchange channel update failed.", exc_info=error)
+
     @check_news.before_loop
     async def before_check_news(self) -> None:
         # 디스코드 기본 연결 대기 함수를 가리지 않도록 다른 이름을 사용합니다.
@@ -2901,6 +3253,14 @@ class MapleNewsBot(commands.Bot):
 
     @check_server_status.before_loop
     async def before_check_server_status(self) -> None:
+        await self.wait_until_ready()
+
+    @update_time_channels.before_loop
+    async def before_update_time_channels(self) -> None:
+        await self.wait_until_ready()
+
+    @update_exchange_channels.before_loop
+    async def before_update_exchange_channels(self) -> None:
         await self.wait_until_ready()
 
 
