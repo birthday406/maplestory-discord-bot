@@ -1662,6 +1662,90 @@ async def item_search_autocomplete(
     return choices
 
 
+CHANNEL_RECOMMEND_MESSAGES = (
+    "헐 **{display_name}**야 오늘도 많이 힘들었구나 어떡해 ㅠㅠ\n"
+    "불쌍하니까 **광휘나 칠흑 잘 뜨는 채널** 점지해줄게 ✨\n\n"
+    "오늘의 추천 채널은 바로\n**[ {channel_number}채널 ]** 이야\n\n"
+    "광휘나 칠흑 꼭 먹고 나 보스 캐리해줘야 돼 ㅋㅋ",
+    "어이구 **{display_name}**야 오늘도 보스한테 탈탈 털렸구나 ㅠㅠ\n"
+    "내가 특별히 **대박 터지는 채널** 하나 골라줄게 🍀\n\n"
+    "오늘은\n**[ {channel_number}채널 ]** 로 가봐\n\n"
+    "여기서 칠흑 먹으면 내 덕인 거 알지? ㅋㅋ",
+    "**{display_name}**야 잠깐만... 지금 신호가 왔어 🔮\n"
+    "오늘 광휘 먹을 수 있는 채널이 딱 하나 보인다\n\n"
+    "바로\n**[ {channel_number}채널 ]** 이야\n\n"
+    "의심하지 말고 들어가서 보스부터 잡아봐 ㅋㅋ",
+    "헉 **{display_name}**야 오늘 운이 심상치 않은데? ✨\n"
+    "느낌 좋은 채널을 내가 직접 점지해줄게\n\n"
+    "행운의 채널은\n**[ {channel_number}채널 ]** 이야\n\n"
+    "오늘 칠흑 뜨면 자랑하러 와야 돼 ㅋㅋ",
+    "**{display_name}**야 요즘 보상이 너무 짜지 ㅠㅠ\n"
+    "불쌍해서 오늘만 특별히 **축복받은 채널** 알려줄게 🙏\n\n"
+    "**[ {channel_number}채널 ]** 로 가봐\n\n"
+    "광휘 하나 먹고 인생 좀 펴보자 ㅋㅋ",
+    "잠깐 **{display_name}**야, 채널 아무 데나 들어가면 안 돼\n"
+    "오늘은 내가 계산까지 다 해봤거든 🤓\n\n"
+    "정답은\n**[ {channel_number}채널 ]** 이야\n\n"
+    "여기서 보스 잡으면 뭔가 하나는 뜰 거 같은데? ㅋㅋ",
+    "우우우... **{display_name}**, 많이 힘들었구나 ㅠㅠ\n"
+    "간절한 마음을 담아 행운의 채널을 점지해줄게 ✨\n\n"
+    "오늘의 추천 채널은\n**[ {channel_number}채널 ]** 이야\n\n"
+    "여기서 꼭 광휘나 칠흑 먹고 행복해져야 돼 ㅋㅋ",
+    "**{display_name}**야 오늘 보스 갈 거지?\n"
+    "그냥 가지 말고 내가 골라준 채널에서 잡아봐 😎\n\n"
+    "오늘의 대박 채널은\n**[ {channel_number}채널 ]** 이야\n\n"
+    "칠흑 뜨면 수수료로 보스 캐리 한 번만 부탁해 ㅋㅋ",
+    "헐 **{display_name}**야 방금 메이플의 기운이 느껴졌어 ⚡\n"
+    "오늘 유난히 보상이 잘 뜨는 채널이 있대\n\n"
+    "그 채널은 바로\n**[ {channel_number}채널 ]** 이야\n\n"
+    "늦기 전에 들어가서 광휘부터 챙겨 ㅋㅋ",
+    "**{display_name}**야 오늘도 빈손으로 나오면 너무 슬프잖아 ㅠㅠ\n"
+    "그래서 내가 진짜 열심히 골라봤어\n\n"
+    "오늘의 행운 채널은\n**[ {channel_number}채널 ]** 이야 🍀\n\n"
+    "제발 뭐라도 하나 먹고 웃으면서 돌아와 ㅋㅋ",
+    "쉿 **{display_name}**야, 이건 너한테만 알려주는 비밀인데 🤫\n"
+    "오늘 보상이 몰려 있는 채널을 찾았어\n\n"
+    "바로\n**[ {channel_number}채널 ]** 이야\n\n"
+    "사람들 몰리기 전에 빨리 가서 칠흑 챙겨 ㅋㅋ",
+    "**{display_name}**야 오늘은 왠지 될 것 같아\n"
+    "내가 보기엔 광휘가 너 기다리고 있거든 ✨\n\n"
+    "광휘가 숨어 있는 곳은\n**[ {channel_number}채널 ]** 이야\n\n"
+    "잡고 나서 아무것도 안 뜨면... 한 번만 더 믿어줘 ㅋㅋ",
+    "아이고 **{display_name}**야 그동안 고생 많았다 ㅠㅠ\n"
+    "오늘은 보상 하나쯤 먹을 때도 됐잖아\n\n"
+    "내가 골라준 채널은\n**[ {channel_number}채널 ]** 이야\n\n"
+    "오늘 여기서 칠흑 먹고 졸업하자 ㅋㅋ",
+    "**{display_name}**야 채널 선택부터가 보스 공략인 거 몰랐어?\n"
+    "아무 데나 들어가지 말고 내 말을 믿어봐 😏\n\n"
+    "오늘의 정답은\n**[ {channel_number}채널 ]** 이야\n\n"
+    "광휘 뜨면 역시 내 선택이었다고 인정해줘 ㅋㅋ",
+    "두구두구두구... 🥁\n"
+    "**{display_name}**를 위한 오늘의 행운 채널을 발표합니다\n\n"
+    "결과는 바로\n**[ {channel_number}채널 ]** 입니다 ✨\n\n"
+    "오늘은 진짜 칠흑 하나 먹을 수 있을 것 같은데? ㅋㅋ",
+    "**{display_name}**야 오늘 운세 확인해봤는데 대박이래 🔮\n"
+    "특히 이 채널에서 보스를 잡으면 뭔가 뜬다는데?\n\n"
+    "추천 채널은\n**[ {channel_number}채널 ]** 이야\n\n"
+    "광휘 먹고 나한테 큰절 한 번 하면 돼 ㅋㅋ",
+    "헐 **{display_name}**야 아직도 채널 못 정했어?\n"
+    "그런 건 고민할 필요 없이 나한테 맡기면 되지 😌\n\n"
+    "오늘은\n**[ {channel_number}채널 ]** 로 가\n\n"
+    "칠흑 먹을 준비하고 보스부터 잡아버려 ㅋㅋ",
+    "**{display_name}**야 오늘은 내가 느낌이 진짜 좋아\n"
+    "이 채널에서 보스 잡으면 빈손으로 나오진 않을 것 같아 ✨\n\n"
+    "그곳은 바로\n**[ {channel_number}채널 ]** 이야\n\n"
+    "광휘든 칠흑이든 하나만 딱 먹고 오자 ㅋㅋ",
+    "어라 **{display_name}**야? 네 이름 옆에 행운의 숫자가 보이는데? 👀\n"
+    "아무래도 오늘 갈 채널이 정해진 것 같아\n\n"
+    "행운의 숫자는\n**[ {channel_number}채널 ]** 이야\n\n"
+    "여기서 대박 터뜨리고 자랑하러 와 ㅋㅋ",
+    "**{display_name}**야 오늘의 메이플 신탁이 내려왔어 🙏\n"
+    "광휘와 칠흑의 기운이 한 채널에 모이고 있대\n\n"
+    "신탁이 가리킨 곳은\n**[ {channel_number}채널 ]** 이야\n\n"
+    "오늘 꼭 득템하고 나 보스 캐리해줘야 돼 ㅋㅋ",
+)
+
+
 @app_commands.command(
     name="아이템검색", description="캐시 아이템의 GMS·KMS 이름과 아이콘을 검색합니다."
 )
@@ -1846,13 +1930,10 @@ async def channel_recommend_command(interaction: discord.Interaction) -> None:
     # 메이플스토리 게임 채널 1번부터 40번까지 중 하나를 같은 확률로 선택합니다.
     channel_number = random.randint(1, 40)
 
-    # 말투를 바꾸고 싶다면 아래 문자열만 수정하면 됩니다.
-    message = (
-        f"헐 **{display_name}**야 오늘도 많이 힘들었구나 어떡해 ㅠㅠ\n"
-        "불쌍하니까 **광휘나 칠흑 잘뜨는 채널** 점지해줄게 ✨\n\n"
-        "오늘의 추천 채널은 바로\n"
-        f"**[ {channel_number}채널 ]** 이야\n\n"
-        "광휘나 칠흑 꼭 먹고 나 보스 캐리해줘야돼 ㅋㅋ"
+    # 위의 문구 20개 중 하나를 같은 확률로 고른 뒤 닉네임과 채널 번호를 채웁니다.
+    message = random.choice(CHANNEL_RECOMMEND_MESSAGES).format(
+        display_name=display_name,
+        channel_number=channel_number,
     )
     await interaction.response.send_message(message)
 

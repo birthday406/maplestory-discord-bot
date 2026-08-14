@@ -2348,13 +2348,20 @@ class ChannelRecommendationTests(unittest.IsolatedAsyncioTestCase):
             response=SimpleNamespace(send_message=AsyncMock()),
         )
 
-        # 무작위 결과를 27로 고정해 닉네임과 추천 채널이 메시지에 들어가는지 확인합니다.
-        with patch("maple_bot.random.randint", return_value=27) as randint:
+        selected_message = maple_bot.CHANNEL_RECOMMEND_MESSAGES[2]
+        # 채널은 27, 문구는 세 번째 항목으로 고정해 두 무작위 선택이 적용되는지 확인합니다.
+        with (
+            patch("maple_bot.random.randint", return_value=27) as randint,
+            patch("maple_bot.random.choice", return_value=selected_message) as choice,
+        ):
             await channel_recommend_command.callback(interaction)
 
         randint.assert_called_once_with(1, 40)
+        choice.assert_called_once_with(maple_bot.CHANNEL_RECOMMEND_MESSAGES)
         message = interaction.response.send_message.await_args.args[0]
         self.assertIn("류\\*게이", message)
         self.assertIn("27채널", message)
-        self.assertIn("광휘나 칠흑 잘뜨는 채널", message)
-        self.assertIn("나 보스 캐리해줘야돼 ㅋㅋ", message)
+        self.assertIn("지금 신호가 왔어", message)
+
+    def test_twenty_messages_are_available(self) -> None:
+        self.assertEqual(len(maple_bot.CHANNEL_RECOMMEND_MESSAGES), 20)
