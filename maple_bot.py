@@ -18,7 +18,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from maple_calculators import (
     calculate_arcane_symbol_completion,
@@ -36,6 +36,9 @@ from maple_data import (
     EPIC_DUNGEONS,
     EXP_COUPON_BURNING_OPTIONS,
     EXP_COUPONS,
+    FAMILIAR_DOUBLE_PRIME_CHANCE,
+    FAMILIAR_EPIC_POTENTIALS,
+    FAMILIAR_UNIQUE_POTENTIALS,
     GROWTH_POTIONS,
     HEXA_CORE_COSTS,
     LEVEL_EXP,
@@ -110,6 +113,16 @@ PSSB_BACK_EFFECT_PATH = Path(__file__).parent / "assets" / "pssb-backeffect.png"
 PSSB_COMMON_SLOT_PATH = Path(__file__).parent / "assets" / "pssb-slot-common.png"
 PSSB_ADVANCED_SLOT_PATH = Path(__file__).parent / "assets" / "pssb-slot-advanced.png"
 PSSB_ADVANCED_RATE_THRESHOLD = 2.0
+FAMILIAR_ASSET_PATHS = {
+    "back": Path(__file__).parent / "assets" / "familiar-card-back.png",
+    "scene": Path(__file__).parent / "assets" / "familiar-card-scene.png",
+    "spec": Path(__file__).parent / "assets" / "familiar-card-spec.png",
+    "name": Path(__file__).parent / "assets" / "familiar-card-unique-name.png",
+    "lock": Path(__file__).parent / "assets" / "familiar-card-lock.png",
+    "edit": Path(__file__).parent / "assets" / "familiar-card-edit.png",
+    "sherbet": Path(__file__).parent / "assets" / "familiar-sherbet.png",
+    "font": Path(__file__).parent / "assets" / "NanumGothic.ttf",
+}
 URSUS_TIMEZONE = ZoneInfo("America/Los_Angeles")
 INFO_CHANNEL_TIMEZONE = ZoneInfo("Asia/Seoul")
 POLL_INTERVAL_MINUTES = 5
@@ -257,6 +270,87 @@ def create_pssb_result_image(results: list[tuple[str, float]]) -> io.BytesIO:
         icon_x = slot_x + (slot_size - icon.width) // 2
         icon_y = slot_y + (slot_size - icon.height) // 2
         canvas.alpha_composite(icon, (icon_x, icon_y))
+
+    output = io.BytesIO()
+    canvas.convert("RGB").save(output, format="PNG", optimize=True)
+    output.seek(0)
+    return output
+
+
+def create_familiar_result_image(first_line: str, second_line: str) -> io.BytesIO:
+    """실제 GMS 퍼밀리어 UI에 Sherbet과 잠재능력 두 줄을 합칩니다."""
+    scale = 2
+
+    def scaled_asset(name: str) -> Image.Image:
+        with Image.open(FAMILIAR_ASSET_PATHS[name]) as source:
+            image = source.convert("RGBA")
+        return image.resize(
+            (image.width * scale, image.height * scale), Image.Resampling.NEAREST
+        )
+
+    canvas = scaled_asset("back")
+
+    # 카드의 고정 UI 조각은 GMS 클라이언트의 실제 좌표에 맞춰 배치합니다.
+    for name, position in (
+        ("name", (14, 15)),
+        ("scene", (13, 58)),
+        ("spec", (31, 229)),
+        ("edit", (310, 20)),
+        ("lock", (331, 18)),
+    ):
+        canvas.alpha_composite(
+            scaled_asset(name), (position[0] * scale, position[1] * scale)
+        )
+
+    # Sherbet은 작은 픽셀 스프라이트이므로 흐려지지 않게 정수 배율로 확대합니다.
+    with Image.open(FAMILIAR_ASSET_PATHS["sherbet"]) as source:
+        sherbet = source.convert("RGBA")
+    sherbet = sherbet.resize(
+        (sherbet.width * 5 * scale, sherbet.height * 5 * scale),
+        Image.Resampling.NEAREST,
+    )
+    canvas.alpha_composite(
+        sherbet,
+        ((183 * scale - sherbet.width // 2), (219 * scale - sherbet.height)),
+    )
+
+    draw = ImageDraw.Draw(canvas)
+
+    def font(size: int) -> ImageFont.FreeTypeFont:
+        return ImageFont.truetype(str(FAMILIAR_ASSET_PATHS["font"]), size * scale)
+
+    def fitting_font(text: str, size: int = 11) -> ImageFont.FreeTypeFont:
+        # 긴 회복 옵션도 잠재능력 칸 한 줄 안에 들어가도록 필요한 경우에만 줄입니다.
+        while size > 8:
+            selected = font(size)
+            if draw.textbbox((0, 0), text, font=selected)[2] <= 320 * scale:
+                return selected
+            size -= 1
+        return font(size)
+
+    pale_text = (239, 222, 189, 255)
+    white_text = (245, 245, 245, 255)
+    draw.text(
+        (28 * scale, 20 * scale),
+        "Luna Pet Sherbet",
+        font=font(13),
+        fill=white_text,
+    )
+    draw.text(
+        (23 * scale, 63 * scale),
+        "Breakthrough Available",
+        font=font(10),
+        fill=(180, 160, 134, 255),
+    )
+    draw.text((52 * scale, 229 * scale), "1", font=font(10), fill=pale_text)
+    draw.text((23 * scale, 280 * scale), first_line, font=fitting_font(first_line), fill=white_text)
+    draw.text((23 * scale, 299 * scale), second_line, font=fitting_font(second_line), fill=white_text)
+    draw.text(
+        (23 * scale, 320 * scale),
+        "Switch Potential Info with Interact/Harvest",
+        font=font(8),
+        fill=white_text,
+    )
 
     output = io.BytesIO()
     canvas.convert("RGB").save(output, format="PNG", optimize=True)
@@ -1921,7 +2015,7 @@ async def help_command(interaction: discord.Interaction) -> None:
     )
     embed.add_field(
         name="시뮬레이터",
-        value="`/익성비` `/스스비` `/채널추천`",
+        value="`/익성비` `/스스비` `/퍼밀리어` `/채널추천`",
         inline=False,
     )
     embed.add_field(
@@ -2059,6 +2153,53 @@ async def channel_recommend_command(interaction: discord.Interaction) -> None:
         channel_number=channel_number,
     )
     await interaction.response.send_message(message)
+
+
+def draw_unique_familiar_potential() -> tuple[str, str, bool]:
+    """유니크 퍼밀리어 카드의 잠재능력 두 줄을 표본 확률대로 추첨합니다."""
+    first_line = random.choices(
+        FAMILIAR_UNIQUE_POTENTIALS,
+        weights=[rate for _, rate in FAMILIAR_UNIQUE_POTENTIALS],
+        k=1,
+    )[0][0]
+    double_prime = random.random() < FAMILIAR_DOUBLE_PRIME_CHANCE
+    second_pool = (
+        FAMILIAR_UNIQUE_POTENTIALS if double_prime else FAMILIAR_EPIC_POTENTIALS
+    )
+    second_line = random.choices(
+        second_pool,
+        weights=[rate for _, rate in second_pool],
+        k=1,
+    )[0][0]
+    return first_line, second_line, double_prime
+
+
+@app_commands.command(
+    name="퍼밀리어",
+    description="유니크 퍼밀리어 잠재능력 두 줄을 무작위로 추첨합니다.",
+)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def familiar_command(interaction: discord.Interaction) -> None:
+    """유니크 퍼밀리어 카드 한 장의 잠재능력 결과를 보여줍니다."""
+    first_line, second_line, double_prime = draw_unique_familiar_potential()
+    embed = discord.Embed(
+        title="🔮 유니크 퍼밀리어 잠재능력",
+        description="✨ **더블 프라임!**" if double_prime else None,
+        color=0x9B59B6,
+    )
+    filename = "familiar-result.png"
+    embed.set_image(url=f"attachment://{filename}")
+    embed.set_footer(
+        text="커뮤니티 표본 확률 기준 · 두 번째 줄 유니크 확률 1%"
+    )
+    await interaction.response.send_message(
+        embed=embed,
+        file=discord.File(
+            create_familiar_result_image(first_line, second_line),
+            filename=filename,
+        ),
+    )
 
 
 @app_commands.command(
@@ -2648,6 +2789,7 @@ class MapleNewsBot(commands.Bot):
             item_search_command,
             traffic_light_command,
             channel_recommend_command,
+            familiar_command,
             pssb_command,
             cash_shop_command,
             sunny_sunday_command,
@@ -3610,9 +3752,9 @@ class MapleNewsBot(commands.Bot):
             except discord.HTTPException:
                 logging.exception("Failed to update exchange log in %s.", channel.id)
 
-    @tasks.loop(minutes=5)
+    @tasks.loop(minutes=10)
     async def update_time_channels(self) -> None:
-        # 한국 현재 시각을 등록된 음성 채널에 5분마다 표시합니다.
+        # Discord 채널 이름 변경 제한에 걸리지 않도록 10분마다 갱신합니다.
         if not self.alert_channels[INFO_TIME]:
             return
         await self.rename_info_channels(

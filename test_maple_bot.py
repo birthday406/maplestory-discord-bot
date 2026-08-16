@@ -1,3 +1,4 @@
+import io
 import json
 import tempfile
 import unittest
@@ -267,6 +268,9 @@ class NewsFilteringTests(unittest.TestCase):
         rate = parse_usd_exchange_rate(source)
         self.assertEqual(rate, Decimal("1423.80"))
         self.assertEqual(format_exchange_channel_name(rate), "USD-1,423.80")
+
+    def test_time_channel_rename_interval_avoids_discord_rate_limit(self) -> None:
+        self.assertEqual(maple_bot.MapleNewsBot.update_time_channels.minutes, 10.0)
 
     def test_missing_naver_usd_rate_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -2241,6 +2245,85 @@ class AppearanceSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Toben Hair", embed.description)
         self.assertIn("검은색 토벤 머리", embed.description)
         self.assertIn("30000", embed.description)
+
+
+class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
+    def test_normal_result_uses_unique_then_epic_pool(self) -> None:
+        unique = ("공격력 +6%", 3.42)
+        epic = ("보스 몬스터 공격 시 데미지 +30%", 0.24)
+
+        with (
+            patch("maple_bot.random.random", return_value=0.5),
+            patch("maple_bot.random.choices", side_effect=[[unique], [epic]]) as choices,
+        ):
+            result = maple_bot.draw_unique_familiar_potential()
+
+        self.assertEqual(result, (unique[0], epic[0], False))
+        self.assertIs(choices.call_args_list[0].args[0], maple_bot.FAMILIAR_UNIQUE_POTENTIALS)
+        self.assertIs(choices.call_args_list[1].args[0], maple_bot.FAMILIAR_EPIC_POTENTIALS)
+
+    def test_double_prime_uses_unique_pool_twice(self) -> None:
+        first = ("공격력 +6%", 3.42)
+        second = ("보스 몬스터 공격 시 데미지 +40%", 1.01)
+
+        with (
+            patch("maple_bot.random.random", return_value=0.001),
+            patch("maple_bot.random.choices", side_effect=[[first], [second]]) as choices,
+        ):
+            result = maple_bot.draw_unique_familiar_potential()
+
+        self.assertEqual(result, (first[0], second[0], True))
+        self.assertIs(choices.call_args_list[1].args[0], maple_bot.FAMILIAR_UNIQUE_POTENTIALS)
+
+    def test_result_image_uses_familiar_card_size(self) -> None:
+        result = maple_bot.create_familiar_result_image(
+            "공격력 +6%", "보스 몬스터 공격 시 데미지 +30%"
+        )
+
+        with Image.open(result) as image:
+            self.assertEqual(image.size, (732, 698))
+            self.assertEqual(image.mode, "RGB")
+
+    async def test_command_sends_localized_lines_in_one_card_image(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        with (
+            patch(
+                "maple_bot.draw_unique_familiar_potential",
+                return_value=("공격력 +6%", "보스 몬스터 공격 시 데미지 +30%", False),
+            ),
+            patch(
+                "maple_bot.create_familiar_result_image",
+                return_value=io.BytesIO(b"image"),
+            ) as create_image,
+        ):
+            await maple_bot.familiar_command.callback(interaction)
+
+        message = interaction.response.send_message.await_args.kwargs
+        embed = message["embed"]
+        self.assertEqual(maple_bot.familiar_command.name, "퍼밀리어")
+        self.assertIsNone(embed.description)
+        self.assertEqual(embed.image.url, "attachment://familiar-result.png")
+        self.assertEqual(message["file"].filename, "familiar-result.png")
+        create_image.assert_called_once_with(
+            "공격력 +6%", "보스 몬스터 공격 시 데미지 +30%"
+        )
+
+    async def test_command_marks_double_prime(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        with patch(
+            "maple_bot.draw_unique_familiar_potential",
+            return_value=("공격력 +6%", "마력 +6%", True),
+        ):
+            await maple_bot.familiar_command.callback(interaction)
+
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertIn("더블 프라임", embed.description)
 
 
 class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
