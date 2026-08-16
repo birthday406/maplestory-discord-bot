@@ -2283,6 +2283,7 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         with Image.open(result) as image:
             self.assertEqual(image.size, (732, 698))
             self.assertEqual(image.mode, "RGB")
+            self.assertEqual(image.getpixel((4, 100)), (149, 69, 6))
 
     async def test_command_sends_localized_lines_in_one_card_image(self) -> None:
         interaction = SimpleNamespace(
@@ -2304,7 +2305,9 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         message = interaction.response.send_message.await_args.kwargs
         embed = message["embed"]
         self.assertEqual(maple_bot.familiar_command.name, "퍼밀리어")
+        self.assertEqual(embed.title, "퍼밀리어 유니크 시뮬레이터")
         self.assertIsNone(embed.description)
+        self.assertIsNone(embed.footer.text)
         self.assertEqual(embed.image.url, "attachment://familiar-result.png")
         self.assertEqual(message["file"].filename, "familiar-result.png")
         create_image.assert_called_once_with(

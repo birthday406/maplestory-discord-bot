@@ -121,7 +121,7 @@ FAMILIAR_ASSET_PATHS = {
     "lock": Path(__file__).parent / "assets" / "familiar-card-lock.png",
     "edit": Path(__file__).parent / "assets" / "familiar-card-edit.png",
     "sherbet": Path(__file__).parent / "assets" / "familiar-sherbet.png",
-    "font": Path(__file__).parent / "assets" / "NanumGothic.ttf",
+    "font": Path(__file__).parent / "assets" / "BaekmukDotum.ttf",
 }
 URSUS_TIMEZONE = ZoneInfo("America/Los_Angeles")
 INFO_CHANNEL_TIMEZONE = ZoneInfo("Asia/Seoul")
@@ -293,7 +293,7 @@ def create_familiar_result_image(first_line: str, second_line: str) -> io.BytesI
     # 카드의 고정 UI 조각은 GMS 클라이언트의 실제 좌표에 맞춰 배치합니다.
     for name, position in (
         ("name", (14, 15)),
-        ("scene", (13, 58)),
+        ("scene", (13, 53)),
         ("spec", (31, 229)),
         ("edit", (310, 20)),
         ("lock", (331, 18)),
@@ -316,6 +316,14 @@ def create_familiar_result_image(first_line: str, second_line: str) -> io.BytesI
 
     draw = ImageDraw.Draw(canvas)
 
+    # 유니크 카드의 바깥 프레임은 상단 이름표와 같은 실제 UI 색상을 사용합니다.
+    draw.rounded_rectangle(
+        (2 * scale, 2 * scale, canvas.width - 3 * scale, canvas.height - 3 * scale),
+        radius=12 * scale,
+        outline=(149, 69, 6, 255),
+        width=5 * scale,
+    )
+
     def font(size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.truetype(str(FAMILIAR_ASSET_PATHS["font"]), size * scale)
 
@@ -332,7 +340,7 @@ def create_familiar_result_image(first_line: str, second_line: str) -> io.BytesI
     white_text = (245, 245, 245, 255)
     draw.text(
         (28 * scale, 20 * scale),
-        "Luna Pet Sherbet",
+        "Sherbet",
         font=font(13),
         fill=white_text,
     )
@@ -342,7 +350,7 @@ def create_familiar_result_image(first_line: str, second_line: str) -> io.BytesI
         font=font(10),
         fill=(180, 160, 134, 255),
     )
-    draw.text((52 * scale, 229 * scale), "1", font=font(10), fill=pale_text)
+    draw.text((52 * scale, 233 * scale), "1", font=font(10), fill=pale_text)
     draw.text((23 * scale, 280 * scale), first_line, font=fitting_font(first_line), fill=white_text)
     draw.text((23 * scale, 299 * scale), second_line, font=fitting_font(second_line), fill=white_text)
     draw.text(
@@ -2184,15 +2192,12 @@ async def familiar_command(interaction: discord.Interaction) -> None:
     """유니크 퍼밀리어 카드 한 장의 잠재능력 결과를 보여줍니다."""
     first_line, second_line, double_prime = draw_unique_familiar_potential()
     embed = discord.Embed(
-        title="🔮 유니크 퍼밀리어 잠재능력",
+        title="퍼밀리어 유니크 시뮬레이터",
         description="✨ **더블 프라임!**" if double_prime else None,
         color=0x9B59B6,
     )
     filename = "familiar-result.png"
     embed.set_image(url=f"attachment://{filename}")
-    embed.set_footer(
-        text="커뮤니티 표본 확률 기준 · 두 번째 줄 유니크 확률 1%"
-    )
     await interaction.response.send_message(
         embed=embed,
         file=discord.File(
