@@ -121,7 +121,7 @@ FAMILIAR_ASSET_PATHS = {
     "lock": Path(__file__).parent / "assets" / "familiar-card-lock.png",
     "edit": Path(__file__).parent / "assets" / "familiar-card-edit.png",
     "sherbet": Path(__file__).parent / "assets" / "familiar-sherbet.png",
-    "font": Path(__file__).parent / "assets" / "BaekmukDotum.ttf",
+    "font": Path(__file__).parent / "assets" / "NanumGothic.ttf",
 }
 URSUS_TIMEZONE = ZoneInfo("America/Los_Angeles")
 INFO_CHANNEL_TIMEZONE = ZoneInfo("Asia/Seoul")
