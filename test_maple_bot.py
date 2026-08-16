@@ -2305,7 +2305,8 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         message = interaction.response.send_message.await_args.kwargs
         embed = message["embed"]
         self.assertEqual(maple_bot.familiar_command.name, "퍼밀리어")
-        self.assertEqual(embed.title, "퍼밀리어 유니크 시뮬레이터")
+        self.assertIsNone(embed.title)
+        self.assertEqual(embed.color.value, 0x954506)
         self.assertIsNone(embed.description)
         self.assertIsNone(embed.footer.text)
         self.assertEqual(embed.image.url, "attachment://familiar-result.png")

@@ -2192,9 +2192,8 @@ async def familiar_command(interaction: discord.Interaction) -> None:
     """유니크 퍼밀리어 카드 한 장의 잠재능력 결과를 보여줍니다."""
     first_line, second_line, double_prime = draw_unique_familiar_potential()
     embed = discord.Embed(
-        title="퍼밀리어 유니크 시뮬레이터",
         description="✨ **더블 프라임!**" if double_prime else None,
-        color=0x9B59B6,
+        color=0x954506,
     )
     filename = "familiar-result.png"
     embed.set_image(url=f"attachment://{filename}")
