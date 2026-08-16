@@ -45,6 +45,8 @@ from maple_bot import (
     build_exchange_rate_log_embed,
     build_server_status_embed,
     build_ursus_embed,
+    appearance_search_autocomplete,
+    appearance_search_command,
     calculate_epic_dungeon,
     calculate_exp_coupons,
     calculate_growth_potions,
@@ -1248,9 +1250,14 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
                 "유피테르",
             ],
         )
-        self.assertEqual(
-            {choice.value for choice in traffic_light_command.parameters[0].choices},
-            set(BOSS_TRAFFIC_LIGHTS),
+        boss_choices = {
+            choice.value for choice in traffic_light_command.parameters[0].choices
+        }
+        self.assertIn("검밑", boss_choices)
+        self.assertTrue(
+            {"스우", "데미안", "루시드", "윌", "더스크", "진 힐라", "듄켈"}.isdisjoint(
+                boss_choices
+            )
         )
         self.assertEqual(BOSS_TRAFFIC_LIGHTS["칼로스"]["카오스"], ("5.12Q", "256T"))
         self.assertEqual(BOSS_TRAFFIC_LIGHTS["칼로스"]["익스트림"], ("21.57Q", "1.08Q"))
@@ -1297,10 +1304,31 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
 
         embed = interaction.response.send_message.await_args.kwargs["embed"]
         self.assertEqual(embed.title, "🚦 하드 발드릭스 5%")
+        self.assertNotIn("**하드 발드릭스**", embed.description)
         self.assertIn("**총 체력**　20,270,000,000,000K", embed.description)
         self.assertIn("**5% 최소 피해량**　1,010,000,000,000K", embed.description)
         self.assertNotIn("전투력 분석", embed.description)
         self.assertIsNone(embed.footer.text)
+
+    async def test_black_mage_below_group_shows_all_seven_bosses(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await traffic_light_command.callback(
+            interaction,
+            SimpleNamespace(value="검밑"),
+            None,
+        )
+
+        message = interaction.response.send_message.await_args.kwargs
+        embed = message["embed"]
+        self.assertEqual(embed.title, "🚦 검밑 보스 5%")
+        self.assertEqual(
+            [name for name in ("스우", "데미안", "루시드", "윌", "더스크", "진 힐라", "듄켈") if name in embed.description],
+            ["스우", "데미안", "루시드", "윌", "더스크", "진 힐라", "듄켈"],
+        )
+        self.assertNotIn("file", message)
 
     async def test_command_title_omits_missing_difficulty(self) -> None:
         interaction = SimpleNamespace(
@@ -2127,6 +2155,7 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/서버", field_text)
         self.assertIn("/캐샵", field_text)
         self.assertIn("/아이템검색", field_text)
+        self.assertIn("/외형검색", field_text)
         self.assertNotIn("/공지알림", field_text)
 
 
@@ -2178,6 +2207,40 @@ class ItemSearchTests(unittest.IsolatedAsyncioTestCase):
         description = interaction.response.send_message.await_args.kwargs["embed"].description
         self.assertIn("Sweet Apple Fox Mask", description)
         self.assertIn("KMS 동일 ID 없음", description)
+
+
+class AppearanceSearchTests(unittest.IsolatedAsyncioTestCase):
+    def test_search_filters_hair_and_face(self) -> None:
+        hair = search_cash_items("30000", category="Hair", limit=1)
+        wrong_category = search_cash_items("30000", category="Face", limit=1)
+
+        self.assertEqual(hair[0]["gms_name"], "Toben Hair")
+        self.assertEqual(hair[0]["kms_name"], "검은색 토벤 머리")
+        self.assertEqual(wrong_category, [])
+
+    async def test_autocomplete_shows_only_selected_type(self) -> None:
+        interaction = SimpleNamespace(namespace=SimpleNamespace(종류="Face"))
+
+        choices = await appearance_search_autocomplete(interaction, "도전적인 얼굴")
+
+        self.assertEqual(choices[0].value, "20000")
+        self.assertIn("Defiant Face", choices[0].name)
+        self.assertIn("도전적인 얼굴", choices[0].name)
+
+    async def test_command_shows_gms_and_kms_names(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+        appearance_type = SimpleNamespace(name="헤어", value="Hair")
+
+        await appearance_search_command.callback(
+            interaction, appearance_type, "30000"
+        )
+
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertIn("Toben Hair", embed.description)
+        self.assertIn("검은색 토벤 머리", embed.description)
+        self.assertIn("30000", embed.description)
 
 
 class PssbCommandTests(unittest.IsolatedAsyncioTestCase):

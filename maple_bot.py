@@ -94,6 +94,16 @@ BOSS_THUMBNAIL_PATHS = {
     "유피테르": Path(__file__).parent / "assets" / "boss-jupiter.webp",
     "림보": Path(__file__).parent / "assets" / "boss-limbo.webp",
 }
+# 흔히 "검밑"으로 묶어 부르는 보스와 대표 난이도입니다.
+BLACK_MAGE_BELOW_BOSSES = (
+    ("스우", "하드"),
+    ("데미안", "하드"),
+    ("루시드", "하드"),
+    ("윌", "하드"),
+    ("더스크", "카오스"),
+    ("진 힐라", "하드"),
+    ("듄켈", "하드"),
+)
 ITEM_DATA_PATH = Path(__file__).parent / "data" / "cash-items.tsv"
 ITEM_ICON_ARCHIVE_PATH = Path(__file__).parent / "data" / "cash-item-icons.zip"
 PSSB_BACK_EFFECT_PATH = Path(__file__).parent / "assets" / "pssb-backeffect.png"
@@ -147,6 +157,7 @@ ITEM_CATEGORY_NAMES = {
     "Taming": "라이딩",
     "Weapon": "무기",
 }
+APPEARANCE_CATEGORIES = ("Hair", "Face")
 
 
 def load_cash_items(path: Path = ITEM_DATA_PATH) -> list[dict[str, str]]:
@@ -253,7 +264,9 @@ def create_pssb_result_image(results: list[tuple[str, float]]) -> io.BytesIO:
     return output
 
 
-def search_cash_items(query: str, limit: int = 25) -> list[dict[str, str]]:
+def search_cash_items(
+    query: str, limit: int = 25, category: str | None = None
+) -> list[dict[str, str]]:
     """영문명·한글명·아이템 ID에서 검색어와 가까운 항목부터 찾습니다."""
     normalized_query = query.strip().casefold()
     if not normalized_query:
@@ -272,9 +285,12 @@ def search_cash_items(query: str, limit: int = 25) -> list[dict[str, str]]:
     matches = [
         item
         for item in CASH_ITEMS
-        if normalized_query in item["id"].casefold()
-        or normalized_query in item["gms_name"].casefold()
-        or normalized_query in item["kms_name"].casefold()
+        if (category is None or item["category"] == category)
+        and (
+            normalized_query in item["id"].casefold()
+            or normalized_query in item["gms_name"].casefold()
+            or normalized_query in item["kms_name"].casefold()
+        )
     ]
     return sorted(matches, key=match_rank)[:limit]
 
@@ -1662,6 +1678,31 @@ async def item_search_autocomplete(
     return choices
 
 
+async def appearance_search_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    """먼저 선택한 헤어 또는 성형 안에서 영문명·한글명·ID를 검색합니다."""
+    appearance_type = vars(interaction.namespace).get(
+        "종류", getattr(interaction.namespace, "appearance_type", None)
+    )
+    # Discord가 Choice 객체를 넘겨도 실제 분류 문자열만 꺼내 사용합니다.
+    category = getattr(appearance_type, "value", appearance_type)
+    if category not in APPEARANCE_CATEGORIES:
+        return []
+
+    choices = []
+    for item in search_cash_items(current, category=category):
+        label = item["gms_name"]
+        if item["kms_name"]:
+            label += f' / {item["kms_name"]}'
+        if len(label) > 84:
+            label = label[:81] + "..."
+        choices.append(
+            app_commands.Choice(name=f'{label} ({item["id"]})', value=item["id"])
+        )
+    return choices
+
+
 CHANNEL_RECOMMEND_MESSAGES = (
     "헐 **{display_name}**야 오늘도 많이 힘들었구나 어떡해 ㅠㅠ\n"
     "불쌍하니까 **광휘나 칠흑 잘 뜨는 채널** 점지해줄게 ✨\n\n"
@@ -1804,6 +1845,62 @@ async def item_search_command(
     await interaction.response.send_message(embed=embed)
 
 
+@app_commands.command(
+    name="외형검색", description="헤어·성형의 GMS 이름과 KMS 이름을 검색합니다."
+)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.rename(appearance_type="종류", appearance_id="이름")
+@app_commands.describe(
+    appearance_type="검색할 외형 종류",
+    appearance_id="영문명·한글명 또는 외형 ID를 입력한 뒤 목록에서 선택",
+)
+@app_commands.choices(
+    appearance_type=[
+        app_commands.Choice(name=ITEM_CATEGORY_NAMES[category], value=category)
+        for category in APPEARANCE_CATEGORIES
+    ]
+)
+@app_commands.autocomplete(appearance_id=appearance_search_autocomplete)
+async def appearance_search_command(
+    interaction: discord.Interaction,
+    appearance_type: app_commands.Choice[str],
+    appearance_id: str,
+) -> None:
+    """선택한 헤어·성형의 GMS 이름과 같은 ID의 KMS 이름을 보여줍니다."""
+    item = CASH_ITEMS_BY_ID.get(appearance_id)
+    if item is not None and item["category"] != appearance_type.value:
+        item = None
+    if item is None:
+        exact_matches = [
+            match
+            for match in search_cash_items(
+                appearance_id, category=appearance_type.value
+            )
+            if appearance_id.casefold()
+            in (match["gms_name"].casefold(), match["kms_name"].casefold())
+        ]
+        if len(exact_matches) != 1:
+            await interaction.response.send_message(
+                "검색 목록에서 외형을 하나 선택해주세요.", ephemeral=True
+            )
+            return
+        item = exact_matches[0]
+
+    kms_name = item["kms_name"] or "KMS 동일 ID 없음"
+    embed = discord.Embed(
+        title="외형 검색",
+        description=(
+            f"**종류**　{appearance_type.name}\n"
+            f'**GMS 이름**　{item["gms_name"]}\n'
+            f"**KMS 이름**　{kms_name}\n"
+            f'**외형 ID**　`{item["id"]}`'
+        ),
+        color=0x9B59B6,
+    )
+    await interaction.response.send_message(embed=embed)
+
+
 @app_commands.command(name="명령어", description="일반 사용자가 쓸 수 있는 명령어를 안내합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -1837,7 +1934,7 @@ async def help_command(interaction: discord.Interaction) -> None:
     )
     embed.add_field(
         name="아이템",
-        value="`/아이템검색`",
+        value="`/아이템검색` `/외형검색`",
         inline=False,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1859,6 +1956,8 @@ async def traffic_light_difficulty_autocomplete(
     )
     # Discord가 선택값을 Choice 객체로 넘기는 경우에도 실제 문자열로 조회합니다.
     boss = getattr(boss, "value", boss)
+    if boss == "검밑":
+        return []
     difficulties = BOSS_TRAFFIC_LIGHTS.get(boss, {})
     return [
         app_commands.Choice(name=name, value=name)
@@ -1876,14 +1975,40 @@ async def traffic_light_difficulty_autocomplete(
     difficulty="확인할 보스 난이도",
 )
 @app_commands.choices(
-    boss=[app_commands.Choice(name=name, value=name) for name in BOSS_TRAFFIC_LIGHTS],
+    boss=[
+        app_commands.Choice(name=name, value=name)
+        for name in (
+            "검밑",
+            *(
+                name
+                for name in BOSS_TRAFFIC_LIGHTS
+                if name not in {boss for boss, _ in BLACK_MAGE_BELOW_BOSSES}
+            ),
+        )
+    ],
 )
 @app_commands.autocomplete(difficulty=traffic_light_difficulty_autocomplete)
 async def traffic_light_command(
     interaction: discord.Interaction,
     boss: app_commands.Choice[str],
-    difficulty: str,
+    difficulty: str | None = None,
 ) -> None:
+    if boss.value == "검밑":
+        lines = []
+        for boss_name, boss_difficulty in BLACK_MAGE_BELOW_BOSSES:
+            _, minimum_damage = BOSS_TRAFFIC_LIGHTS[boss_name][boss_difficulty]
+            lines.append(
+                f"**{boss_difficulty} {boss_name}**　"
+                f"{format_boss_hp_as_k(minimum_damage)}"
+            )
+        embed = discord.Embed(
+            title="🚦 검밑 보스 5%",
+            description="\n".join(lines),
+            color=0x57F287,
+        )
+        await interaction.response.send_message(embed=embed)
+        return
+
     boss_difficulties = BOSS_TRAFFIC_LIGHTS[boss.value]
     if difficulty not in boss_difficulties:
         available = ", ".join(boss_difficulties)
@@ -1896,12 +2021,10 @@ async def traffic_light_command(
     total_hp, minimum_damage = boss_difficulties[difficulty]
     total_hp_k = format_boss_hp_as_k(total_hp)
     minimum_damage_k = format_boss_hp_as_k(minimum_damage)
-    boss_name = boss.value if difficulty == "일반" else f"{difficulty} {boss.value}"
     title_boss_name = f"{difficulty} {boss.value}"
     embed = discord.Embed(
         title=f"🚦 {title_boss_name} 5%",
         description=(
-            f"**{boss_name}**\n\n"
             f"**총 체력**　{total_hp_k}\n"
             f"**5% 최소 피해량**　{minimum_damage_k}"
         ),
