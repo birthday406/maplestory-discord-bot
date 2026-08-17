@@ -3,5 +3,8 @@
 
 # Runtime data and Python cache files
 state.json
+ranking.db
+ranking.db-shm
+ranking.db-wal
 __pycache__/
 *.py[cod]

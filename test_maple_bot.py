@@ -43,7 +43,9 @@ from maple_bot import (
     HEXA_CORE_COSTS,
     LEVEL_EXP,
     build_miracle_time_embed,
+    build_command_stats_embed,
     build_exchange_rate_log_embed,
+    build_ranking_embed,
     build_server_status_embed,
     build_ursus_embed,
     appearance_search_autocomplete,
@@ -56,10 +58,12 @@ from maple_bot import (
     cash_shop_transfer_alert_command,
     cash_shop_transfer_command,
     channel_recommend_command,
+    command_stats_command,
     cube_sale_alert_command,
     cube_sale_command,
     current_sunny_sunday_entry,
     current_ursus_window,
+    create_ranking_history_image,
     epic_dungeon_command,
     exp_coupon_command,
     exchange_log_alert_command,
@@ -74,6 +78,7 @@ from maple_bot import (
     format_time_channel_name,
     format_sunny_sunday_date,
     format_boss_hp_as_k,
+    find_ranking_character,
     growth_potion_command,
     help_command,
     hot_week_command,
@@ -99,9 +104,14 @@ from maple_bot import (
     post_url,
     pssb_cash_item,
     pssb_command,
+    quick_copy_command,
+    ranking_command,
+    record_command_usage,
     record_exchange_rate,
     save_state,
     search_cash_items,
+    seed_ring_command,
+    SeedRingSimulatorView,
     server_status_alert_command,
     server_status_command,
     should_check_server_status,
@@ -114,6 +124,7 @@ from maple_bot import (
     sunny_sunday_list_command,
     sunny_sunday_timestamp,
     symbol_calculator_command,
+    simulate_seed_ring,
     thumbnail_url,
     traffic_light_command,
     traffic_light_difficulty_autocomplete,
@@ -125,6 +136,7 @@ from maple_bot import (
     visible_sunny_sunday_entries,
     watched_posts,
 )
+from ranking_store import RankingStore, scan_kronos_rankings
 
 
 class NewsFilteringTests(unittest.TestCase):
@@ -422,6 +434,7 @@ class NewsFilteringTests(unittest.TestCase):
                 exchange_log,
                 server_alert_roles,
                 maintenance_watch,
+                command_stats,
             ) = load_state()
 
         maple_bot.STATE_PATH = original_state_path
@@ -438,6 +451,7 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertIsNone(exchange_log)
         self.assertEqual(server_alert_roles, {})
         self.assertIsNone(maintenance_watch)
+        self.assertEqual(command_stats, {"total": 0, "commands": {}, "users": {}})
 
     def test_legacy_weekly_message_id_is_migrated_to_its_channel(self) -> None:
         schedule = {
@@ -501,6 +515,11 @@ class NewsFilteringTests(unittest.TestCase):
             "saw_down": True,
             "completed": False,
         }
+        command_stats = {
+            "total": 3,
+            "commands": {"ㅁ": 2, "캐샵": 1},
+            "users": {"123": {"name": "테스터", "count": 3}},
+        }
         with tempfile.TemporaryDirectory() as directory:
             maple_bot.STATE_PATH = Path(directory) / "state.json"
             save_state(
@@ -517,6 +536,7 @@ class NewsFilteringTests(unittest.TestCase):
                 exchange_log,
                 server_alert_roles,
                 maintenance_watch,
+                command_stats,
             )
             (
                 sent_ids,
@@ -532,6 +552,7 @@ class NewsFilteringTests(unittest.TestCase):
                 loaded_exchange_log,
                 loaded_server_alert_roles,
                 loaded_maintenance_watch,
+                loaded_command_stats,
             ) = load_state()
 
         maple_bot.STATE_PATH = original_state_path
@@ -550,6 +571,7 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(loaded_exchange_log, exchange_log)
         self.assertEqual(loaded_server_alert_roles, server_alert_roles)
         self.assertEqual(loaded_maintenance_watch, maintenance_watch)
+        self.assertEqual(loaded_command_stats, command_stats)
 
     def test_ursus_schedule_matches_fixed_utc_windows(self) -> None:
         summer_start = datetime(2026, 8, 11, 18, 0, tzinfo=timezone.utc)
@@ -848,6 +870,209 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(
             sunny_sunday_entry_action(entry, 222, start + 1), "send"
         )
+
+
+class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def character(**changes) -> dict:
+        character = {
+            "characterName": "Home",
+            "characterImgURL": "https://example.com/home.png",
+            "exp": LEVEL_EXP[95] // 2,
+            "jobName": "Dawn Warrior",
+            "level": 295,
+            "rank": 8926,
+            "worldID": 45,
+        }
+        character.update(changes)
+        return character
+
+    def test_exact_character_is_selected_from_official_response(self) -> None:
+        payload = {"ranks": [self.character(characterName="Other"), self.character()]}
+
+        self.assertEqual(find_ranking_character(payload, "home")["rank"], 8926)
+        self.assertIsNone(find_ranking_character(payload, "Missing"))
+
+    def test_embed_shows_level_progress_and_available_ranks(self) -> None:
+        embed = build_ranking_embed(
+            self.character(),
+            world_rank=1309,
+            legion={"legionLevel": 10221, "rank": 2923},
+        )
+
+        self.assertEqual(embed.title, "Home")
+        self.assertIn("Lv. 295 (50.000%)", embed.description)
+        self.assertIn("Kronos", embed.description)
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["전체 순위"], "8,926위")
+        self.assertEqual(fields["월드 순위"], "1,309위")
+        self.assertEqual(fields["유니온 레벨"], "10,221")
+        self.assertEqual(embed.thumbnail.url, "https://example.com/home.png")
+
+    async def test_command_loads_three_na_rankings(self) -> None:
+        character = self.character()
+        world_character = self.character(rank=1309)
+        legion = self.character(rank=2923, legionLevel=10221)
+        client = SimpleNamespace(
+            fetch_ranking_character=AsyncMock(
+                side_effect=[character, world_character, legion]
+            ),
+            ranking_store=SimpleNamespace(save_snapshot=Mock(return_value=[])),
+        )
+        interaction = SimpleNamespace(
+            client=client,
+            response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+        await ranking_command.callback(interaction, " Home ")
+
+        interaction.response.defer.assert_awaited_once_with()
+        self.assertEqual(
+            [call.args for call in client.fetch_ranking_character.await_args_list],
+            [
+                ("na", "overall", "weekly", "Home"),
+                ("na", "world", 45, "Home"),
+                ("na", "legion", 45, "Home"),
+            ],
+        )
+        self.assertEqual(
+            interaction.followup.send.await_args.kwargs["embed"].title, "Home"
+        )
+        self.assertEqual(
+            interaction.followup.send.await_args.kwargs["embed"].image.url,
+            "attachment://ranking-history.png",
+        )
+        client.ranking_store.save_snapshot.assert_called_once()
+
+    def test_snapshot_calculates_gain_across_a_level_up(self) -> None:
+        first = self.character(level=295, exp=LEVEL_EXP[95] - 100)
+        second = self.character(level=296, exp=50)
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            self.assertEqual(store.save_snapshot(first, date(2026, 8, 15)), [])
+            gains = store.save_snapshot(second, date(2026, 8, 16))
+
+        self.assertEqual(gains, [{"date": "2026-08-16", "exp": 150}])
+
+    def test_history_graph_is_rendered_as_png(self) -> None:
+        result = create_ranking_history_image(
+            "Home",
+            [
+                {"date": "2026-08-15", "exp": 1_200_000_000_000},
+                {"date": "2026-08-16", "exp": 2_500_000_000_000},
+            ],
+        )
+
+        with Image.open(result) as image:
+            self.assertEqual(image.format, "PNG")
+            self.assertEqual(image.size, (900, 360))
+
+    async def test_missing_character_returns_short_private_message(self) -> None:
+        interaction = SimpleNamespace(
+            client=SimpleNamespace(fetch_ranking_character=AsyncMock(return_value=None)),
+            response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+        await ranking_command.callback(interaction, "Missing")
+
+        message = interaction.followup.send.await_args
+        self.assertIn("찾지 못했습니다", message.args[0])
+        self.assertTrue(message.kwargs["ephemeral"])
+
+
+class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def ranks(start: int, count: int = 10, level: int = 295) -> list[dict]:
+        return [
+            {
+                "characterName": f"Rank{rank}",
+                "characterImgURL": f"https://example.com/{rank}.png",
+                "exp": rank,
+                "jobName": "Hero",
+                "level": level,
+                "rank": rank,
+                "worldID": 45,
+            }
+            for rank in range(start, start + count)
+        ]
+
+    async def test_trial_scans_from_top_and_stops_at_limit(self) -> None:
+        fetch_page = AsyncMock(
+            side_effect=[{"ranks": self.ranks(1)}, {"ranks": self.ranks(11)}]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+
+            result = await scan_kronos_rankings(
+                fetch_page,
+                store,
+                date(2026, 8, 16),
+                max_characters=15,
+                delay_seconds=0,
+            )
+
+            self.assertEqual(store.character_count(), 15)
+        self.assertEqual(result["reason"], "limit")
+        self.assertEqual([call.args[0] for call in fetch_page.await_args_list], [1, 11])
+
+    async def test_interrupted_scan_resumes_from_saved_page(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            failed_fetch = AsyncMock(
+                side_effect=[{"ranks": self.ranks(1)}, TimeoutError()]
+            )
+            with self.assertRaises(TimeoutError):
+                await scan_kronos_rankings(
+                    failed_fetch,
+                    store,
+                    date(2026, 8, 16),
+                    max_characters=20,
+                    delay_seconds=0,
+                )
+
+            # 사용자가 /랭킹을 조회해도 자동 수집의 11위 재개 지점은 바뀌지 않습니다.
+            store.save_snapshot(self.ranks(99, count=1)[0], date(2026, 8, 16))
+            resumed_fetch = AsyncMock(return_value={"ranks": self.ranks(11)})
+            result = await scan_kronos_rankings(
+                resumed_fetch,
+                store,
+                date(2026, 8, 16),
+                max_characters=20,
+                delay_seconds=0,
+            )
+
+            self.assertEqual(store.character_count(), 21)
+        resumed_fetch.assert_awaited_once_with(11)
+        self.assertEqual(result["reason"], "limit")
+
+    async def test_scan_stops_when_level_falls_below_260(self) -> None:
+        ranks = self.ranks(1, count=5, level=260) + self.ranks(6, count=5, level=259)
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            result = await scan_kronos_rankings(
+                AsyncMock(return_value={"ranks": ranks}),
+                store,
+                date(2026, 8, 16),
+                max_characters=100,
+                delay_seconds=0,
+            )
+
+            self.assertEqual(store.character_count(), 5)
+        self.assertEqual(result["reason"], "level_boundary")
+
+    def test_backup_is_readable_and_keeps_saved_characters(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = RankingStore(Path(directory) / "ranking.db")
+            source.save_snapshot(self.ranks(1, count=1)[0], date(2026, 8, 16))
+            backup_path = Path(directory) / "backup" / "ranking.db"
+
+            self.assertEqual(source.backup_to(backup_path), 1)
+            restored = RankingStore(backup_path)
+
+            self.assertEqual(restored.character_count(), 1)
 
 
 class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
@@ -1382,6 +1607,56 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
             "림보에서 선택 가능한 난이도: **노말, 하드**",
             ephemeral=True,
         )
+
+
+class SeedRingSimulatorTests(unittest.IsolatedAsyncioTestCase):
+    def test_level_four_and_five_probability_boundaries(self) -> None:
+        self.assertTrue(simulate_seed_ring(4, 5, roll=50)["success"])
+        self.assertFalse(simulate_seed_ring(4, 5, roll=51)["success"])
+        self.assertTrue(simulate_seed_ring(5, 5, roll=25)["success"])
+        self.assertFalse(simulate_seed_ring(5, 5, roll=26)["success"])
+
+    def test_repeat_view_keeps_attempt_and_stone_totals(self) -> None:
+        view = SeedRingSimulatorView(user_id=123, level=4, stone_count=3)
+        with patch("maple_bot.random.randint", side_effect=[100, 1]):
+            first = view.draw()
+            second = view.draw()
+
+        self.assertIn("강화에 실패", first.description)
+        self.assertIn("강화에 성공", second.description)
+        fields = {field.name: field.value for field in second.fields}
+        self.assertEqual(fields["시도 횟수"], "2회")
+        self.assertEqual(fields["성공 / 실패"], "1회 / 1회")
+        self.assertEqual(fields["누적 사용 연마석"], "6개")
+
+    async def test_other_user_cannot_press_repeat_button(self) -> None:
+        view = SeedRingSimulatorView(user_id=123, level=5, stone_count=1)
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=456),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+        self.assertFalse(await view.interaction_check(interaction))
+        interaction.response.send_message.assert_awaited_once_with(
+            "이 버튼은 명령어를 실행한 사용자만 누를 수 있습니다.", ephemeral=True
+        )
+
+    async def test_command_sends_first_result_with_repeat_button(self) -> None:
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=123),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+        await seed_ring_command.callback(
+            interaction,
+            SimpleNamespace(value=4),
+            SimpleNamespace(value=5),
+        )
+
+        arguments = interaction.response.send_message.await_args.kwargs
+        self.assertEqual(arguments["view"].attempts, 1)
+        self.assertEqual(arguments["view"].children[0].label, "같은 조건으로 다시 시도")
+        self.assertIn("성공 확률: **50%**", arguments["embed"].description)
 
 
 class HexaCostTests(unittest.TestCase):
@@ -2160,7 +2435,84 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/캐샵", field_text)
         self.assertIn("/아이템검색", field_text)
         self.assertIn("/외형검색", field_text)
+        self.assertIn("/랭킹", field_text)
+        self.assertIn("/시드링", field_text)
+        self.assertIn("/ㅁ", field_text)
         self.assertNotIn("/공지알림", field_text)
+
+    async def test_quick_copy_shows_four_separate_code_blocks(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await quick_copy_command.callback(interaction)
+
+        arguments = interaction.response.send_message.await_args
+        message = arguments.args[0]
+        self.assertTrue(arguments.kwargs["ephemeral"])
+        self.assertEqual(message.count("```text"), 4)
+        self.assertIn("Sacred Symbol/claim", message)
+        self.assertIn("Arcane Symbol/claim", message)
+        self.assertIn("Sol Erda Fragment", message)
+        self.assertIn("/partyleave", message)
+
+
+class CommandStatsTests(unittest.IsolatedAsyncioTestCase):
+    def test_usage_is_counted_by_command_and_user(self) -> None:
+        stats = {"total": 0, "commands": {}, "users": {}}
+
+        record_command_usage(stats, "ㅁ", 123, "테스터")
+        record_command_usage(stats, "ㅁ", 123, "새 닉네임")
+
+        self.assertEqual(stats["total"], 2)
+        self.assertEqual(stats["commands"], {"ㅁ": 2})
+        self.assertEqual(
+            stats["users"]["123"], {"name": "새 닉네임", "count": 2}
+        )
+        self.assertIn("/ㅁ", build_command_stats_embed(stats).fields[0].value)
+
+    async def test_application_command_interaction_is_persisted_once(self) -> None:
+        bot = SimpleNamespace(
+            command_stats={"total": 0, "commands": {}, "users": {}},
+            persist_state=Mock(),
+        )
+        interaction = SimpleNamespace(
+            type=maple_bot.discord.InteractionType.application_command,
+            data={"name": "ㅁ"},
+            user=SimpleNamespace(id=123, display_name="테스터"),
+        )
+
+        await maple_bot.MapleNewsBot.on_interaction(bot, interaction)
+
+        self.assertEqual(bot.command_stats["commands"], {"ㅁ": 1})
+        bot.persist_state.assert_called_once_with()
+
+    async def test_only_bot_owner_can_view_stats(self) -> None:
+        denied = SimpleNamespace(
+            user=SimpleNamespace(),
+            client=SimpleNamespace(is_owner=AsyncMock(return_value=False)),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+        await command_stats_command.callback(denied)
+        self.assertIn(
+            "봇 소유자만", denied.response.send_message.await_args.args[0]
+        )
+        self.assertTrue(denied.response.send_message.await_args.kwargs["ephemeral"])
+
+        allowed = SimpleNamespace(
+            user=SimpleNamespace(),
+            client=SimpleNamespace(
+                is_owner=AsyncMock(return_value=True),
+                command_stats={"total": 0, "commands": {}, "users": {}},
+            ),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+        await command_stats_command.callback(allowed)
+        self.assertEqual(
+            allowed.response.send_message.await_args.kwargs["embed"].title,
+            "명령어 사용 통계",
+        )
+        self.assertTrue(allowed.response.send_message.await_args.kwargs["ephemeral"])
 
 
 class ItemSearchTests(unittest.IsolatedAsyncioTestCase):

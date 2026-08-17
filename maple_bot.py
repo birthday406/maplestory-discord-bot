@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import html
 import io
@@ -6,8 +7,9 @@ import logging
 import os
 import random
 import re
+import sqlite3
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time as datetime_time, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -19,6 +21,8 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from PIL import Image, ImageDraw, ImageFont
+
+from ranking_store import RankingStore, scan_kronos_rankings
 
 from maple_calculators import (
     calculate_arcane_symbol_completion,
@@ -47,14 +51,24 @@ from maple_data import (
 )
 
 
+BOT_VERSION = "1.4.3"
 NEWS_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news"
 NEWS_DETAIL_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news/{post_id}"
 SERVER_STATUS_API_URL = "https://www.nexon.com/api/maplestory/no-auth/v1/server-status/na"
+RANKING_API_URL = "https://www.nexon.com/api/maplestory/no-auth/ranking/v2/{region}"
 USD_EXCHANGE_RATE_URL = "https://finance.naver.com/marketindex/exchangeList.naver"
 SERVER_STATUS_PAGE_URL = (
     "https://www.nexon.com/maplestory/support/server-status/north-america/scania"
 )
 MAIN_WORLDS = ("Scania", "Bera", "Kronos", "Hyperion")
+RANKING_WORLDS = {
+    1: "Bera",
+    19: "Scania",
+    30: "Luna",
+    45: "Kronos",
+    46: "Solis",
+    70: "Hyperion",
+}
 PSSB_RATES_API_URL = "https://g.nexonstatic.com/maplestory/cms/v1/general-posts/5797"
 PSSB_RATES_PAGE_URL = "https://www.nexon.com/maplestory/general-post/5797"
 CASH_SHOP_MINING_URL = "https://masonym.dev/cash-shop"
@@ -72,6 +86,14 @@ CATEGORY_COLORS = {
     "events": 0x57F287,  # 초록
 }
 STATE_PATH = Path("state.json")
+RANKING_DB_PATH = Path("ranking.db")
+RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.db"
+# 전체 약 53만 명을 바로 요청하지 않고 첫 배포에서는 상위 1,000명만 검증합니다.
+RANKING_SCAN_TRIAL_LIMIT = 1_000
+SEED_RING_LEVELS = {
+    4: {"stone": "생명의 연마석", "rate_per_stone": 10},
+    5: {"stone": "신념의 연마석", "rate_per_stone": 5},
+}
 SUNNY_SUNDAY_IMAGE_PATH = Path(__file__).parent / "assets" / "title-sunny-sunday.webp"
 CASH_SHOP_TRANSFER_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-transfer.png"
 CASH_SHOP_UPDATE_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-update.png"
@@ -1248,6 +1270,250 @@ def build_server_status_embed(
     return embed
 
 
+def find_ranking_character(payload: dict, nickname: str) -> dict | None:
+    """공식 랭킹 응답에서 입력한 닉네임과 정확히 같은 캐릭터만 찾습니다."""
+    for character in payload.get("ranks", []):
+        if character.get("characterName", "").casefold() == nickname.casefold():
+            return character
+    return None
+
+
+def compact_exp(value: int) -> str:
+    """그래프 수치를 게임에서 익숙한 K·M·B·T·Q 단위로 줄입니다."""
+    for unit, size in (("Q", 10**15), ("T", 10**12), ("B", 10**9), ("M", 10**6), ("K", 10**3)):
+        if value >= size:
+            return f"{value / size:.2f}".rstrip("0").rstrip(".") + unit
+    return str(value)
+
+
+def create_ranking_history_image(character_name: str, gains: list[dict]) -> io.BytesIO:
+    """최근 경험치 변화량을 보라색 영역 그래프 PNG로 만듭니다."""
+    scale = 2
+    width, height = 900, 360
+    image = Image.new("RGB", (width * scale, height * scale), "#111827")
+    draw = ImageDraw.Draw(image, "RGBA")
+    font_path = str(FAMILIAR_ASSET_PATHS["font"])
+    title_font = ImageFont.truetype(font_path, 25 * scale)
+    body_font = ImageFont.truetype(font_path, 15 * scale)
+    small_font = ImageFont.truetype(font_path, 12 * scale)
+
+    draw.rounded_rectangle(
+        (16 * scale, 16 * scale, (width - 16) * scale, (height - 16) * scale),
+        radius=20 * scale,
+        fill="#17122B",
+        outline="#8B5CF6",
+        width=2 * scale,
+    )
+    draw.text((42 * scale, 34 * scale), character_name, font=title_font, fill="#F5F3FF")
+    draw.text(
+        (42 * scale, 72 * scale),
+        "최근 경험치 변화 · 공식 랭킹 조회 기록",
+        font=body_font,
+        fill="#A78BFA",
+    )
+
+    if not gains:
+        draw.text(
+            (width * scale // 2, 196 * scale),
+            "첫 기록을 저장했습니다",
+            font=title_font,
+            fill="#EDE9FE",
+            anchor="mm",
+        )
+        draw.text(
+            (width * scale // 2, 235 * scale),
+            "다음 날짜의 조회부터 경험치 변화가 표시됩니다",
+            font=body_font,
+            fill="#9CA3AF",
+            anchor="mm",
+        )
+    else:
+        left, top, right, bottom = 70, 115, 850, 300
+        maximum = max(item["exp"] for item in gains) or 1
+        for index in range(5):
+            y = top + (bottom - top) * index / 4
+            draw.line(
+                (left * scale, y * scale, right * scale, y * scale),
+                fill="#312E4D",
+                width=1 * scale,
+            )
+
+        if len(gains) == 1:
+            x_positions = [(left + right) / 2]
+        else:
+            x_positions = [
+                left + (right - left) * index / (len(gains) - 1)
+                for index in range(len(gains))
+            ]
+        points = [
+            (x, bottom - (bottom - top) * item["exp"] / maximum)
+            for x, item in zip(x_positions, gains)
+        ]
+        area = [(left, bottom), *points, (right, bottom)]
+        draw.polygon(
+            [(x * scale, y * scale) for x, y in area],
+            fill=(124, 58, 237, 70),
+        )
+        if len(points) > 1:
+            draw.line(
+                [(x * scale, y * scale) for x, y in points],
+                fill="#A78BFA",
+                width=4 * scale,
+                joint="curve",
+            )
+        for (x, y), item in zip(points, gains):
+            draw.ellipse(
+                (
+                    (x - 6) * scale,
+                    (y - 6) * scale,
+                    (x + 6) * scale,
+                    (y + 6) * scale,
+                ),
+                fill="#22D3EE",
+                outline="#E0F2FE",
+                width=2 * scale,
+            )
+            draw.text(
+                (x * scale, (y - 14) * scale),
+                compact_exp(item["exp"]),
+                font=small_font,
+                fill="#F5F3FF",
+                anchor="ms",
+            )
+            draw.text(
+                (x * scale, (bottom + 14) * scale),
+                item["date"][5:].replace("-", "/"),
+                font=small_font,
+                fill="#9CA3AF",
+                anchor="ma",
+            )
+
+    image = image.resize((width, height), Image.Resampling.LANCZOS)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    output.seek(0)
+    return output
+
+
+def build_ranking_embed(
+    character: dict,
+    world_rank: int | None,
+    legion: dict | None,
+) -> discord.Embed:
+    """공식 랭킹에서 확인한 캐릭터 정보를 Discord 한 화면으로 정리합니다."""
+    level = character["level"]
+    current_exp = character.get("exp", 0)
+    world = RANKING_WORLDS.get(character["worldID"], f"월드 ID {character['worldID']}")
+    level_text = f"Lv. {level}"
+    if 200 <= level < 300:
+        required_exp = LEVEL_EXP[level - 200]
+        progress = Decimal(current_exp) * 100 / Decimal(required_exp)
+        level_text += f" ({progress:.3f}%)"
+
+    embed = discord.Embed(
+        title=character["characterName"],
+        description=f"**{level_text}** · {character['jobName']} · {world}",
+        color=0x5865F2,
+    )
+    embed.set_author(name="MapleStory | CHARACTER RANKING")
+    embed.add_field(name="전체 순위", value=f"{character['rank']:,}위")
+    embed.add_field(
+        name="월드 순위",
+        value=f"{world_rank:,}위" if world_rank is not None else "확인 불가",
+    )
+    if legion is not None:
+        embed.add_field(name="유니온 레벨", value=f"{legion['legionLevel']:,}")
+        embed.add_field(name="유니온 순위", value=f"{legion['rank']:,}위")
+    if character.get("characterImgURL"):
+        embed.set_thumbnail(url=character["characterImgURL"])
+    embed.set_footer(text="Nexon 공식 GMS 랭킹 기준")
+    return embed
+
+
+def simulate_seed_ring(level: int, stone_count: int, roll: int | None = None) -> dict:
+    """리스트레인트 링을 선택한 연마석 개수로 한 번 강화합니다."""
+    if level not in SEED_RING_LEVELS:
+        raise ValueError("현재 레벨은 4 또는 5여야 합니다.")
+    if not 1 <= stone_count <= 5:
+        raise ValueError("연마석은 1~5개를 넣어야 합니다.")
+    setting = SEED_RING_LEVELS[level]
+    success_rate = setting["rate_per_stone"] * stone_count
+    rolled_number = roll if roll is not None else random.randint(1, 100)
+    if not 1 <= rolled_number <= 100:
+        raise ValueError("추첨값은 1~100이어야 합니다.")
+    return {
+        "level": level,
+        "target_level": level + 1,
+        "stone": setting["stone"],
+        "stone_count": stone_count,
+        "success_rate": success_rate,
+        "success": rolled_number <= success_rate,
+    }
+
+
+def build_seed_ring_embed(result: dict, attempts: int, successes: int) -> discord.Embed:
+    """한 번의 강화 결과와 현재 버튼 세션 누계를 보여줍니다."""
+    success = result["success"]
+    outcome = (
+        f"✅ **강화에 성공했습니다!**\n리스트레인트 링 Lv.{result['target_level']} 달성"
+        if success
+        else f"❌ **강화에 실패했습니다.**\n리스트레인트 링 Lv.{result['level']} 유지"
+    )
+    embed = discord.Embed(
+        title="💍 리스트레인트 링 강화 시뮬레이터",
+        description=(
+            f"**Lv.{result['level']} → Lv.{result['target_level']}**\n"
+            f"{result['stone']}: **{result['stone_count']}개**\n"
+            f"성공 확률: **{result['success_rate']}%**\n\n{outcome}"
+        ),
+        color=0x57F287 if success else 0xED4245,
+    )
+    embed.set_author(name="MapleStory | SEED RING")
+    embed.add_field(name="시도 횟수", value=f"{attempts}회")
+    embed.add_field(name="성공 / 실패", value=f"{successes}회 / {attempts - successes}회")
+    embed.add_field(
+        name="누적 사용 연마석",
+        value=f"{attempts * result['stone_count']}개",
+    )
+    return embed
+
+
+class SeedRingSimulatorView(discord.ui.View):
+    """처음 선택한 조건으로 같은 메시지에서 계속 독립 추첨합니다."""
+
+    def __init__(self, user_id: int, level: int, stone_count: int) -> None:
+        super().__init__(timeout=900)
+        self.user_id = user_id
+        self.level = level
+        self.stone_count = stone_count
+        self.attempts = 0
+        self.successes = 0
+
+    def draw(self) -> discord.Embed:
+        result = simulate_seed_ring(self.level, self.stone_count)
+        self.attempts += 1
+        self.successes += int(result["success"])
+        return build_seed_ring_embed(result, self.attempts, self.successes)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "이 버튼은 명령어를 실행한 사용자만 누를 수 있습니다.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(
+        label="같은 조건으로 다시 시도",
+        style=discord.ButtonStyle.primary,
+        emoji="🎲",
+    )
+    async def retry(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.edit_message(embed=self.draw(), view=self)
+
+
 def build_miracle_time_embed(
     schedule: dict,
     entries: list[dict],
@@ -1271,6 +1537,34 @@ def build_miracle_time_embed(
             inline=False,
         )
     return embed
+
+
+@app_commands.command(name="시드링", description="리스트레인트 링 강화를 무작위로 추첨합니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.rename(current_level="현재레벨", stone_count="연마석개수")
+@app_commands.describe(
+    current_level="강화할 리스트레인트 링의 현재 레벨",
+    stone_count="한 번의 강화에 넣을 연마석 개수",
+)
+@app_commands.choices(
+    current_level=[
+        app_commands.Choice(name="Lv.4 → Lv.5", value=4),
+        app_commands.Choice(name="Lv.5 → Lv.6", value=5),
+    ],
+    stone_count=[
+        app_commands.Choice(name=f"{count}개", value=count) for count in range(1, 6)
+    ],
+)
+async def seed_ring_command(
+    interaction: discord.Interaction,
+    current_level: app_commands.Choice[int],
+    stone_count: app_commands.Choice[int],
+) -> None:
+    view = SeedRingSimulatorView(
+        interaction.user.id, current_level.value, stone_count.value
+    )
+    await interaction.response.send_message(embed=view.draw(), view=view)
 
 
 @app_commands.command(name="헥사", description="HEXA 코어 강화에 필요한 재료를 계산합니다.")
@@ -2023,7 +2317,7 @@ async def help_command(interaction: discord.Interaction) -> None:
     )
     embed.add_field(
         name="시뮬레이터",
-        value="`/익성비` `/스스비` `/퍼밀리어` `/채널추천`",
+        value="`/익성비` `/시드링` `/스스비` `/퍼밀리어` `/채널추천`",
         inline=False,
     )
     embed.add_field(
@@ -2039,7 +2333,94 @@ async def help_command(interaction: discord.Interaction) -> None:
         value="`/아이템검색` `/외형검색`",
         inline=False,
     )
+    embed.add_field(name="편의", value="`/랭킹` `/ㅁ`", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@app_commands.command(name="ㅁ", description="자주 쓰는 메이플 문구를 복사하기 쉽게 보여줍니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def quick_copy_command(interaction: discord.Interaction) -> None:
+    """각 문구에 Discord의 코드 블록 복사 버튼이 따로 생기게 표시합니다."""
+    await interaction.response.send_message(
+        "```text\nSacred Symbol/claim\n```\n"
+        "```text\nArcane Symbol/claim\n```\n"
+        "```text\nSol Erda Fragment\n```\n"
+        "```text\n/partyleave\n```",
+        ephemeral=True,
+    )
+
+
+def record_command_usage(
+    command_stats: dict,
+    command_name: str,
+    user_id: int,
+    display_name: str,
+) -> None:
+    """명령어별·사용자별 실행 횟수를 재시작 후에도 남길 형태로 기록합니다."""
+    command_stats["total"] = command_stats.get("total", 0) + 1
+    commands_used = command_stats.setdefault("commands", {})
+    commands_used[command_name] = commands_used.get(command_name, 0) + 1
+    users = command_stats.setdefault("users", {})
+    user = users.setdefault(str(user_id), {"name": display_name, "count": 0})
+    user["name"] = display_name
+    user["count"] += 1
+
+
+def build_command_stats_embed(command_stats: dict) -> discord.Embed:
+    """소유자가 한 화면에서 전체·명령어별·사용자별 횟수를 확인하게 만듭니다."""
+    commands_used = sorted(
+        command_stats.get("commands", {}).items(), key=lambda item: (-item[1], item[0])
+    )
+    users = sorted(
+        command_stats.get("users", {}).items(),
+        key=lambda item: (-item[1]["count"], item[0]),
+    )[:10]
+    embed = discord.Embed(
+        title="명령어 사용 통계",
+        description=(
+            f"**전체 사용:** {command_stats.get('total', 0):,}회\n"
+            f"**사용자 수:** {len(command_stats.get('users', {})):,}명"
+        ),
+        color=0x5865F2,
+    )
+    embed.add_field(
+        name="명령어별",
+        value=(
+            "\n".join(f"`/{name}`　{count:,}회" for name, count in commands_used)
+            or "기록 없음"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="사용자별 상위 10명",
+        value=(
+            "\n".join(
+                f"{discord.utils.escape_markdown(data['name'])} (`{user_id}`)　"
+                f"{data['count']:,}회"
+                for user_id, data in users
+            )
+            or "기록 없음"
+        ),
+        inline=False,
+    )
+    return embed
+
+
+@app_commands.command(name="명령어통계", description="봇 명령어 사용 통계를 확인합니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def command_stats_command(interaction: discord.Interaction) -> None:
+    """Discord 애플리케이션 소유자에게만 저장된 통계를 보여줍니다."""
+    if not await interaction.client.is_owner(interaction.user):
+        await interaction.response.send_message(
+            "봇 소유자만 확인할 수 있습니다.", ephemeral=True
+        )
+        return
+    await interaction.response.send_message(
+        embed=build_command_stats_embed(interaction.client.command_stats),
+        ephemeral=True,
+    )
 
 
 def format_boss_hp_as_k(value: str) -> str:
@@ -2383,6 +2764,68 @@ async def ursus_command(interaction: discord.Interaction) -> None:
     )
 
 
+@app_commands.command(name="랭킹", description="GMS 캐릭터의 공식 레벨 랭킹을 확인합니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.rename(nickname="닉네임")
+@app_commands.describe(nickname="검색할 GMS 캐릭터 닉네임")
+async def ranking_command(
+    interaction: discord.Interaction,
+    nickname: str,
+) -> None:
+    """공식 GMS 랭킹에서 캐릭터·월드·유니온 순위를 찾아 보여줍니다."""
+    nickname = nickname.strip()
+    if not nickname or len(nickname) > 20:
+        await interaction.response.send_message(
+            "닉네임을 1~20자로 입력해주세요.", ephemeral=True
+        )
+        return
+
+    await interaction.response.defer()
+    try:
+        character = await interaction.client.fetch_ranking_character(
+            "na", "overall", "weekly", nickname
+        )
+        if character is None:
+            await interaction.followup.send(
+                f"**{discord.utils.escape_markdown(nickname)}** 캐릭터를 찾지 못했습니다.",
+                ephemeral=True,
+            )
+            return
+        world_id = character["worldID"]
+        world_character = await interaction.client.fetch_ranking_character(
+            "na", "world", world_id, nickname
+        )
+        legion = await interaction.client.fetch_ranking_character(
+            "na", "legion", world_id, nickname
+        )
+    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError):
+        logging.exception("Failed to load the official GMS character ranking.")
+        await interaction.followup.send(
+            "공식 캐릭터 랭킹을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
+            ephemeral=True,
+        )
+        return
+
+    gains = interaction.client.ranking_store.save_snapshot(
+        character, datetime.now(URSUS_TIMEZONE).date()
+    )
+    embed = build_ranking_embed(
+        character,
+        world_character["rank"] if world_character is not None else None,
+        legion,
+    )
+    filename = "ranking-history.png"
+    embed.set_image(url=f"attachment://{filename}")
+    await interaction.followup.send(
+        embed=embed,
+        file=discord.File(
+            create_ranking_history_image(character["characterName"], gains),
+            filename=filename,
+        ),
+    )
+
+
 @app_commands.command(name="서버", description="글로벌 메이플 주요 월드의 접속 상태를 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -2679,10 +3122,15 @@ def load_state() -> tuple[
     dict | None,
     dict[str, int],
     dict | None,
+    dict,
 ]:
     # 이전 실행에서 이미 알린 공지 번호를 불러와 같은 글을 다시 보내지 않습니다.
     if not STATE_PATH.exists():
-        return None, set(), None, None, None, {}, {}, {}, None, None, None, {}, None
+        return None, set(), None, None, None, {}, {}, {}, None, None, None, {}, None, {
+            "total": 0,
+            "commands": {},
+            "users": {},
+        }
     state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     stored_sent_ids = state.get("sent_ids")
     return (
@@ -2699,6 +3147,7 @@ def load_state() -> tuple[
         state.get("exchange_log"),
         state.get("server_alert_roles", {}),
         state.get("maintenance_watch"),
+        state.get("command_stats", {"total": 0, "commands": {}, "users": {}}),
     )
 
 
@@ -2716,6 +3165,7 @@ def save_state(
     exchange_log: dict | None = None,
     server_alert_roles: dict[str, int] | None = None,
     maintenance_watch: dict | None = None,
+    command_stats: dict | None = None,
 ) -> None:
     # 봇을 껐다 켜도 중복 알림을 막을 수 있도록 공지 번호를 파일에 저장합니다.
     STATE_PATH.write_text(
@@ -2739,6 +3189,8 @@ def save_state(
                 "exchange_log": exchange_log,
                 "server_alert_roles": server_alert_roles or {},
                 "maintenance_watch": maintenance_watch,
+                "command_stats": command_stats
+                or {"total": 0, "commands": {}, "users": {}},
             },
             indent=2,
         ),
@@ -2767,12 +3219,17 @@ class MapleNewsBot(commands.Bot):
             self.exchange_log,
             self.server_alert_roles,
             self.maintenance_watch,
+            self.command_stats,
         ) = load_state()
         self.alert_channels = normalize_alert_channels(
             stored_alert_channels, channel_id, sunny_channel_id
         )
         migrate_sunny_sunday_state(self.sunny_sunday, sunny_channel_id)
         self.session: aiohttp.ClientSession | None = None
+        self.ranking_store = RankingStore(RANKING_DB_PATH)
+        self.ranking_scan_enabled = (
+            os.getenv("RANKING_SCAN_ENABLED", "false").lower() == "true"
+        )
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
         self.openai = AsyncOpenAI()
         # Google 번역 키도 .env 파일에서 읽습니다. 키를 Discord나 GitHub에 올리면 안 됩니다.
@@ -2784,6 +3241,9 @@ class MapleNewsBot(commands.Bot):
         # 전역 슬래시 명령을 Discord에 등록합니다. 명령 내용이 바뀌어도 재시작 시 동기화됩니다.
         for command in (
             help_command,
+            quick_copy_command,
+            command_stats_command,
+            seed_ring_command,
             hexa_command,
             extreme_growth_potion_command,
             growth_potion_command,
@@ -2792,6 +3252,7 @@ class MapleNewsBot(commands.Bot):
             symbol_calculator_command,
             item_search_command,
             traffic_light_command,
+            ranking_command,
             channel_recommend_command,
             familiar_command,
             pssb_command,
@@ -2834,7 +3295,23 @@ class MapleNewsBot(commands.Bot):
             self.exchange_log,
             self.server_alert_roles,
             self.maintenance_watch,
+            self.command_stats,
         )
+
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        """슬래시 명령 실행만 한 번 기록하고 버튼·자동완성은 제외합니다."""
+        if interaction.type is not discord.InteractionType.application_command:
+            return
+        command_name = (interaction.data or {}).get("name")
+        if not command_name:
+            return
+        record_command_usage(
+            self.command_stats,
+            command_name,
+            interaction.user.id,
+            interaction.user.display_name,
+        )
+        self.persist_state()
 
     async def on_ready(self) -> None:
         # 디스코드 연결이 끝난 뒤에만 첫 공지 확인을 시작합니다.
@@ -2855,6 +3332,8 @@ class MapleNewsBot(commands.Bot):
             self.update_time_channels.start()
         if not self.update_exchange_channels.is_running():
             self.update_exchange_channels.start()
+        if self.ranking_scan_enabled and not self.collect_ranking_trial.is_running():
+            self.collect_ranking_trial.start()
 
     async def close(self) -> None:
         if self.session is not None:
@@ -2877,6 +3356,56 @@ class MapleNewsBot(commands.Bot):
         ) as response:
             response.raise_for_status()
             return parse_server_status(await response.json())
+
+    async def fetch_ranking_character(
+        self,
+        region: str,
+        ranking_type: str,
+        ranking_id: str | int,
+        nickname: str,
+    ) -> dict | None:
+        # 공식 GMS 랭킹 화면이 사용하는 공개 응답에서 닉네임 한 명만 찾습니다.
+        assert self.session is not None
+        async with self.session.get(
+            RANKING_API_URL.format(region=region),
+            params={
+                "type": ranking_type,
+                "id": str(ranking_id),
+                "reboot_index": "0",
+                "page_index": "1",
+                "character_name": nickname,
+            },
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as response:
+            response.raise_for_status()
+            return find_ranking_character(await response.json(), nickname)
+
+    async def fetch_kronos_ranking_page(self, page_index: int) -> dict:
+        """크로노스 월드 랭킹 10명을 읽고 429면 안내된 시간만큼 기다립니다."""
+        assert self.session is not None
+        for attempt in range(5):
+            async with self.session.get(
+                RANKING_API_URL.format(region="na"),
+                params={
+                    "type": "world",
+                    "id": "45",
+                    "reboot_index": "0",
+                    "page_index": str(page_index),
+                },
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as response:
+                if response.status != 429:
+                    response.raise_for_status()
+                    return await response.json()
+
+                retry_after = min(int(response.headers.get("Retry-After", "60")), 300)
+                logging.warning(
+                    "Kronos ranking request was rate limited; retrying in %s seconds.",
+                    retry_after,
+                )
+            if attempt < 4:
+                await asyncio.sleep(retry_after)
+        raise ValueError("Kronos ranking API rate limit did not clear.")
 
     async def fetch_usd_exchange_rate(self) -> Decimal:
         # 네이버 금융 환율표는 JSON API가 아니므로 HTML에서 미국 USD 행만 읽습니다.
@@ -3793,6 +4322,32 @@ class MapleNewsBot(commands.Bot):
             if changed or missing_message:
                 await self.update_exchange_log_messages()
                 self.persist_state()
+
+    @tasks.loop(time=datetime_time(hour=22, tzinfo=timezone.utc))
+    async def collect_ranking_trial(self) -> None:
+        """매일 공식 갱신 뒤 크로노스 상위 1,000명만 시험 수집합니다."""
+        scan_date = datetime.now(URSUS_TIMEZONE).date()
+        try:
+            result = await scan_kronos_rankings(
+                self.fetch_kronos_ranking_page,
+                self.ranking_store,
+                scan_date,
+                max_characters=RANKING_SCAN_TRIAL_LIMIT,
+            )
+            if result["reason"] == "already_completed":
+                return
+            # 그래프는 최근 14일 변화만 사용하므로 여유 있게 15일 기록을 남깁니다.
+            self.ranking_store.remove_old_snapshots(scan_date - timedelta(days=15))
+            backup_rows = self.ranking_store.backup_to(RANKING_BACKUP_PATH)
+            logging.info(
+                "Kronos ranking trial saved %s characters (%s); backup has %s rows.",
+                result["saved"],
+                result["reason"],
+                backup_rows,
+            )
+        except (aiohttp.ClientError, TimeoutError, ValueError, OSError, sqlite3.Error):
+            # 중단 지점은 페이지마다 DB에 저장되므로 다음 실행에서 이어갈 수 있습니다.
+            logging.exception("Kronos ranking trial collection failed.")
 
     @check_news.error
     async def check_news_error(self, error: Exception) -> None:
