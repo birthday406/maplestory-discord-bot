@@ -2679,7 +2679,7 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(embed.footer.text)
         self.assertEqual(embed.image.url, "attachment://familiar-result.png")
         self.assertEqual(message["file"].filename, "familiar-result.png")
-        self.assertEqual(message["view"].children[0].label, "리롤")
+        self.assertEqual(message["view"].children[0].label, "다시 뽑기")
         create_image.assert_called_once_with(
             "공격력 +6%", "보스 몬스터 공격 시 데미지 +30%"
         )
@@ -2735,7 +2735,7 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         message = interaction.followup.send.await_args.kwargs
         self.assertEqual(interaction.followup.send.await_count, 1)
         self.assertEqual(message["file"].filename, "pssb-1-results.png")
-        self.assertEqual(message["view"].children[0].label, "리롤")
+        self.assertEqual(message["view"].children[0].label, "다시 뽑기")
         self.assertEqual(
             message["embed"].image.url,
             "attachment://pssb-1-results.png",

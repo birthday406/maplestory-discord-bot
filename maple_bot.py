@@ -2603,7 +2603,7 @@ def build_familiar_result() -> tuple[discord.Embed, discord.File]:
 class FamiliarSimulatorView(UserOwnedView):
     """같은 퍼밀리어 메시지에서 잠재능력을 다시 추첨합니다."""
 
-    @discord.ui.button(label="리롤", style=discord.ButtonStyle.primary, emoji="🎲")
+    @discord.ui.button(label="다시 뽑기", style=discord.ButtonStyle.primary, emoji="🎲")
     async def reroll(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
@@ -2668,7 +2668,7 @@ class PssbSimulatorView(UserOwnedView):
         super().__init__(user_id)
         self.count = count
 
-    @discord.ui.button(label="리롤", style=discord.ButtonStyle.primary, emoji="🎲")
+    @discord.ui.button(label="다시 뽑기", style=discord.ButtonStyle.primary, emoji="🎲")
     async def reroll(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
