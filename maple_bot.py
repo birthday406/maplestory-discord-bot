@@ -94,6 +94,22 @@ SEED_RING_LEVELS = {
     4: {"stone": "생명의 연마석", "rate_per_stone": 10},
     5: {"stone": "신념의 연마석", "rate_per_stone": 5},
 }
+
+
+class KoreanCommandTranslator(app_commands.Translator):
+    """지정된 명령어만 한국어 Discord에서 현지화해 표시합니다."""
+
+    async def translate(
+        self,
+        string: app_commands.locale_str,
+        locale: discord.Locale,
+        context: app_commands.TranslationContext,
+    ) -> str | None:
+        if locale is discord.Locale.korean:
+            return string.extras.get("ko")
+        return None
+
+
 SUNNY_SUNDAY_IMAGE_PATH = Path(__file__).parent / "assets" / "title-sunny-sunday.webp"
 CASH_SHOP_TRANSFER_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-transfer.png"
 CASH_SHOP_UPDATE_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-update.png"
@@ -231,8 +247,8 @@ def pssb_slot_path(rate: float) -> Path:
 
 
 def format_pssb_result(index: int, name: str, rate: float) -> str:
-    """Discord가 부분 글자색을 지원하지 않아 보라 등급은 보라 표식으로 구분합니다."""
-    rarity = "🟪 " if rate <= PSSB_ADVANCED_RATE_THRESHOLD else ""
+    """Discord가 부분 글자색을 지원하지 않아 희귀 보상은 반짝이로 구분합니다."""
+    rarity = "✨ " if rate <= PSSB_ADVANCED_RATE_THRESHOLD else ""
     return f"**{index}.** {rarity}**{name}**　`{rate:.2f}%`"
 
 
@@ -1478,12 +1494,27 @@ def build_seed_ring_embed(result: dict, attempts: int, successes: int) -> discor
     return embed
 
 
-class SeedRingSimulatorView(discord.ui.View):
+class UserOwnedView(discord.ui.View):
+    """명령어를 실행한 사용자만 버튼을 누를 수 있는 공통 View입니다."""
+
+    def __init__(self, user_id: int, *, timeout: float = 900) -> None:
+        super().__init__(timeout=timeout)
+        self.user_id = user_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "이 버튼은 명령어를 실행한 사용자만 누를 수 있습니다.", ephemeral=True
+        )
+        return False
+
+
+class SeedRingSimulatorView(UserOwnedView):
     """처음 선택한 조건으로 같은 메시지에서 계속 독립 추첨합니다."""
 
     def __init__(self, user_id: int, level: int, stone_count: int) -> None:
-        super().__init__(timeout=900)
-        self.user_id = user_id
+        super().__init__(user_id)
         self.level = level
         self.stone_count = stone_count
         self.attempts = 0
@@ -1494,14 +1525,6 @@ class SeedRingSimulatorView(discord.ui.View):
         self.attempts += 1
         self.successes += int(result["success"])
         return build_seed_ring_embed(result, self.attempts, self.successes)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.user_id:
-            return True
-        await interaction.response.send_message(
-            "이 버튼은 명령어를 실행한 사용자만 누를 수 있습니다.", ephemeral=True
-        )
-        return False
 
     @discord.ui.button(
         label="같은 조건으로 다시 시도",
@@ -2563,6 +2586,33 @@ def draw_unique_familiar_potential() -> tuple[str, str, bool]:
     return first_line, second_line, double_prime
 
 
+def build_familiar_result() -> tuple[discord.Embed, discord.File]:
+    """퍼밀리어 잠재능력을 새로 추첨하고 카드 이미지까지 만듭니다."""
+    first_line, second_line, double_prime = draw_unique_familiar_potential()
+    embed = discord.Embed(
+        description="✨ **더블 프라임!**" if double_prime else None,
+        color=0x954506,
+    )
+    filename = "familiar-result.png"
+    embed.set_image(url=f"attachment://{filename}")
+    return embed, discord.File(
+        create_familiar_result_image(first_line, second_line), filename=filename
+    )
+
+
+class FamiliarSimulatorView(UserOwnedView):
+    """같은 퍼밀리어 메시지에서 잠재능력을 다시 추첨합니다."""
+
+    @discord.ui.button(label="리롤", style=discord.ButtonStyle.primary, emoji="🎲")
+    async def reroll(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        embed, file = build_familiar_result()
+        await interaction.response.edit_message(
+            embed=embed, attachments=[file], view=self
+        )
+
+
 @app_commands.command(
     name="퍼밀리어",
     description="유니크 퍼밀리어 잠재능력 두 줄을 무작위로 추첨합니다.",
@@ -2571,24 +2621,86 @@ def draw_unique_familiar_potential() -> tuple[str, str, bool]:
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def familiar_command(interaction: discord.Interaction) -> None:
     """유니크 퍼밀리어 카드 한 장의 잠재능력 결과를 보여줍니다."""
-    first_line, second_line, double_prime = draw_unique_familiar_potential()
-    embed = discord.Embed(
-        description="✨ **더블 프라임!**" if double_prime else None,
-        color=0x954506,
-    )
-    filename = "familiar-result.png"
-    embed.set_image(url=f"attachment://{filename}")
+    embed, file = build_familiar_result()
     await interaction.response.send_message(
         embed=embed,
-        file=discord.File(
-            create_familiar_result_image(first_line, second_line),
-            filename=filename,
-        ),
+        file=file,
+        view=FamiliarSimulatorView(interaction.user.id),
     )
+
+
+def draw_pssb_results(
+    rates: list[tuple[str, float]], count: int
+) -> list[tuple[str, float]]:
+    """현재 공식 PSSB 목록에서 요청한 횟수만큼 독립 추첨합니다."""
+    return random.choices(
+        rates,
+        weights=[rate for _, rate in rates],
+        k=count,
+    )
+
+
+def build_pssb_embed(results: list[tuple[str, float]]) -> discord.Embed:
+    """PSSB 추첨 결과 텍스트 임베드를 만듭니다."""
+    return discord.Embed(
+        title=f"{PSSB_EMOJI} Premium Surprise Style Box",
+        url=PSSB_RATES_PAGE_URL,
+        description="\n".join(
+            format_pssb_result(index, name, rate)
+            for index, (name, rate) in enumerate(results, start=1)
+        ),
+        color=0xFF69B4,
+    )
+
+
+def build_pssb_file(
+    results: list[tuple[str, float]], count: int
+) -> tuple[discord.File, str]:
+    """PSSB 결과 합성 이미지를 Discord 파일로 만듭니다."""
+    filename = f"pssb-{count}-results.png"
+    return discord.File(create_pssb_result_image(results), filename=filename), filename
+
+
+class PssbSimulatorView(UserOwnedView):
+    """같은 메시지에서 최신 공식 목록으로 PSSB를 다시 추첨합니다."""
+
+    def __init__(self, user_id: int, count: int) -> None:
+        super().__init__(user_id)
+        self.count = count
+
+    @discord.ui.button(label="리롤", style=discord.ButtonStyle.primary, emoji="🎲")
+    async def reroll(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        # 버튼을 누른 사이 공식 품목이 바뀌었을 수 있으므로 매번 새 확률표를 읽습니다.
+        await interaction.response.defer()
+        try:
+            rates = await interaction.client.fetch_pssb_rates()
+        except (aiohttp.ClientError, TimeoutError, ValueError):
+            logging.exception("Failed to reload the official PSSB rates.")
+            await interaction.followup.send(
+                "공식 PSSB 확률표를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+                ephemeral=True,
+            )
+            return
+
+        results = draw_pssb_results(rates, self.count)
+        embed = build_pssb_embed(results)
+        try:
+            file, filename = build_pssb_file(results, self.count)
+            embed.set_image(url=f"attachment://{filename}")
+            await interaction.edit_original_response(
+                embed=embed, attachments=[file], view=self
+            )
+        except (OSError, ValueError, zipfile.BadZipFile):
+            logging.exception("PSSB result image could not be created.")
+            await interaction.edit_original_response(
+                embed=embed, attachments=[], view=self
+            )
 
 
 @app_commands.command(
-    name="스스비",
+    name=app_commands.locale_str("ssb", ko="스스비"),
     description="현재 PSSB 공식 확률표로 1회 또는 5회 시뮬레이션합니다.",
 )
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -2618,30 +2730,36 @@ async def pssb_command(
         return
 
     # 각 상자는 독립적으로 추첨하므로 같은 아이템이 여러 번 나올 수 있습니다.
-    results = random.choices(
-        rates,
-        weights=[rate for _, rate in rates],
-        k=count.value,
-    )
-    embed = discord.Embed(
-        title=f"{PSSB_EMOJI} Premium Surprise Style Box",
-        url=PSSB_RATES_PAGE_URL,
-        description="\n".join(
-            format_pssb_result(index, name, rate)
-            for index, (name, rate) in enumerate(results, start=1)
-        ),
-        color=0xFF69B4,
-    )
+    results = draw_pssb_results(rates, count.value)
+    embed = build_pssb_embed(results)
+    view = PssbSimulatorView(interaction.user.id, count.value)
     try:
-        result_image = create_pssb_result_image(results)
-        filename = f"pssb-{count.value}-results.png"
-        file = discord.File(result_image, filename=filename)
+        file, filename = build_pssb_file(results, count.value)
         embed.set_image(url=f"attachment://{filename}")
-        await interaction.followup.send(embed=embed, file=file)
+        await interaction.followup.send(embed=embed, file=file, view=view)
     except (OSError, ValueError, zipfile.BadZipFile):
         # 리소스 파일에 문제가 생겨도 추첨 결과 이름까지 잃지는 않게 텍스트는 보냅니다.
         logging.exception("PSSB result image could not be created.")
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, view=view)
+
+
+@app_commands.command(name="ㅅㅅㅂ", description="/스스비의 초성 별칭입니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.rename(count="횟수")
+@app_commands.describe(count="시뮬레이션 횟수")
+@app_commands.choices(
+    count=[
+        app_commands.Choice(name="1회", value=1),
+        app_commands.Choice(name="5회", value=5),
+    ]
+)
+async def pssb_initials_command(
+    interaction: discord.Interaction,
+    count: app_commands.Choice[int],
+) -> None:
+    """초성으로 실행해도 기존 PSSB 명령어와 같은 로직을 사용합니다."""
+    await pssb_command.callback(interaction, count)
 
 
 @app_commands.command(name="캐샵", description="최신 캐시샵 업데이트 링크를 보여줍니다.")
@@ -3238,6 +3356,7 @@ class MapleNewsBot(commands.Bot):
     async def setup_hook(self) -> None:
         # Discord 연결이 준비되면 5분마다 새 공지를 확인하는 작업을 시작합니다.
         self.session = aiohttp.ClientSession()
+        await self.tree.set_translator(KoreanCommandTranslator())
         # 전역 슬래시 명령을 Discord에 등록합니다. 명령 내용이 바뀌어도 재시작 시 동기화됩니다.
         for command in (
             help_command,
@@ -3251,11 +3370,13 @@ class MapleNewsBot(commands.Bot):
             epic_dungeon_command,
             symbol_calculator_command,
             item_search_command,
+            appearance_search_command,
             traffic_light_command,
             ranking_command,
             channel_recommend_command,
             familiar_command,
             pssb_command,
+            pssb_initials_command,
             cash_shop_command,
             sunny_sunday_command,
             sunny_sunday_list_command,

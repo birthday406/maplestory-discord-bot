@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import maple_bot
 from PIL import Image
@@ -2566,6 +2566,21 @@ class ItemSearchTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AppearanceSearchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_command_is_registered_during_setup(self) -> None:
+        bot = SimpleNamespace(
+            tree=SimpleNamespace(
+                set_translator=AsyncMock(),
+                add_command=Mock(),
+                sync=AsyncMock(),
+            ),
+            persist_state=Mock(),
+        )
+
+        with patch("maple_bot.aiohttp.ClientSession", return_value=Mock()):
+            await maple_bot.MapleNewsBot.setup_hook(bot)
+
+        bot.tree.add_command.assert_any_call(appearance_search_command)
+
     def test_search_filters_hair_and_face(self) -> None:
         hair = search_cash_items("30000", category="Hair", limit=1)
         wrong_category = search_cash_items("30000", category="Face", limit=1)
@@ -2639,6 +2654,7 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_command_sends_localized_lines_in_one_card_image(self) -> None:
         interaction = SimpleNamespace(
+            user=SimpleNamespace(id=123),
             response=SimpleNamespace(send_message=AsyncMock())
         )
 
@@ -2663,12 +2679,14 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(embed.footer.text)
         self.assertEqual(embed.image.url, "attachment://familiar-result.png")
         self.assertEqual(message["file"].filename, "familiar-result.png")
+        self.assertEqual(message["view"].children[0].label, "리롤")
         create_image.assert_called_once_with(
             "공격력 +6%", "보스 몬스터 공격 시 데미지 +30%"
         )
 
     async def test_command_marks_double_prime(self) -> None:
         interaction = SimpleNamespace(
+            user=SimpleNamespace(id=123),
             response=SimpleNamespace(send_message=AsyncMock())
         )
 
@@ -2681,11 +2699,27 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         embed = interaction.response.send_message.await_args.kwargs["embed"]
         self.assertIn("더블 프라임", embed.description)
 
+    async def test_reroll_button_replaces_the_card_image(self) -> None:
+        view = maple_bot.FamiliarSimulatorView(user_id=123)
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(edit_message=AsyncMock())
+        )
+        embed = maple_bot.discord.Embed(color=0x954506)
+        file = maple_bot.discord.File(io.BytesIO(b"image"), filename="familiar-result.png")
+
+        with patch("maple_bot.build_familiar_result", return_value=(embed, file)):
+            await view.children[0].callback(interaction)
+
+        interaction.response.edit_message.assert_awaited_once_with(
+            embed=embed, attachments=[file], view=view
+        )
+
 
 class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def interaction(rates: list[tuple[str, float]]) -> SimpleNamespace:
         return SimpleNamespace(
+            user=SimpleNamespace(id=123),
             client=SimpleNamespace(fetch_pssb_rates=AsyncMock(return_value=rates)),
             response=SimpleNamespace(defer=AsyncMock()),
             followup=SimpleNamespace(send=AsyncMock()),
@@ -2701,6 +2735,7 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         message = interaction.followup.send.await_args.kwargs
         self.assertEqual(interaction.followup.send.await_count, 1)
         self.assertEqual(message["file"].filename, "pssb-1-results.png")
+        self.assertEqual(message["view"].children[0].label, "리롤")
         self.assertEqual(
             message["embed"].image.url,
             "attachment://pssb-1-results.png",
@@ -2708,6 +2743,32 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(message["embed"].footer.text)
         with Image.open(message["file"].fp) as result_image:
             self.assertEqual(result_image.size, (664, 591))
+
+    async def test_ssb_name_is_searchable_in_english_and_displayed_in_korean(self) -> None:
+        translator = maple_bot.KoreanCommandTranslator()
+
+        self.assertEqual(pssb_command.name, "ssb")
+        self.assertEqual(maple_bot.pssb_initials_command.name, "ㅅㅅㅂ")
+        self.assertEqual(
+            await translator.translate(
+                pssb_command._locale_name,
+                maple_bot.discord.Locale.korean,
+                None,
+            ),
+            "스스비",
+        )
+
+    async def test_korean_initials_alias_uses_the_same_draw_logic(self) -> None:
+        result = ("Roaring Green Rain Hood", 5.0)
+        interaction = self.interaction([result])
+
+        with patch("maple_bot.random.choices", return_value=[result]):
+            await maple_bot.pssb_initials_command.callback(
+                interaction, SimpleNamespace(value=1)
+            )
+
+        interaction.client.fetch_pssb_rates.assert_awaited_once()
+        self.assertEqual(interaction.followup.send.await_count, 1)
 
     async def test_five_draws_send_one_message_with_five_results(self) -> None:
         result = ("Roaring Green Rain Hood", 5.0)
@@ -2734,6 +2795,31 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message["file"].filename, "pssb-1-results.png")
         self.assertIn("Future PSSB Item", message["embed"].description)
 
+    async def test_reroll_button_refreshes_official_rates_and_replaces_image(self) -> None:
+        result = ("New Rotation Item", 2.0)
+        view = maple_bot.PssbSimulatorView(user_id=123, count=1)
+        interaction = SimpleNamespace(
+            client=SimpleNamespace(fetch_pssb_rates=AsyncMock(return_value=[result])),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+        file = maple_bot.discord.File(io.BytesIO(b"image"), filename="pssb-1-results.png")
+
+        with (
+            patch("maple_bot.draw_pssb_results", return_value=[result]),
+            patch(
+                "maple_bot.build_pssb_file",
+                return_value=(file, "pssb-1-results.png"),
+            ),
+        ):
+            await view.children[0].callback(interaction)
+
+        interaction.client.fetch_pssb_rates.assert_awaited_once()
+        interaction.edit_original_response.assert_awaited_once_with(
+            embed=ANY, attachments=[file], view=view
+        )
+
     def test_gender_suffix_uses_the_shared_item_name(self) -> None:
         item = pssb_cash_item("Oh My Captain (M) / Oh My Captain (F)")
 
@@ -2744,9 +2830,9 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(maple_bot.pssb_slot_path(2.0), maple_bot.PSSB_ADVANCED_SLOT_PATH)
         self.assertEqual(maple_bot.pssb_slot_path(4.0), maple_bot.PSSB_COMMON_SLOT_PATH)
 
-    def test_two_percent_result_has_purple_marker(self) -> None:
-        self.assertIn("🟪 **Rare Item**", maple_bot.format_pssb_result(1, "Rare Item", 2.0))
-        self.assertNotIn("🟪", maple_bot.format_pssb_result(1, "Common Item", 4.0))
+    def test_two_percent_result_has_subtle_rare_marker(self) -> None:
+        self.assertIn("✨ **Rare Item**", maple_bot.format_pssb_result(1, "Rare Item", 2.0))
+        self.assertNotIn("✨", maple_bot.format_pssb_result(1, "Common Item", 4.0))
 
 
 class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
