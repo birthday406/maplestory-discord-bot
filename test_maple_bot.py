@@ -22,6 +22,7 @@ from maple_data import (
     EXTREME_GROWTH_POTION_RATES,
     SYMBOL_REGIONS,
 )
+from familiar_store import FamiliarExpectationStore
 from maple_bot import (
     ALERT_CASH_TRANSFER,
     ALERT_CUBE_SALE,
@@ -2676,10 +2677,11 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(embed.title)
         self.assertEqual(embed.color.value, 0x954506)
         self.assertIsNone(embed.description)
-        self.assertIsNone(embed.footer.text)
+        self.assertEqual(embed.footer.text, "누적 추첨 횟수: 1회")
         self.assertEqual(embed.image.url, "attachment://familiar-result.png")
         self.assertEqual(message["file"].filename, "familiar-result.png")
         self.assertEqual(message["view"].children[0].label, "다시 뽑기")
+        self.assertEqual(message["view"].children[1].label, "기대값 계산하기")
         create_image.assert_called_once_with(
             "공격력 +6%", "보스 몬스터 공격 시 데미지 +30%"
         )
@@ -2700,19 +2702,79 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("더블 프라임", embed.description)
 
     async def test_reroll_button_replaces_the_card_image(self) -> None:
-        view = maple_bot.FamiliarSimulatorView(user_id=123)
+        initial_result = ("공격력 +6%", "최대 MP +6%", False)
+        next_result = ("마력 +6%", "최대 HP +6%", False)
+        view = maple_bot.FamiliarSimulatorView(123, initial_result)
         interaction = SimpleNamespace(
             response=SimpleNamespace(edit_message=AsyncMock())
         )
         embed = maple_bot.discord.Embed(color=0x954506)
         file = maple_bot.discord.File(io.BytesIO(b"image"), filename="familiar-result.png")
 
-        with patch("maple_bot.build_familiar_result", return_value=(embed, file)):
+        with patch(
+            "maple_bot.build_familiar_result",
+            return_value=(embed, file, next_result),
+        ) as build_result:
             await view.children[0].callback(interaction)
 
+        build_result.assert_called_once_with(2)
+        self.assertEqual(view.draw_count, 2)
+        self.assertEqual(view.result, next_result)
         interaction.response.edit_message.assert_awaited_once_with(
             embed=embed, attachments=[file], view=view
         )
+
+    async def test_expectation_button_shows_current_result_only_to_user(self) -> None:
+        result = ("공격력 +6%", "보스 몬스터 공격 시 데미지 +30%", False)
+        view = maple_bot.FamiliarSimulatorView(123, result)
+        store = Mock()
+        store.get.return_value = {
+            "probability": 0.0001,
+            "expected_attempts": 10_000,
+            "rarity_percentile": 12.34,
+        }
+        interaction = SimpleNamespace(
+            client=SimpleNamespace(familiar_expectation_store=store),
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await view.children[1].callback(interaction)
+
+        message = interaction.response.send_message.await_args
+        self.assertIn("공격력 +6%", message.args[0])
+        self.assertIn("상위 `12.34%`", message.args[0])
+        self.assertIn("10,000회", message.args[0])
+        self.assertIn("내 1회 이내 달성 확률", message.args[0])
+        self.assertTrue(message.kwargs["ephemeral"])
+
+
+class FamiliarExpectationStoreTests(unittest.TestCase):
+    def test_precomputes_every_combination_and_rarity_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = FamiliarExpectationStore(Path(directory) / "familiar.db")
+            common = store.get(("최대 MP +6%", "방어력 +240", False))
+            rare = store.get(("크리티컬 확률 +6%", "메소 드롭률 +100%", False))
+            example = store.get(
+                ("공격력 +6%", "보스 몬스터 공격 시 데미지 +30%", False)
+            )
+
+            connection = store._connect()
+            try:
+                count = connection.execute(
+                    "SELECT COUNT(*) FROM familiar_expectations"
+                ).fetchone()[0]
+            finally:
+                connection.close()
+
+        self.assertEqual(count, 4_784)
+        self.assertLess(rare["probability"], common["probability"])
+        self.assertLess(
+            rare["rarity_percentile"], common["rarity_percentile"]
+        )
+        self.assertAlmostEqual(
+            rare["expected_attempts"], 1 / rare["probability"]
+        )
+        self.assertAlmostEqual(example["rarity_percentile"], 4.3485132628)
 
 
 class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -2736,11 +2798,12 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(interaction.followup.send.await_count, 1)
         self.assertEqual(message["file"].filename, "pssb-1-results.png")
         self.assertEqual(message["view"].children[0].label, "다시 뽑기")
+        self.assertEqual(message["view"].children[1].label, "기대값 계산하기")
         self.assertEqual(
             message["embed"].image.url,
             "attachment://pssb-1-results.png",
         )
-        self.assertIsNone(message["embed"].footer.text)
+        self.assertEqual(message["embed"].footer.text, "누적 추첨 횟수: 1회")
         with Image.open(message["file"].fp) as result_image:
             self.assertEqual(result_image.size, (664, 591))
 
@@ -2781,6 +2844,7 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(interaction.followup.send.await_count, 1)
         self.assertEqual(message["file"].filename, "pssb-5-results.png")
         self.assertEqual(message["embed"].description.count("Roaring Green Rain Hood"), 5)
+        self.assertEqual(message["embed"].footer.text, "누적 추첨 횟수: 5회")
         with Image.open(message["file"].fp) as result_image:
             self.assertEqual(result_image.size, (664, 336))
 
@@ -2797,7 +2861,7 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reroll_button_refreshes_official_rates_and_replaces_image(self) -> None:
         result = ("New Rotation Item", 2.0)
-        view = maple_bot.PssbSimulatorView(user_id=123, count=1)
+        view = maple_bot.PssbSimulatorView(123, 1, [("Old Rotation Item", 5.0)])
         interaction = SimpleNamespace(
             client=SimpleNamespace(fetch_pssb_rates=AsyncMock(return_value=[result])),
             response=SimpleNamespace(defer=AsyncMock()),
@@ -2816,9 +2880,30 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
             await view.children[0].callback(interaction)
 
         interaction.client.fetch_pssb_rates.assert_awaited_once()
+        self.assertEqual(view.draw_count, 2)
+        self.assertEqual(view.results, [result])
         interaction.edit_original_response.assert_awaited_once_with(
             embed=ANY, attachments=[file], view=view
         )
+
+    async def test_expectation_button_shows_expected_boxes_only_to_user(self) -> None:
+        view = maple_bot.PssbSimulatorView(
+            123,
+            5,
+            [("Rare Item", 2.0), ("Common Item", 5.0)],
+        )
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+
+        await view.children[1].callback(interaction)
+
+        message = interaction.response.send_message.await_args
+        self.assertIn("Rare Item", message.args[0])
+        self.assertIn("평균 약 `50회`", message.args[0])
+        self.assertIn("평균 약 `20회`", message.args[0])
+        self.assertIn("내 5회 이내 달성 확률", message.args[0])
+        self.assertTrue(message.kwargs["ephemeral"])
 
     def test_gender_suffix_uses_the_shared_item_name(self) -> None:
         item = pssb_cash_item("Oh My Captain (M) / Oh My Captain (F)")

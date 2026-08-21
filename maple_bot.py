@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from PIL import Image, ImageDraw, ImageFont
 
+from familiar_store import FamiliarExpectationStore
 from ranking_store import RankingStore, scan_kronos_rankings
 
 from maple_calculators import (
@@ -87,6 +88,7 @@ CATEGORY_COLORS = {
 }
 STATE_PATH = Path("state.json")
 RANKING_DB_PATH = Path("ranking.db")
+FAMILIAR_DB_PATH = Path("familiar.db")
 RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.db"
 # 전체 약 53만 명을 바로 요청하지 않고 첫 배포에서는 상위 1,000명만 검증합니다.
 RANKING_SCAN_TRIAL_LIMIT = 1_000
@@ -2586,30 +2588,82 @@ def draw_unique_familiar_potential() -> tuple[str, str, bool]:
     return first_line, second_line, double_prime
 
 
-def build_familiar_result() -> tuple[discord.Embed, discord.File]:
+def expectation_line(probability: float) -> str:
+    """확률을 백분율과 평균 등장 횟수로 함께 표시합니다."""
+    return f"`{probability * 100:.6f}%` · 평균 약 `{1 / probability:,.0f}회`"
+
+
+def cumulative_success_probability(probability: float, attempts: int) -> float:
+    """독립 추첨을 여러 번 했을 때 목표가 한 번 이상 나올 확률입니다."""
+    return 1 - (1 - probability) ** attempts
+
+
+def familiar_expectation_text(
+    result: tuple[str, str, bool], expectation: dict, draw_count: int
+) -> str:
+    """DB에서 읽은 현재 두 줄 조합의 확률·기대 횟수·희귀도를 표시합니다."""
+    first_line, second_line, double_prime = result
+    second_rank = "유니크" if double_prime else "에픽"
+    return (
+        f"**1번째 줄**　{first_line}\n"
+        f"**2번째 줄 ({second_rank})**　{second_line}\n\n"
+        f"**1회 시행 시 목표 달성 확률**\n"
+        f"`{expectation['probability'] * 100:.10f}%`\n\n"
+        f"**실제 희귀도**　상위 `{expectation['rarity_percentile']:.2f}%`\n"
+        f"**평균 필요 횟수**　약 `{expectation['expected_attempts']:,.0f}회`\n"
+        f"**내 {draw_count:,}회 이내 달성 확률**　상위 `"
+        f"{cumulative_success_probability(expectation['probability'], draw_count) * 100:.2f}%`"
+    )
+
+
+def build_familiar_result(
+    draw_count: int,
+) -> tuple[discord.Embed, discord.File, tuple[str, str, bool]]:
     """퍼밀리어 잠재능력을 새로 추첨하고 카드 이미지까지 만듭니다."""
     first_line, second_line, double_prime = draw_unique_familiar_potential()
     embed = discord.Embed(
         description="✨ **더블 프라임!**" if double_prime else None,
         color=0x954506,
     )
+    embed.set_footer(text=f"누적 추첨 횟수: {draw_count:,}회")
     filename = "familiar-result.png"
     embed.set_image(url=f"attachment://{filename}")
-    return embed, discord.File(
-        create_familiar_result_image(first_line, second_line), filename=filename
+    result = (first_line, second_line, double_prime)
+    return (
+        embed,
+        discord.File(
+            create_familiar_result_image(first_line, second_line), filename=filename
+        ),
+        result,
     )
 
 
 class FamiliarSimulatorView(UserOwnedView):
     """같은 퍼밀리어 메시지에서 잠재능력을 다시 추첨합니다."""
 
+    def __init__(self, user_id: int, result: tuple[str, str, bool]) -> None:
+        super().__init__(user_id)
+        self.result = result
+        self.draw_count = 1
+
     @discord.ui.button(label="다시 뽑기", style=discord.ButtonStyle.primary, emoji="🎲")
     async def reroll(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        embed, file = build_familiar_result()
+        self.draw_count += 1
+        embed, file, self.result = build_familiar_result(self.draw_count)
         await interaction.response.edit_message(
             embed=embed, attachments=[file], view=self
+        )
+
+    @discord.ui.button(label="기대값 계산하기", style=discord.ButtonStyle.secondary)
+    async def show_expectation(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        expectation = interaction.client.familiar_expectation_store.get(self.result)
+        await interaction.response.send_message(
+            familiar_expectation_text(self.result, expectation, self.draw_count),
+            ephemeral=True,
         )
 
 
@@ -2621,11 +2675,11 @@ class FamiliarSimulatorView(UserOwnedView):
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def familiar_command(interaction: discord.Interaction) -> None:
     """유니크 퍼밀리어 카드 한 장의 잠재능력 결과를 보여줍니다."""
-    embed, file = build_familiar_result()
+    embed, file, result = build_familiar_result(1)
     await interaction.response.send_message(
         embed=embed,
         file=file,
-        view=FamiliarSimulatorView(interaction.user.id),
+        view=FamiliarSimulatorView(interaction.user.id, result),
     )
 
 
@@ -2640,9 +2694,11 @@ def draw_pssb_results(
     )
 
 
-def build_pssb_embed(results: list[tuple[str, float]]) -> discord.Embed:
+def build_pssb_embed(
+    results: list[tuple[str, float]], draw_count: int
+) -> discord.Embed:
     """PSSB 추첨 결과 텍스트 임베드를 만듭니다."""
-    return discord.Embed(
+    embed = discord.Embed(
         title=f"{PSSB_EMOJI} Premium Surprise Style Box",
         url=PSSB_RATES_PAGE_URL,
         description="\n".join(
@@ -2651,6 +2707,27 @@ def build_pssb_embed(results: list[tuple[str, float]]) -> discord.Embed:
         ),
         color=0xFF69B4,
     )
+    embed.set_footer(text=f"누적 추첨 횟수: {draw_count:,}회")
+    return embed
+
+
+def pssb_expectation_text(
+    results: list[tuple[str, float]], draw_count: int
+) -> str:
+    """현재 PSSB 결과별 공식 확률과 평균 등장 횟수를 보여줍니다."""
+    lines = []
+    seen = set()
+    for name, rate in results:
+        if name in seen:
+            continue
+        seen.add(name)
+        probability = rate / 100
+        success = cumulative_success_probability(probability, draw_count) * 100
+        lines.append(
+            f"**{name}**\n{expectation_line(probability)}\n"
+            f"내 {draw_count:,}회 이내 달성 확률: 상위 `{success:.2f}%`"
+        )
+    return "\n\n".join(lines)
 
 
 def build_pssb_file(
@@ -2664,9 +2741,13 @@ def build_pssb_file(
 class PssbSimulatorView(UserOwnedView):
     """같은 메시지에서 최신 공식 목록으로 PSSB를 다시 추첨합니다."""
 
-    def __init__(self, user_id: int, count: int) -> None:
+    def __init__(
+        self, user_id: int, count: int, results: list[tuple[str, float]]
+    ) -> None:
         super().__init__(user_id)
         self.count = count
+        self.results = results
+        self.draw_count = count
 
     @discord.ui.button(label="다시 뽑기", style=discord.ButtonStyle.primary, emoji="🎲")
     async def reroll(
@@ -2685,7 +2766,9 @@ class PssbSimulatorView(UserOwnedView):
             return
 
         results = draw_pssb_results(rates, self.count)
-        embed = build_pssb_embed(results)
+        self.results = results
+        self.draw_count += self.count
+        embed = build_pssb_embed(results, self.draw_count)
         try:
             file, filename = build_pssb_file(results, self.count)
             embed.set_image(url=f"attachment://{filename}")
@@ -2697,6 +2780,14 @@ class PssbSimulatorView(UserOwnedView):
             await interaction.edit_original_response(
                 embed=embed, attachments=[], view=self
             )
+
+    @discord.ui.button(label="기대값 계산하기", style=discord.ButtonStyle.secondary)
+    async def show_expectation(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.send_message(
+            pssb_expectation_text(self.results, self.draw_count), ephemeral=True
+        )
 
 
 @app_commands.command(
@@ -2731,8 +2822,8 @@ async def pssb_command(
 
     # 각 상자는 독립적으로 추첨하므로 같은 아이템이 여러 번 나올 수 있습니다.
     results = draw_pssb_results(rates, count.value)
-    embed = build_pssb_embed(results)
-    view = PssbSimulatorView(interaction.user.id, count.value)
+    embed = build_pssb_embed(results, count.value)
+    view = PssbSimulatorView(interaction.user.id, count.value, results)
     try:
         file, filename = build_pssb_file(results, count.value)
         embed.set_image(url=f"attachment://{filename}")
@@ -3345,6 +3436,7 @@ class MapleNewsBot(commands.Bot):
         migrate_sunny_sunday_state(self.sunny_sunday, sunny_channel_id)
         self.session: aiohttp.ClientSession | None = None
         self.ranking_store = RankingStore(RANKING_DB_PATH)
+        self.familiar_expectation_store = FamiliarExpectationStore(FAMILIAR_DB_PATH)
         self.ranking_scan_enabled = (
             os.getenv("RANKING_SCAN_ENABLED", "false").lower() == "true"
         )

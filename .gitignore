@@ -6,5 +6,8 @@ state.json
 ranking.db
 ranking.db-shm
 ranking.db-wal
+familiar.db
+familiar.db-shm
+familiar.db-wal
 __pycache__/
 *.py[cod]
