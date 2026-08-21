@@ -2677,11 +2677,12 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(embed.title)
         self.assertEqual(embed.color.value, 0x954506)
         self.assertIsNone(embed.description)
-        self.assertEqual(embed.footer.text, "누적 추첨 횟수: 1회")
+        self.assertEqual(embed.footer.text, "누적 횟수: 1회")
         self.assertEqual(embed.image.url, "attachment://familiar-result.png")
         self.assertEqual(message["file"].filename, "familiar-result.png")
         self.assertEqual(message["view"].children[0].label, "다시 뽑기")
         self.assertEqual(message["view"].children[1].label, "기대값 계산하기")
+        self.assertEqual(message["view"].timeout, 86_400)
         create_image.assert_called_once_with(
             "공격력 +6%", "보스 몬스터 공격 시 데미지 +30%"
         )
@@ -2747,6 +2748,25 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("내 1회 이내 달성 확률", message.args[0])
         self.assertTrue(message.kwargs["ephemeral"])
 
+    async def test_other_user_can_check_expectation_but_not_reroll(self) -> None:
+        view = maple_bot.FamiliarSimulatorView(123, ("공격력 +6%", "최대 MP +6%", False))
+        expectation_interaction = SimpleNamespace(
+            user=SimpleNamespace(id=456),
+            data={"custom_id": view.show_expectation.custom_id},
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+        reroll_interaction = SimpleNamespace(
+            user=SimpleNamespace(id=456),
+            data={"custom_id": view.reroll.custom_id},
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+        self.assertTrue(await view.interaction_check(expectation_interaction))
+        self.assertFalse(await view.interaction_check(reroll_interaction))
+        reroll_interaction.response.send_message.assert_awaited_once_with(
+            "이 버튼은 명령어를 실행한 사용자만 누를 수 있습니다.", ephemeral=True
+        )
+
 
 class FamiliarExpectationStoreTests(unittest.TestCase):
     def test_precomputes_every_combination_and_rarity_order(self) -> None:
@@ -2799,11 +2819,12 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message["file"].filename, "pssb-1-results.png")
         self.assertEqual(message["view"].children[0].label, "다시 뽑기")
         self.assertEqual(message["view"].children[1].label, "기대값 계산하기")
+        self.assertEqual(message["view"].timeout, 86_400)
         self.assertEqual(
             message["embed"].image.url,
             "attachment://pssb-1-results.png",
         )
-        self.assertEqual(message["embed"].footer.text, "누적 추첨 횟수: 1회")
+        self.assertEqual(message["embed"].footer.text, "누적 횟수: 1회")
         with Image.open(message["file"].fp) as result_image:
             self.assertEqual(result_image.size, (664, 591))
 
@@ -2844,7 +2865,7 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(interaction.followup.send.await_count, 1)
         self.assertEqual(message["file"].filename, "pssb-5-results.png")
         self.assertEqual(message["embed"].description.count("Roaring Green Rain Hood"), 5)
-        self.assertEqual(message["embed"].footer.text, "누적 추첨 횟수: 5회")
+        self.assertEqual(message["embed"].footer.text, "누적 횟수: 5회")
         with Image.open(message["file"].fp) as result_image:
             self.assertEqual(result_image.size, (664, 336))
 

@@ -2625,7 +2625,7 @@ def build_familiar_result(
         description="✨ **더블 프라임!**" if double_prime else None,
         color=0x954506,
     )
-    embed.set_footer(text=f"누적 추첨 횟수: {draw_count:,}회")
+    embed.set_footer(text=f"누적 횟수: {draw_count:,}회")
     filename = "familiar-result.png"
     embed.set_image(url=f"attachment://{filename}")
     result = (first_line, second_line, double_prime)
@@ -2642,9 +2642,14 @@ class FamiliarSimulatorView(UserOwnedView):
     """같은 퍼밀리어 메시지에서 잠재능력을 다시 추첨합니다."""
 
     def __init__(self, user_id: int, result: tuple[str, str, bool]) -> None:
-        super().__init__(user_id)
+        super().__init__(user_id, timeout=86_400)
         self.result = result
         self.draw_count = 1
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if (interaction.data or {}).get("custom_id") == self.show_expectation.custom_id:
+            return True
+        return await super().interaction_check(interaction)
 
     @discord.ui.button(label="다시 뽑기", style=discord.ButtonStyle.primary, emoji="🎲")
     async def reroll(
@@ -2707,7 +2712,7 @@ def build_pssb_embed(
         ),
         color=0xFF69B4,
     )
-    embed.set_footer(text=f"누적 추첨 횟수: {draw_count:,}회")
+    embed.set_footer(text=f"누적 횟수: {draw_count:,}회")
     return embed
 
 
@@ -2744,7 +2749,7 @@ class PssbSimulatorView(UserOwnedView):
     def __init__(
         self, user_id: int, count: int, results: list[tuple[str, float]]
     ) -> None:
-        super().__init__(user_id)
+        super().__init__(user_id, timeout=86_400)
         self.count = count
         self.results = results
         self.draw_count = count
