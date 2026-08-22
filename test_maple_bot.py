@@ -2681,6 +2681,7 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.image.url, "attachment://familiar-result.png")
         self.assertEqual(message["file"].filename, "familiar-result.png")
         self.assertEqual(message["view"].children[0].label, "다시 뽑기")
+        self.assertIsNone(message["view"].children[0].emoji)
         self.assertEqual(message["view"].children[1].label, "기대값 계산하기")
         self.assertEqual(message["view"].timeout, 86_400)
         create_image.assert_called_once_with(
@@ -2818,6 +2819,7 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(interaction.followup.send.await_count, 1)
         self.assertEqual(message["file"].filename, "pssb-1-results.png")
         self.assertEqual(message["view"].children[0].label, "다시 뽑기")
+        self.assertIsNone(message["view"].children[0].emoji)
         self.assertEqual(message["view"].children[1].label, "기대값 계산하기")
         self.assertEqual(message["view"].timeout, 86_400)
         self.assertEqual(
@@ -2923,14 +2925,31 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Rare Item", message.args[0])
         self.assertIn("평균 약 `50회`", message.args[0])
         self.assertIn("평균 약 `20회`", message.args[0])
+        self.assertIn("165,600 NX", message.args[0])
+        self.assertIn("68,400 NX", message.args[0])
         self.assertIn("내 5회 이내 달성 확률", message.args[0])
         self.assertTrue(message.kwargs["ephemeral"])
+
+    def test_nx_cost_uses_the_cheapest_single_and_set_mix(self) -> None:
+        self.assertEqual(maple_bot.pssb_nx_cost(10), 36_000)
+        self.assertEqual(maple_bot.pssb_nx_cost(11), 36_000)
+        self.assertEqual(maple_bot.pssb_nx_cost(12), 39_600)
 
     def test_gender_suffix_uses_the_shared_item_name(self) -> None:
         item = pssb_cash_item("Oh My Captain (M) / Oh My Captain (F)")
 
         self.assertIsNotNone(item)
         self.assertEqual(item["gms_name"], "Oh My Captain")
+
+    def test_duplicate_name_prefers_hangover_makeup_item_with_icon(self) -> None:
+        item = pssb_cash_item("Hangover Make-up")
+
+        self.assertEqual(item["id"], "1012603")
+        self.assertEqual(item["category"], "Accessory")
+        self.assertEqual(item["icon"], "1012603.png")
+
+    def test_appearance_data_is_not_used_for_pssb_items(self) -> None:
+        self.assertIsNone(pssb_cash_item("Defiant Face"))
 
     def test_only_two_percent_or_lower_uses_purple_slot(self) -> None:
         self.assertEqual(maple_bot.pssb_slot_path(2.0), maple_bot.PSSB_ADVANCED_SLOT_PATH)

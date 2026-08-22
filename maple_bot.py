@@ -153,6 +153,9 @@ PSSB_BACK_EFFECT_PATH = Path(__file__).parent / "assets" / "pssb-backeffect.png"
 PSSB_COMMON_SLOT_PATH = Path(__file__).parent / "assets" / "pssb-slot-common.png"
 PSSB_ADVANCED_SLOT_PATH = Path(__file__).parent / "assets" / "pssb-slot-advanced.png"
 PSSB_ADVANCED_RATE_THRESHOLD = 2.0
+PSSB_SINGLE_PRICE = 3_600
+PSSB_SET_SIZE = 11
+PSSB_SET_PRICE = 36_000
 FAMILIAR_ASSET_PATHS = {
     "back": Path(__file__).parent / "assets" / "familiar-card-back.png",
     "scene": Path(__file__).parent / "assets" / "familiar-card-scene.png",
@@ -223,9 +226,14 @@ def load_cash_items(path: Path = ITEM_DATA_PATH) -> list[dict[str, str]]:
 
 CASH_ITEMS = load_cash_items()
 CASH_ITEMS_BY_ID = {item["id"]: item for item in CASH_ITEMS}
-CASH_ITEMS_BY_GMS_NAME = {
-    item["gms_name"].casefold(): item for item in CASH_ITEMS
-}
+CASH_ITEMS_BY_GMS_NAME = {}
+for item in CASH_ITEMS:
+    if item["category"] in APPEARANCE_CATEGORIES:
+        continue
+    key = item["gms_name"].casefold()
+    current = CASH_ITEMS_BY_GMS_NAME.get(key)
+    if current is None or (item["icon"] and not current["icon"]):
+        CASH_ITEMS_BY_GMS_NAME[key] = item
 
 
 def pssb_cash_item(name: str) -> dict[str, str] | None:
@@ -2651,7 +2659,7 @@ class FamiliarSimulatorView(UserOwnedView):
             return True
         return await super().interaction_check(interaction)
 
-    @discord.ui.button(label="다시 뽑기", style=discord.ButtonStyle.primary, emoji="🎲")
+    @discord.ui.button(label="다시 뽑기", style=discord.ButtonStyle.primary)
     async def reroll(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
@@ -2727,12 +2735,22 @@ def pssb_expectation_text(
             continue
         seen.add(name)
         probability = rate / 100
+        expected_boxes = round(1 / probability)
         success = cumulative_success_probability(probability, draw_count) * 100
         lines.append(
             f"**{name}**\n{expectation_line(probability)}\n"
+            f"평균 구매 비용: 약 `{pssb_nx_cost(expected_boxes):,} NX`\n"
             f"내 {draw_count:,}회 이내 달성 확률: 상위 `{success:.2f}%`"
         )
-    return "\n\n".join(lines)
+    return "\n\n".join(lines) + "\n\n*1개 3,600 NX · 11개 세트 36,000 NX 기준*"
+
+
+def pssb_nx_cost(box_count: int) -> int:
+    """필요한 PSSB 수량을 낱개와 11개 세트로 가장 싸게 구매한 NX입니다."""
+    sets, singles = divmod(box_count, PSSB_SET_SIZE)
+    return sets * PSSB_SET_PRICE + min(
+        singles * PSSB_SINGLE_PRICE, PSSB_SET_PRICE
+    )
 
 
 def build_pssb_file(
@@ -2754,7 +2772,7 @@ class PssbSimulatorView(UserOwnedView):
         self.results = results
         self.draw_count = count
 
-    @discord.ui.button(label="다시 뽑기", style=discord.ButtonStyle.primary, emoji="🎲")
+    @discord.ui.button(label="다시 뽑기", style=discord.ButtonStyle.primary)
     async def reroll(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
