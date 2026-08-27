@@ -921,11 +921,11 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields["유니온 레벨"], "10,221")
         self.assertEqual(embed.thumbnail.url, "https://example.com/home.png")
 
-    async def test_command_loads_three_na_rankings(self) -> None:
+    async def test_command_loads_four_na_rankings(self) -> None:
         character = self.character()
         world_character = self.character(rank=1309)
         legion = self.character(rank=2923, legionLevel=10221)
-        achievement = self.character(rank=810, score=12340)
+        achievement = self.character(rank=810, score=0, starSum=33370)
         client = SimpleNamespace(
             fetch_ranking_character=AsyncMock(
                 side_effect=[character, world_character, legion, achievement]
@@ -960,6 +960,15 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             interaction.followup.send.await_args.kwargs["embed"].image.url,
             "attachment://ranking-history.png",
+        )
+        fields = {
+            field.name: field.value
+            for field in interaction.followup.send.await_args.kwargs["embed"].fields
+        }
+        self.assertEqual(fields["업적 점수"], "33,370")
+        self.assertEqual(
+            client.ranking_store.save_snapshot.call_args.args[0]["achievementScore"],
+            33370,
         )
         client.ranking_store.save_snapshot.assert_called_once()
         client.ranking_store.save_default_character.assert_called_once_with(123, "Home")

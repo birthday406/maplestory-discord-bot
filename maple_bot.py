@@ -3190,6 +3190,9 @@ async def ranking_command(
         achievement = await interaction.client.fetch_ranking_character(
             "na", "achievement", world_id, nickname
         )
+        if achievement is not None:
+            # 업적 API는 실제 업적 점수를 score가 아니라 starSum으로 반환합니다.
+            achievement["score"] = achievement.get("starSum", achievement.get("score", 0))
     except (aiohttp.ClientError, TimeoutError, ValueError, KeyError):
         logging.exception("Failed to load the official GMS character ranking.")
         await interaction.followup.send(
