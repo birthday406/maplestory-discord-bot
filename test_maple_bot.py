@@ -43,9 +43,11 @@ from maple_bot import (
     GROWTH_POTIONS,
     HEXA_CORE_COSTS,
     LEVEL_EXP,
+    RANKING_SCAN_INTERVAL_SECONDS,
     build_miracle_time_embed,
     build_command_stats_embed,
     build_exchange_rate_log_embed,
+    build_guild_ranking_embed,
     build_ranking_embed,
     build_server_status_embed,
     build_ursus_embed,
@@ -107,6 +109,10 @@ from maple_bot import (
     pssb_command,
     quick_copy_command,
     ranking_command,
+    guild_ranking_command,
+    guild_ranking_register_command,
+    guild_ranking_unregister_command,
+    maple_addict_power,
     record_command_usage,
     record_exchange_rate,
     save_state,
@@ -141,6 +147,9 @@ from ranking_store import RankingStore, scan_kronos_rankings
 
 
 class NewsFilteringTests(unittest.TestCase):
+    def test_ranking_collection_runs_every_five_seconds(self) -> None:
+        self.assertEqual(RANKING_SCAN_INTERVAL_SECONDS, 5)
+
     def test_pssb_rates_keep_gender_pair_in_one_reward_slot(self) -> None:
         source = """
         <table><tbody>
@@ -255,9 +264,11 @@ class NewsFilteringTests(unittest.TestCase):
             {"Scania": True, "Bera": False, "Kronos": True, "Hyperion": True},
         )
 
-    def test_server_status_rejects_missing_world_data(self) -> None:
-        with self.assertRaises(ValueError):
-            parse_server_status({"servers": []})
+    def test_server_status_treats_empty_world_list_as_maintenance(self) -> None:
+        self.assertEqual(
+            parse_server_status({"servers": []}),
+            {"Scania": False, "Bera": False, "Kronos": False, "Hyperion": False},
+        )
 
     def test_info_channel_names_use_korea_time_and_naver_usd_rate(self) -> None:
         self.assertEqual(
@@ -914,14 +925,19 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         character = self.character()
         world_character = self.character(rank=1309)
         legion = self.character(rank=2923, legionLevel=10221)
+        achievement = self.character(rank=810, score=12340)
         client = SimpleNamespace(
             fetch_ranking_character=AsyncMock(
-                side_effect=[character, world_character, legion]
+                side_effect=[character, world_character, legion, achievement]
             ),
-            ranking_store=SimpleNamespace(save_snapshot=Mock(return_value=[])),
+            ranking_store=SimpleNamespace(
+                save_snapshot=Mock(return_value=[]),
+                save_default_character=Mock(),
+            ),
         )
         interaction = SimpleNamespace(
             client=client,
+            user=SimpleNamespace(id=123),
             response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
             followup=SimpleNamespace(send=AsyncMock()),
         )
@@ -935,6 +951,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                 ("na", "overall", "weekly", "Home"),
                 ("na", "world", 45, "Home"),
                 ("na", "legion", 45, "Home"),
+                ("na", "achievement", 45, "Home"),
             ],
         )
         self.assertEqual(
@@ -945,6 +962,49 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             "attachment://ranking-history.png",
         )
         client.ranking_store.save_snapshot.assert_called_once()
+        client.ranking_store.save_default_character.assert_called_once_with(123, "Home")
+
+    async def test_command_uses_saved_character_when_nickname_is_empty(self) -> None:
+        character = self.character()
+        client = SimpleNamespace(
+            fetch_ranking_character=AsyncMock(
+                side_effect=[
+                    character,
+                    self.character(rank=1309),
+                    self.character(rank=2923, legionLevel=10221),
+                    self.character(rank=810, score=12340),
+                ]
+            ),
+            ranking_store=SimpleNamespace(
+                get_default_character=Mock(return_value="Home"),
+                save_default_character=Mock(),
+                save_snapshot=Mock(return_value=[]),
+            ),
+        )
+        interaction = SimpleNamespace(
+            client=client,
+            user=SimpleNamespace(id=123),
+            response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+        await ranking_command.callback(interaction)
+
+        client.ranking_store.get_default_character.assert_called_once_with(123)
+        client.fetch_ranking_character.assert_awaited_with("na", "achievement", 45, "Home")
+
+    async def test_command_without_saved_character_explains_first_lookup(self) -> None:
+        interaction = SimpleNamespace(
+            client=SimpleNamespace(
+                ranking_store=SimpleNamespace(get_default_character=Mock(return_value=None))
+            ),
+            user=SimpleNamespace(id=123),
+            response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+        )
+
+        await ranking_command.callback(interaction)
+
+        self.assertIn("처음에는", interaction.response.send_message.await_args.args[0])
 
     def test_snapshot_calculates_gain_across_a_level_up(self) -> None:
         first = self.character(level=295, exp=LEVEL_EXP[95] - 100)
@@ -956,6 +1016,118 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             gains = store.save_snapshot(second, date(2026, 8, 16))
 
         self.assertEqual(gains, [{"date": "2026-08-16", "exp": 150}])
+
+    def test_default_character_is_saved_per_discord_user(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_default_character(1, "Akanelize")
+            store.save_default_character(2, "Home")
+
+            self.assertEqual(store.get_default_character(1), "Akanelize")
+            self.assertEqual(store.get_default_character(2), "Home")
+            self.assertIsNone(store.get_default_character(3))
+
+    def test_all_first_place_rankings_have_max_maple_addict_power(self) -> None:
+        score, title = maple_addict_power(
+            {
+                "level": 250,
+                "exp": 0,
+                "ranking": 1,
+                "legion_level": 1,
+                "legion_rank": 1,
+                "achievement_score": 1,
+                "achievement_rank": 1,
+            }
+        )
+
+        self.assertEqual(score, 99.9)
+        self.assertEqual(title, "초월 메창")
+
+    def test_guild_registration_is_separated_by_discord_server(self) -> None:
+        character = self.character(
+            legionLevel=10221,
+            legionRank=2923,
+            achievementScore=12340,
+            achievementRank=810,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(character, date(2026, 8, 16))
+            store.register_guild_character(100, 1, "슈비", "Home")
+            store.register_guild_character(200, 1, "다른 서버 슈비", "Home")
+
+            self.assertEqual(store.get_guild_rankings(100)[0]["discord_display_name"], "슈비")
+            self.assertEqual(store.get_guild_rankings(200)[0]["discord_display_name"], "다른 서버 슈비")
+            self.assertTrue(store.unregister_guild_character(100, 1))
+            self.assertEqual(store.get_guild_rankings(100), [])
+            self.assertEqual(len(store.get_guild_rankings(200)), 1)
+
+    async def test_guild_register_uses_last_directly_looked_up_character(self) -> None:
+        store = SimpleNamespace(
+            get_default_character=Mock(return_value="Home"),
+            register_guild_character=Mock(),
+        )
+        interaction = SimpleNamespace(
+            guild_id=100,
+            client=SimpleNamespace(ranking_store=store),
+            user=SimpleNamespace(id=123, display_name="슈비"),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+        await guild_ranking_register_command.callback(interaction)
+
+        store.register_guild_character.assert_called_once_with(100, 123, "슈비", "Home")
+
+    async def test_guild_ranking_never_sends_a_discord_mention(self) -> None:
+        entries = [
+            {
+                "discord_display_name": "슈비",
+                "character_name": "Home",
+                "level": 295,
+                "exp": LEVEL_EXP[95] // 2,
+                "ranking": 8926,
+                "legion_level": 10221,
+                "legion_rank": 2923,
+                "achievement_score": 12340,
+                "achievement_rank": 810,
+                "updated_date": "2026-08-16",
+            }
+        ]
+        interaction = SimpleNamespace(
+            guild_id=100,
+            client=SimpleNamespace(ranking_store=SimpleNamespace(get_guild_rankings=Mock(return_value=entries))),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+        await guild_ranking_command.callback(interaction)
+
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        self.assertIn("슈비 (Home)", embed.fields[0].name)
+        self.assertNotIn("<@", embed.fields[0].value)
+
+    def test_guild_ranking_shows_five_above_and_below_target(self) -> None:
+        entries = [
+            {
+                "discord_display_name": f"사용자{rank}",
+                "character_name": f"Rank{rank}",
+                "level": 295,
+                "exp": 0,
+                "ranking": rank,
+                "legion_level": 10_000,
+                "legion_rank": rank,
+                "achievement_score": 20_000,
+                "achievement_rank": rank,
+                "updated_date": "2026-08-27",
+            }
+            for rank in range(1, 13)
+        ]
+
+        embed = build_guild_ranking_embed(entries, "rank7")
+
+        self.assertEqual(len(embed.fields), 11)
+        self.assertTrue(embed.fields[0].name.startswith("2."))
+        self.assertTrue(embed.fields[5].name.startswith("👉 7."))
+        self.assertTrue(embed.fields[-1].name.startswith("12."))
 
     def test_history_graph_is_rendered_as_png(self) -> None:
         result = create_ranking_history_image(
@@ -1048,6 +1220,33 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(store.character_count(), 21)
         resumed_fetch.assert_awaited_once_with(11)
         self.assertEqual(result["reason"], "limit")
+
+    async def test_batch_scan_keeps_cursor_after_a_day_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            first_fetch = AsyncMock(return_value={"ranks": self.ranks(1)})
+            first = await scan_kronos_rankings(
+                first_fetch,
+                store,
+                date(2026, 8, 16),
+                max_characters=None,
+                delay_seconds=0,
+                max_pages=1,
+            )
+            second_fetch = AsyncMock(return_value={"ranks": self.ranks(11)})
+            second = await scan_kronos_rankings(
+                second_fetch,
+                store,
+                date(2026, 8, 17),
+                max_characters=None,
+                delay_seconds=0,
+                max_pages=1,
+            )
+
+        self.assertEqual(first["reason"], "batch")
+        self.assertEqual(second["reason"], "batch")
+        first_fetch.assert_awaited_once_with(1)
+        second_fetch.assert_awaited_once_with(11)
 
     async def test_scan_stops_when_level_falls_below_260(self) -> None:
         ranks = self.ranks(1, count=5, level=260) + self.ranks(6, count=5, level=259)
@@ -2826,7 +3025,10 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
             message["embed"].image.url,
             "attachment://pssb-1-results.png",
         )
-        self.assertEqual(message["embed"].footer.text, "누적 횟수: 1회")
+        self.assertEqual(
+            message["embed"].footer.text,
+            "누적 횟수: 1회\n지금까지 낭비한 돈: 3,600 NX",
+        )
         with Image.open(message["file"].fp) as result_image:
             self.assertEqual(result_image.size, (664, 591))
 
@@ -2867,7 +3069,10 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(interaction.followup.send.await_count, 1)
         self.assertEqual(message["file"].filename, "pssb-5-results.png")
         self.assertEqual(message["embed"].description.count("Roaring Green Rain Hood"), 5)
-        self.assertEqual(message["embed"].footer.text, "누적 횟수: 5회")
+        self.assertEqual(
+            message["embed"].footer.text,
+            "누적 횟수: 5회\n지금까지 낭비한 돈: 18,000 NX",
+        )
         with Image.open(message["file"].fp) as result_image:
             self.assertEqual(result_image.size, (664, 336))
 

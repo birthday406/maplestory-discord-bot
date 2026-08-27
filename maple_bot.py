@@ -4,6 +4,7 @@ import html
 import io
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -90,8 +91,9 @@ STATE_PATH = Path("state.json")
 RANKING_DB_PATH = Path("ranking.db")
 FAMILIAR_DB_PATH = Path("familiar.db")
 RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.db"
-# 전체 약 53만 명을 바로 요청하지 않고 첫 배포에서는 상위 1,000명만 검증합니다.
-RANKING_SCAN_TRIAL_LIMIT = 1_000
+# 공식 랭킹 API에 과도한 요청을 보내지 않으면서 전수 수집을 이어갈 간격입니다.
+RANKING_SCAN_INTERVAL_SECONDS = 5
+RANKING_BACKUP_INTERVAL = timedelta(hours=1)
 SEED_RING_LEVELS = {
     4: {"stone": "생명의 연마석", "rate_per_stone": 10},
     5: {"stone": "신념의 연마석", "rate_per_stone": 5},
@@ -679,8 +681,10 @@ def parse_server_status(payload: dict) -> dict[str, bool]:
     for world in MAIN_WORLDS:
         server = servers.get(world)
         if server is None:
-            # API 형식이 바뀐 상황을 점검으로 오인하지 않도록 오류로 처리합니다.
-            raise ValueError(f"Missing MapleStory world: {world}")
+            # 점검 중에는 공식 API가 월드 목록을 비워서 보냅니다.
+            # 목록에 없는 월드는 접속 불가로 처리해야 서버 오픈 전환을 감지할 수 있습니다.
+            statuses[world] = False
+            continue
         login_servers = [
             value
             for key, value in server.items()
@@ -692,7 +696,9 @@ def parse_server_status(payload: dict) -> dict[str, bool]:
             if key.startswith("Game") and value not in {None, -1}
         ]
         if not login_servers or not game_channels:
-            raise ValueError(f"Missing MapleStory server data: {world}")
+            # 점검 화면처럼 월드 정보가 불완전한 경우도 접속 불가로 봅니다.
+            statuses[world] = False
+            continue
         statuses[world] = all(value == 1 for value in login_servers) and any(
             value == 1 for value in game_channels
         )
@@ -1425,6 +1431,7 @@ def build_ranking_embed(
     character: dict,
     world_rank: int | None,
     legion: dict | None,
+    achievement: dict | None = None,
 ) -> discord.Embed:
     """공식 랭킹에서 확인한 캐릭터 정보를 Discord 한 화면으로 정리합니다."""
     level = character["level"]
@@ -1450,9 +1457,135 @@ def build_ranking_embed(
     if legion is not None:
         embed.add_field(name="유니온 레벨", value=f"{legion['legionLevel']:,}")
         embed.add_field(name="유니온 순위", value=f"{legion['rank']:,}위")
+    if achievement is not None:
+        embed.add_field(name="업적 점수", value=f"{achievement['score']:,}")
+        embed.add_field(name="업적 순위", value=f"{achievement['rank']:,}위")
     if character.get("characterImgURL"):
         embed.set_thumbnail(url=character["characterImgURL"])
     embed.set_footer(text="Nexon 공식 GMS 랭킹 기준")
+    return embed
+
+
+def ranking_progress_percent(level: int, exp: int) -> float:
+    """레벨과 현재 경험치를 200~300 구간의 0~100 성장률로 바꿉니다."""
+    if level >= 300:
+        return 100.0
+    if level < 200:
+        return 0.0
+    required_exp = LEVEL_EXP[level - 200]
+    return min(100.0, (level - 200) + float(Decimal(exp) / Decimal(required_exp)))
+
+
+def ranking_position_score(rank: int | None) -> float:
+    """랭킹 1위는 100점, 뒤로 갈수록 완만히 낮아지는 순위 점수입니다."""
+    if rank is None or rank < 1:
+        return 0.0
+    return 100 / (1 + math.log10(rank) / 4)
+
+
+def maple_addict_power(entry: dict) -> tuple[float, str]:
+    """레벨·유니온·업적의 수치와 순위를 합쳐 재미용 메창력과 칭호를 만듭니다."""
+    # 레벨·경험치와 전체 순위 40점, 유니온 30점, 업적 30점입니다.
+    character_score = (
+        ranking_progress_percent(entry["level"], entry["exp"]) * 0.20
+        + ranking_position_score(entry["ranking"]) * 0.20
+    )
+    union_score = (
+        min(entry.get("legion_level") or 0, 12_000) / 12_000 * 15
+        + ranking_position_score(entry.get("legion_rank")) * 0.15
+    )
+    achievement_score = (
+        min(entry.get("achievement_score") or 0, 30_000) / 30_000 * 15
+        + ranking_position_score(entry.get("achievement_rank")) * 0.15
+    )
+    all_first = all(
+        entry.get(key) == 1
+        for key in ("ranking", "legion_rank", "achievement_rank")
+    )
+    score = 99.9 if all_first else min(99.8, character_score + union_score + achievement_score)
+
+    highest = max(
+        (character_score, "레벨 장인"),
+        (union_score, "유니온 장인"),
+        (achievement_score, "업적 사냥꾼"),
+    )
+    if score >= 95:
+        title = "초월 메창"
+    elif score >= 80:
+        title = "메창"
+    elif max(character_score, union_score, achievement_score) - min(
+        character_score, union_score, achievement_score
+    ) <= 3:
+        title = "밸런스 메창"
+    else:
+        title = highest[1]
+    return round(score, 2), title
+
+
+def build_guild_ranking_embed(
+    entries: list[dict], target_nickname: str | None = None
+) -> discord.Embed:
+    """한 Discord 서버에 직접 등록한 캐릭터만 메창력 순으로 보여줍니다."""
+    ranked = []
+    for entry in entries:
+        if entry["level"] is not None:
+            score, title = maple_addict_power(entry)
+            ranked.append((score, title, entry))
+    ranked.sort(key=lambda item: (-item[0], -item[2]["level"], -item[2]["exp"], item[2]["ranking"]))
+
+    embed = discord.Embed(
+        title="서버 메창력 랭킹",
+        description="등록한 캐릭터의 마지막 `/랭킹` 조회 기준입니다.",
+        color=0xF1C40F,
+    )
+    start = 0
+    visible_ranked = ranked[:20]
+    target_key = target_nickname.strip().casefold() if target_nickname else None
+    if target_key:
+        target_index = next(
+            (
+                index
+                for index, (_, _, entry) in enumerate(ranked)
+                if entry["character_name"].casefold() == target_key
+            ),
+            None,
+        )
+        if target_index is None:
+            embed.description = (
+                f"**{discord.utils.escape_markdown(target_nickname.strip())}** 캐릭터가 "
+                "이 서버 랭킹에 없거나 랭킹 정보를 다시 조회해야 합니다."
+            )
+            return embed
+        # 찾은 캐릭터를 가운데에 두고 위아래 순위를 최대 5명씩 보여줍니다.
+        start = max(0, target_index - 5)
+        visible_ranked = ranked[start : target_index + 6]
+        embed.description = (
+            f"**{discord.utils.escape_markdown(ranked[target_index][2]['character_name'])}** 기준 "
+            "위·아래 최대 5명입니다."
+        )
+
+    for position, (score, title, entry) in enumerate(visible_ranked, start=start + 1):
+        exp_text = ""
+        if 200 <= entry["level"] < 300:
+            exp_text = f" ({ranking_progress_percent(entry['level'], entry['exp']) % 1 * 100:.3f}%)"
+        union_text = f"{entry['legion_level']:,}" if entry["legion_level"] else "확인 불가"
+        achievement_text = (
+            f"{entry['achievement_score']:,}" if entry["achievement_score"] else "확인 불가"
+        )
+        marker = "👉 " if target_key == entry["character_name"].casefold() else ""
+        embed.add_field(
+            name=f"{marker}{position}. {entry['discord_display_name']} ({entry['character_name']})",
+            value=(
+                f"Lv. {entry['level']}{exp_text} · 전체 {entry['ranking']:,}위\n"
+                f"유니온 {union_text} · 업적 {achievement_text}\n"
+                f"**메창력 {score:.2f} · {title}**"
+            ),
+            inline=False,
+        )
+    if not ranked:
+        embed.description = "등록된 캐릭터의 랭킹 정보가 없습니다. 먼저 `/랭킹` 후 `/랭킹등록`을 실행해주세요."
+    elif len(entries) > len(ranked):
+        embed.set_footer(text="일부 등록 캐릭터는 랭킹 정보를 다시 조회해야 합니다.")
     return embed
 
 
@@ -2366,7 +2499,11 @@ async def help_command(interaction: discord.Interaction) -> None:
         value="`/아이템검색` `/외형검색`",
         inline=False,
     )
-    embed.add_field(name="편의", value="`/랭킹` `/ㅁ`", inline=False)
+    embed.add_field(
+        name="편의",
+        value="`/랭킹` `/랭킹등록` `/랭킹해제` `/서버랭킹` `/ㅁ`",
+        inline=False,
+    )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -2720,7 +2857,12 @@ def build_pssb_embed(
         ),
         color=0xFF69B4,
     )
-    embed.set_footer(text=f"누적 횟수: {draw_count:,}회")
+    embed.set_footer(
+        text=(
+            f"누적 횟수: {draw_count:,}회\n"
+            f"지금까지 낭비한 돈: {pssb_nx_cost(draw_count):,} NX"
+        )
+    )
     return embed
 
 
@@ -3000,12 +3142,22 @@ async def ursus_command(interaction: discord.Interaction) -> None:
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.rename(nickname="닉네임")
-@app_commands.describe(nickname="검색할 GMS 캐릭터 닉네임")
+@app_commands.describe(nickname="처음에는 입력하고, 이후에는 비워도 됩니다")
 async def ranking_command(
     interaction: discord.Interaction,
-    nickname: str,
+    nickname: str | None = None,
 ) -> None:
     """공식 GMS 랭킹에서 캐릭터·월드·유니온 순위를 찾아 보여줍니다."""
+    if nickname is None:
+        nickname = interaction.client.ranking_store.get_default_character(
+            interaction.user.id
+        )
+        if nickname is None:
+            await interaction.response.send_message(
+                "처음에는 `/랭킹 닉네임:캐릭터명`처럼 닉네임을 입력해주세요.",
+                ephemeral=True,
+            )
+            return
     nickname = nickname.strip()
     if not nickname or len(nickname) > 20:
         await interaction.response.send_message(
@@ -3024,12 +3176,19 @@ async def ranking_command(
                 ephemeral=True,
             )
             return
+        # 직접 이름을 입력해 성공한 조회만 다음 /랭킹 기본값으로 기억합니다.
+        interaction.client.ranking_store.save_default_character(
+            interaction.user.id, character["characterName"]
+        )
         world_id = character["worldID"]
         world_character = await interaction.client.fetch_ranking_character(
             "na", "world", world_id, nickname
         )
         legion = await interaction.client.fetch_ranking_character(
             "na", "legion", world_id, nickname
+        )
+        achievement = await interaction.client.fetch_ranking_character(
+            "na", "achievement", world_id, nickname
         )
     except (aiohttp.ClientError, TimeoutError, ValueError, KeyError):
         logging.exception("Failed to load the official GMS character ranking.")
@@ -3039,6 +3198,13 @@ async def ranking_command(
         )
         return
 
+    # 서버 랭킹과 메창력도 같은 최신 조회값을 쓰도록 캐릭터 기록에 함께 저장합니다.
+    if legion is not None:
+        character["legionLevel"] = legion["legionLevel"]
+        character["legionRank"] = legion["rank"]
+    if achievement is not None:
+        character["achievementScore"] = achievement["score"]
+        character["achievementRank"] = achievement["rank"]
     gains = interaction.client.ranking_store.save_snapshot(
         character, datetime.now(URSUS_TIMEZONE).date()
     )
@@ -3046,6 +3212,7 @@ async def ranking_command(
         character,
         world_character["rank"] if world_character is not None else None,
         legion,
+        achievement,
     )
     filename = "ranking-history.png"
     embed.set_image(url=f"attachment://{filename}")
@@ -3055,6 +3222,81 @@ async def ranking_command(
             create_ranking_history_image(character["characterName"], gains),
             filename=filename,
         ),
+    )
+
+
+def guild_id_or_none(interaction: discord.Interaction) -> int | None:
+    """서버 전용 랭킹 명령어가 DM에서 실행되지 않게 확인합니다."""
+    return interaction.guild_id
+
+
+@app_commands.command(name="랭킹등록", description="현재 기본 캐릭터를 이 서버 랭킹에 등록합니다.")
+@app_commands.allowed_installs(guilds=True)
+@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+async def guild_ranking_register_command(interaction: discord.Interaction) -> None:
+    """다른 서버와 섞이지 않게 현재 서버의 등록 목록만 갱신합니다."""
+    guild_id = guild_id_or_none(interaction)
+    if guild_id is None:
+        await interaction.response.send_message("이 명령어는 Discord 서버에서만 사용할 수 있습니다.", ephemeral=True)
+        return
+    character_name = interaction.client.ranking_store.get_default_character(interaction.user.id)
+    if character_name is None:
+        await interaction.response.send_message(
+            "먼저 `/랭킹 닉네임:캐릭터명`으로 캐릭터를 조회해주세요.", ephemeral=True
+        )
+        return
+    interaction.client.ranking_store.register_guild_character(
+        guild_id,
+        interaction.user.id,
+        interaction.user.display_name,
+        character_name,
+    )
+    await interaction.response.send_message(
+        f"**{discord.utils.escape_markdown(character_name)}** 캐릭터를 이 서버 랭킹에 등록했습니다.",
+        ephemeral=True,
+    )
+
+
+@app_commands.command(name="랭킹해제", description="현재 서버의 내 랭킹 등록을 해제합니다.")
+@app_commands.allowed_installs(guilds=True)
+@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+async def guild_ranking_unregister_command(interaction: discord.Interaction) -> None:
+    """현재 서버의 사용자 한 명만 해제하며 다른 서버 등록은 건드리지 않습니다."""
+    guild_id = guild_id_or_none(interaction)
+    if guild_id is None:
+        await interaction.response.send_message("이 명령어는 Discord 서버에서만 사용할 수 있습니다.", ephemeral=True)
+        return
+    removed = interaction.client.ranking_store.unregister_guild_character(
+        guild_id, interaction.user.id
+    )
+    await interaction.response.send_message(
+        "이 서버의 랭킹 등록을 해제했습니다." if removed else "이 서버에 등록된 캐릭터가 없습니다.",
+        ephemeral=True,
+    )
+
+
+@app_commands.command(name="서버랭킹", description="이 서버에 등록된 캐릭터의 메창력 랭킹을 봅니다.")
+@app_commands.allowed_installs(guilds=True)
+@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+@app_commands.rename(nickname="닉네임")
+@app_commands.describe(nickname="입력하면 해당 캐릭터의 위·아래 순위를 보여줍니다")
+async def guild_ranking_command(
+    interaction: discord.Interaction, nickname: str | None = None
+) -> None:
+    """등록된 사용자만 비교하며 Discord 멘션 대신 서버 표시명을 보여줍니다."""
+    guild_id = guild_id_or_none(interaction)
+    if guild_id is None:
+        await interaction.response.send_message("이 명령어는 Discord 서버에서만 사용할 수 있습니다.", ephemeral=True)
+        return
+    entries = interaction.client.ranking_store.get_guild_rankings(guild_id)
+    if not entries:
+        await interaction.response.send_message(
+            "아직 이 서버에 등록된 캐릭터가 없습니다. `/랭킹` 후 `/랭킹등록`을 실행해주세요.",
+            ephemeral=True,
+        )
+        return
+    await interaction.response.send_message(
+        embed=build_guild_ranking_embed(entries, nickname)
     )
 
 
@@ -3459,10 +3701,8 @@ class MapleNewsBot(commands.Bot):
         migrate_sunny_sunday_state(self.sunny_sunday, sunny_channel_id)
         self.session: aiohttp.ClientSession | None = None
         self.ranking_store = RankingStore(RANKING_DB_PATH)
+        self._last_ranking_backup_at: datetime | None = None
         self.familiar_expectation_store = FamiliarExpectationStore(FAMILIAR_DB_PATH)
-        self.ranking_scan_enabled = (
-            os.getenv("RANKING_SCAN_ENABLED", "false").lower() == "true"
-        )
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
         self.openai = AsyncOpenAI()
         # Google 번역 키도 .env 파일에서 읽습니다. 키를 Discord나 GitHub에 올리면 안 됩니다.
@@ -3488,6 +3728,9 @@ class MapleNewsBot(commands.Bot):
             appearance_search_command,
             traffic_light_command,
             ranking_command,
+            guild_ranking_register_command,
+            guild_ranking_unregister_command,
+            guild_ranking_command,
             channel_recommend_command,
             familiar_command,
             pssb_command,
@@ -3568,8 +3811,8 @@ class MapleNewsBot(commands.Bot):
             self.update_time_channels.start()
         if not self.update_exchange_channels.is_running():
             self.update_exchange_channels.start()
-        if self.ranking_scan_enabled and not self.collect_ranking_trial.is_running():
-            self.collect_ranking_trial.start()
+        if not self.collect_kronos_rankings.is_running():
+            self.collect_kronos_rankings.start()
 
     async def close(self) -> None:
         if self.session is not None:
@@ -4559,31 +4802,40 @@ class MapleNewsBot(commands.Bot):
                 await self.update_exchange_log_messages()
                 self.persist_state()
 
-    @tasks.loop(time=datetime_time(hour=22, tzinfo=timezone.utc))
-    async def collect_ranking_trial(self) -> None:
-        """매일 공식 갱신 뒤 크로노스 상위 1,000명만 시험 수집합니다."""
+    @tasks.loop(seconds=RANKING_SCAN_INTERVAL_SECONDS)
+    async def collect_kronos_rankings(self) -> None:
+        """크로노스 Lv.260 이상 랭킹을 5초마다 한 페이지씩 순차 수집합니다."""
         scan_date = datetime.now(URSUS_TIMEZONE).date()
         try:
             result = await scan_kronos_rankings(
                 self.fetch_kronos_ranking_page,
                 self.ranking_store,
                 scan_date,
-                max_characters=RANKING_SCAN_TRIAL_LIMIT,
+                max_characters=None,
+                max_pages=1,
+                restart_completed=True,
             )
-            if result["reason"] == "already_completed":
-                return
-            # 그래프는 최근 14일 변화만 사용하므로 여유 있게 15일 기록을 남깁니다.
-            self.ranking_store.remove_old_snapshots(scan_date - timedelta(days=15))
-            backup_rows = self.ranking_store.backup_to(RANKING_BACKUP_PATH)
+            # 기본 그래프는 14일치지만, 나중에 30일 보기에도 쓸 수 있게 한 달간 보관합니다.
+            self.ranking_store.remove_old_snapshots(scan_date - timedelta(days=30))
+            # 페이지마다 DB에는 즉시 저장합니다. 별도 백업 파일은 1시간에 한 번만 만듭니다.
+            now = datetime.now(timezone.utc)
+            backup_rows = None
+            if (
+                self._last_ranking_backup_at is None
+                or now - self._last_ranking_backup_at >= RANKING_BACKUP_INTERVAL
+            ):
+                backup_rows = self.ranking_store.backup_to(RANKING_BACKUP_PATH)
+                self._last_ranking_backup_at = now
             logging.info(
-                "Kronos ranking trial saved %s characters (%s); backup has %s rows.",
+                "Kronos ranking saved %s characters (%s); next rank is %s; backup rows: %s.",
                 result["saved"],
                 result["reason"],
+                result["next_index"],
                 backup_rows,
             )
         except (aiohttp.ClientError, TimeoutError, ValueError, OSError, sqlite3.Error):
             # 중단 지점은 페이지마다 DB에 저장되므로 다음 실행에서 이어갈 수 있습니다.
-            logging.exception("Kronos ranking trial collection failed.")
+            logging.exception("Kronos ranking collection failed.")
 
     @check_news.error
     async def check_news_error(self, error: Exception) -> None:
