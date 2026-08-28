@@ -152,8 +152,8 @@ from ranking_store import RankingStore, scan_rankings
 
 
 class NewsFilteringTests(unittest.TestCase):
-    def test_ranking_collection_fetches_fifteen_characters_per_second(self) -> None:
-        self.assertAlmostEqual(RANKING_SCAN_INTERVAL_SECONDS, 2 / 3)
+    def test_ranking_collection_fetches_ten_characters_per_second(self) -> None:
+        self.assertEqual(RANKING_SCAN_INTERVAL_SECONDS, 1)
         self.assertEqual(RANKING_PAGES_PER_BATCH, 1)
 
     def test_ranking_pages_are_shared_between_active_worlds(self) -> None:
