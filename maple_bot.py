@@ -95,8 +95,9 @@ STATE_PATH = Path("state.json")
 RANKING_DB_PATH = Path("ranking.db")
 FAMILIAR_DB_PATH = Path("familiar.db")
 RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.db"
-# 15명/초도 공식 API가 403을 반환해 1초마다 10명씩 수집합니다.
-RANKING_SCAN_INTERVAL_SECONDS = 1
+# 15명/초는 공식 API가 403을 반환했습니다. 10명/초보다 빠른 안정 구간을 찾기 위해
+# 요청을 몰아서 보내지 않고 0.8초마다 한 페이지(최대 10명)씩 고르게 수집합니다.
+RANKING_SCAN_INTERVAL_SECONDS = 0.8
 RANKING_PAGES_PER_BATCH = 1
 RANKING_BACKUP_INTERVAL = timedelta(hours=1)
 SEED_RING_LEVELS = {
@@ -4832,7 +4833,7 @@ class MapleNewsBot(commands.Bot):
 
     @tasks.loop(seconds=RANKING_SCAN_INTERVAL_SECONDS)
     async def collect_rankings(self) -> None:
-        """북미 주요 월드의 상위 랭킹을 번갈아 초당 10명씩 수집합니다."""
+        """북미 주요 월드의 상위 랭킹을 번갈아 초당 평균 12.5명씩 수집합니다."""
         loop = asyncio.get_running_loop()
         if loop.time() < self._ranking_retry_at:
             return
