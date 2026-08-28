@@ -95,9 +95,9 @@ STATE_PATH = Path("state.json")
 RANKING_DB_PATH = Path("ranking.db")
 FAMILIAR_DB_PATH = Path("familiar.db")
 RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.db"
-# 초당 30명 시험에서 공식 API가 403 제한을 반환해, 20명씩 시험합니다.
-RANKING_SCAN_INTERVAL_SECONDS = 1
-RANKING_PAGES_PER_BATCH = 2
+# 요청을 몰아 보내지 않고 약 0.67초마다 10명씩 읽어 초당 평균 15명을 수집합니다.
+RANKING_SCAN_INTERVAL_SECONDS = 2 / 3
+RANKING_PAGES_PER_BATCH = 1
 RANKING_BACKUP_INTERVAL = timedelta(hours=1)
 SEED_RING_LEVELS = {
     4: {"stone": "생명의 연마석", "rate_per_stone": 10},
@@ -116,7 +116,7 @@ class RankingRateLimited(Exception):
 def allocate_ranking_pages(
     world_ids: list[int] | tuple[int, ...], offset: int
 ) -> tuple[dict[int, int], int]:
-    """초당 두 페이지를 아직 수집 중인 월드에 순서대로 나눕니다."""
+    """한 페이지를 아직 수집 중인 월드에 순서대로 나눕니다."""
     if not world_ids:
         return {}, 0
     allocation: dict[int, int] = {}
@@ -4832,7 +4832,7 @@ class MapleNewsBot(commands.Bot):
 
     @tasks.loop(seconds=RANKING_SCAN_INTERVAL_SECONDS)
     async def collect_rankings(self) -> None:
-        """북미 주요 월드의 상위 랭킹을 번갈아 초당 20명씩 수집합니다."""
+        """북미 주요 월드의 상위 랭킹을 번갈아 초당 평균 15명씩 수집합니다."""
         loop = asyncio.get_running_loop()
         if loop.time() < self._ranking_retry_at:
             return

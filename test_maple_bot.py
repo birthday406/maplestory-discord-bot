@@ -152,21 +152,21 @@ from ranking_store import RankingStore, scan_rankings
 
 
 class NewsFilteringTests(unittest.TestCase):
-    def test_ranking_collection_fetches_twenty_characters_per_second(self) -> None:
-        self.assertEqual(RANKING_SCAN_INTERVAL_SECONDS, 1)
-        self.assertEqual(RANKING_PAGES_PER_BATCH, 2)
+    def test_ranking_collection_fetches_fifteen_characters_per_second(self) -> None:
+        self.assertAlmostEqual(RANKING_SCAN_INTERVAL_SECONDS, 2 / 3)
+        self.assertEqual(RANKING_PAGES_PER_BATCH, 1)
 
     def test_ranking_pages_are_shared_between_active_worlds(self) -> None:
         allocation, offset = allocate_ranking_pages([19, 1, 45, 70], 0)
-        self.assertEqual(allocation, {19: 1, 1: 1})
-        self.assertEqual(offset, 2)
+        self.assertEqual(allocation, {19: 1})
+        self.assertEqual(offset, 1)
 
         allocation, offset = allocate_ranking_pages([45, 70], offset)
-        self.assertEqual(allocation, {45: 1, 70: 1})
+        self.assertEqual(allocation, {70: 1})
         self.assertEqual(offset, 0)
 
         allocation, offset = allocate_ranking_pages([45], offset)
-        self.assertEqual(allocation, {45: 2})
+        self.assertEqual(allocation, {45: 1})
         self.assertEqual(offset, 0)
 
     def test_ranking_rate_limit_returns_without_sleeping_inside_fetch(self) -> None:
