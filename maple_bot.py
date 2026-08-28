@@ -95,9 +95,9 @@ STATE_PATH = Path("state.json")
 RANKING_DB_PATH = Path("ranking.db")
 FAMILIAR_DB_PATH = Path("familiar.db")
 RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.db"
-# 네 월드의 상위 랭킹을 번갈아 매초 3페이지(30명)씩 읽습니다.
+# 초당 30명 시험에서 공식 API가 403 제한을 반환해, 안전하게 10명씩 읽습니다.
 RANKING_SCAN_INTERVAL_SECONDS = 1
-RANKING_PAGES_PER_BATCH = 3
+RANKING_PAGES_PER_BATCH = 1
 RANKING_BACKUP_INTERVAL = timedelta(hours=1)
 SEED_RING_LEVELS = {
     4: {"stone": "생명의 연마석", "rate_per_stone": 10},
@@ -3897,14 +3897,19 @@ class MapleNewsBot(commands.Bot):
                 },
                 timeout=aiohttp.ClientTimeout(total=20),
             ) as response:
-                if response.status != 429:
+                if response.status not in {403, 429}:
                     response.raise_for_status()
                     return await response.json()
 
-                retry_after = min(int(response.headers.get("Retry-After", "60")), 300)
+                # 공식 API는 과도한 요청에 429뿐 아니라 403도 반환합니다.
+                # Retry-After가 없더라도 5분 쉬어 같은 IP를 계속 두드리지 않습니다.
+                retry_after = min(
+                    int(response.headers.get("Retry-After", "300")), 300
+                )
                 logging.warning(
-                    "World %s ranking request was rate limited; retrying in %s seconds.",
+                    "World %s ranking request returned %s; retrying in %s seconds.",
                     world_id,
+                    response.status,
                     retry_after,
                 )
             if attempt < 4:
@@ -4829,7 +4834,7 @@ class MapleNewsBot(commands.Bot):
 
     @tasks.loop(seconds=RANKING_SCAN_INTERVAL_SECONDS)
     async def collect_rankings(self) -> None:
-        """북미 주요 월드의 상위 랭킹을 번갈아 초당 30명씩 수집합니다."""
+        """북미 주요 월드의 상위 랭킹을 번갈아 초당 10명씩 수집합니다."""
         scan_date = datetime.now(URSUS_TIMEZONE).date()
         if self._ranking_scan_date != scan_date:
             self._ranking_scan_date = scan_date
