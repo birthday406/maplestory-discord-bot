@@ -24,7 +24,7 @@ from openai import AsyncOpenAI
 from PIL import Image, ImageDraw, ImageFont
 
 from familiar_store import FamiliarExpectationStore
-from ranking_store import RankingStore, scan_kronos_rankings
+from ranking_store import RankingStore, scan_rankings
 
 from maple_calculators import (
     calculate_arcane_symbol_completion,
@@ -71,6 +71,10 @@ RANKING_WORLDS = {
     46: "Solis",
     70: "Hyperion",
 }
+TRACKED_RANKING_WORLD_IDS = tuple(
+    next(world_id for world_id, name in RANKING_WORLDS.items() if name == world_name)
+    for world_name in MAIN_WORLDS
+)
 PSSB_RATES_API_URL = "https://g.nexonstatic.com/maplestory/cms/v1/general-posts/5797"
 PSSB_RATES_PAGE_URL = "https://www.nexon.com/maplestory/general-post/5797"
 CASH_SHOP_MINING_URL = "https://masonym.dev/cash-shop"
@@ -91,13 +95,27 @@ STATE_PATH = Path("state.json")
 RANKING_DB_PATH = Path("ranking.db")
 FAMILIAR_DB_PATH = Path("familiar.db")
 RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.db"
-# 공식 랭킹 API에 과도한 요청을 보내지 않으면서 전수 수집을 이어갈 간격입니다.
-RANKING_SCAN_INTERVAL_SECONDS = 5
+# 네 월드의 상위 랭킹을 번갈아 매초 3페이지(30명)씩 읽습니다.
+RANKING_SCAN_INTERVAL_SECONDS = 1
+RANKING_PAGES_PER_BATCH = 3
 RANKING_BACKUP_INTERVAL = timedelta(hours=1)
 SEED_RING_LEVELS = {
     4: {"stone": "생명의 연마석", "rate_per_stone": 10},
     5: {"stone": "신념의 연마석", "rate_per_stone": 5},
 }
+
+
+def allocate_ranking_pages(
+    world_ids: list[int] | tuple[int, ...], offset: int
+) -> tuple[dict[int, int], int]:
+    """초당 세 페이지를 아직 수집 중인 월드에 순서대로 나눕니다."""
+    if not world_ids:
+        return {}, 0
+    allocation: dict[int, int] = {}
+    for step in range(RANKING_PAGES_PER_BATCH):
+        world_id = world_ids[(offset + step) % len(world_ids)]
+        allocation[world_id] = allocation.get(world_id, 0) + 1
+    return allocation, (offset + RANKING_PAGES_PER_BATCH) % len(world_ids)
 
 
 class KoreanCommandTranslator(app_commands.Translator):
@@ -1339,7 +1357,7 @@ def create_ranking_history_image(character_name: str, gains: list[dict]) -> io.B
     draw.text((42 * scale, 34 * scale), character_name, font=title_font, fill="#F5F3FF")
     draw.text(
         (42 * scale, 72 * scale),
-        "최근 경험치 변화 · 공식 랭킹 조회 기록",
+        "최근 경험치 변화 · 공식 랭킹 수집 기록",
         font=body_font,
         fill="#A78BFA",
     )
@@ -1354,7 +1372,7 @@ def create_ranking_history_image(character_name: str, gains: list[dict]) -> io.B
         )
         draw.text(
             (width * scale // 2, 235 * scale),
-            "다음 날짜의 조회부터 경험치 변화가 표시됩니다",
+            "다음 날짜의 수집 기록부터 경험치 변화가 표시됩니다",
             font=body_font,
             fill="#9CA3AF",
             anchor="mm",
@@ -3705,6 +3723,9 @@ class MapleNewsBot(commands.Bot):
         self.session: aiohttp.ClientSession | None = None
         self.ranking_store = RankingStore(RANKING_DB_PATH)
         self._last_ranking_backup_at: datetime | None = None
+        self._ranking_scan_date = None
+        self._ranking_world_offset = 0
+        self._completed_ranking_world_ids: set[int] = set()
         self.familiar_expectation_store = FamiliarExpectationStore(FAMILIAR_DB_PATH)
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
         self.openai = AsyncOpenAI()
@@ -3814,8 +3835,8 @@ class MapleNewsBot(commands.Bot):
             self.update_time_channels.start()
         if not self.update_exchange_channels.is_running():
             self.update_exchange_channels.start()
-        if not self.collect_kronos_rankings.is_running():
-            self.collect_kronos_rankings.start()
+        if not self.collect_rankings.is_running():
+            self.collect_rankings.start()
 
     async def close(self) -> None:
         if self.session is not None:
@@ -3862,15 +3883,15 @@ class MapleNewsBot(commands.Bot):
             response.raise_for_status()
             return find_ranking_character(await response.json(), nickname)
 
-    async def fetch_kronos_ranking_page(self, page_index: int) -> dict:
-        """크로노스 월드 랭킹 10명을 읽고 429면 안내된 시간만큼 기다립니다."""
+    async def fetch_ranking_page(self, world_id: int, page_index: int) -> dict:
+        """지정한 월드 랭킹 10명을 읽고 429면 안내된 시간만큼 기다립니다."""
         assert self.session is not None
         for attempt in range(5):
             async with self.session.get(
                 RANKING_API_URL.format(region="na"),
                 params={
                     "type": "world",
-                    "id": "45",
+                    "id": str(world_id),
                     "reboot_index": "0",
                     "page_index": str(page_index),
                 },
@@ -3882,12 +3903,13 @@ class MapleNewsBot(commands.Bot):
 
                 retry_after = min(int(response.headers.get("Retry-After", "60")), 300)
                 logging.warning(
-                    "Kronos ranking request was rate limited; retrying in %s seconds.",
+                    "World %s ranking request was rate limited; retrying in %s seconds.",
+                    world_id,
                     retry_after,
                 )
             if attempt < 4:
                 await asyncio.sleep(retry_after)
-        raise ValueError("Kronos ranking API rate limit did not clear.")
+        raise ValueError(f"World {world_id} ranking API rate limit did not clear.")
 
     async def fetch_usd_exchange_rate(self) -> Decimal:
         # 네이버 금융 환율표는 JSON API가 아니므로 HTML에서 미국 USD 행만 읽습니다.
@@ -4806,17 +4828,49 @@ class MapleNewsBot(commands.Bot):
                 self.persist_state()
 
     @tasks.loop(seconds=RANKING_SCAN_INTERVAL_SECONDS)
-    async def collect_kronos_rankings(self) -> None:
-        """크로노스 Lv.260 이상 랭킹을 5초마다 한 페이지씩 순차 수집합니다."""
+    async def collect_rankings(self) -> None:
+        """북미 주요 월드의 상위 랭킹을 번갈아 초당 30명씩 수집합니다."""
         scan_date = datetime.now(URSUS_TIMEZONE).date()
+        if self._ranking_scan_date != scan_date:
+            self._ranking_scan_date = scan_date
+            self._ranking_world_offset = 0
+            self._completed_ranking_world_ids.clear()
+
+        active_world_ids = [
+            world_id
+            for world_id in TRACKED_RANKING_WORLD_IDS
+            if world_id not in self._completed_ranking_world_ids
+        ]
+        if not active_world_ids:
+            await asyncio.sleep(60)
+            return
+
+        allocation, self._ranking_world_offset = allocate_ranking_pages(
+            active_world_ids, self._ranking_world_offset
+        )
         try:
-            result = await scan_kronos_rankings(
-                self.fetch_kronos_ranking_page,
-                self.ranking_store,
-                scan_date,
-                max_characters=None,
-                max_pages=1,
-                restart_completed=True,
+            jobs = [
+                scan_rankings(
+                    lambda page_index, selected_world_id=world_id: self.fetch_ranking_page(
+                        selected_world_id, page_index
+                    ),
+                    self.ranking_store,
+                    scan_date,
+                    max_characters=None,
+                    max_pages=page_count,
+                    scan_id=world_id,
+                )
+                for world_id, page_count in allocation.items()
+            ]
+            results = await asyncio.gather(*jobs)
+            for world_id, result in zip(allocation, results):
+                if result["reason"] in {"already_completed", "level_boundary", "end"}:
+                    self._completed_ranking_world_ids.add(world_id)
+
+            saved = sum(result["saved"] for result in results)
+            reasons = ", ".join(
+                f"{RANKING_WORLDS[world_id]}={result['reason']}"
+                for world_id, result in zip(allocation, results)
             )
             # 기본 그래프는 14일치지만, 나중에 30일 보기에도 쓸 수 있게 한 달간 보관합니다.
             self.ranking_store.remove_old_snapshots(scan_date - timedelta(days=30))
@@ -4830,15 +4884,14 @@ class MapleNewsBot(commands.Bot):
                 backup_rows = self.ranking_store.backup_to(RANKING_BACKUP_PATH)
                 self._last_ranking_backup_at = now
             logging.info(
-                "Kronos ranking saved %s characters (%s); next rank is %s; backup rows: %s.",
-                result["saved"],
-                result["reason"],
-                result["next_index"],
+                "Main-world rankings saved %s characters (%s); backup rows: %s.",
+                saved,
+                reasons,
                 backup_rows,
             )
         except (aiohttp.ClientError, TimeoutError, ValueError, OSError, sqlite3.Error):
             # 중단 지점은 페이지마다 DB에 저장되므로 다음 실행에서 이어갈 수 있습니다.
-            logging.exception("Kronos ranking collection failed.")
+            logging.exception("Main-world ranking collection failed.")
 
     @check_news.error
     async def check_news_error(self, error: Exception) -> None:

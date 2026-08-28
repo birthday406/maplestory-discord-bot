@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import tempfile
@@ -44,6 +45,8 @@ from maple_bot import (
     HEXA_CORE_COSTS,
     LEVEL_EXP,
     RANKING_SCAN_INTERVAL_SECONDS,
+    RANKING_PAGES_PER_BATCH,
+    allocate_ranking_pages,
     build_miracle_time_embed,
     build_command_stats_embed,
     build_exchange_rate_log_embed,
@@ -143,12 +146,26 @@ from maple_bot import (
     visible_sunny_sunday_entries,
     watched_posts,
 )
-from ranking_store import RankingStore, scan_kronos_rankings
+from ranking_store import RankingStore, scan_rankings
 
 
 class NewsFilteringTests(unittest.TestCase):
-    def test_ranking_collection_runs_every_five_seconds(self) -> None:
-        self.assertEqual(RANKING_SCAN_INTERVAL_SECONDS, 5)
+    def test_ranking_collection_fetches_thirty_characters_per_second(self) -> None:
+        self.assertEqual(RANKING_SCAN_INTERVAL_SECONDS, 1)
+        self.assertEqual(RANKING_PAGES_PER_BATCH, 3)
+
+    def test_ranking_pages_are_shared_between_active_worlds(self) -> None:
+        allocation, offset = allocate_ranking_pages([19, 1, 45, 70], 0)
+        self.assertEqual(allocation, {19: 1, 1: 1, 45: 1})
+        self.assertEqual(offset, 3)
+
+        allocation, offset = allocate_ranking_pages([45, 70], offset)
+        self.assertEqual(allocation, {70: 2, 45: 1})
+        self.assertEqual(offset, 0)
+
+        allocation, offset = allocate_ranking_pages([45], offset)
+        self.assertEqual(allocation, {45: 3})
+        self.assertEqual(offset, 0)
 
     def test_pssb_rates_keep_gender_pair_in_one_reward_slot(self) -> None:
         source = """
@@ -1188,7 +1205,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = RankingStore(Path(directory) / "ranking.db")
 
-            result = await scan_kronos_rankings(
+            result = await scan_rankings(
                 fetch_page,
                 store,
                 date(2026, 8, 16),
@@ -1207,7 +1224,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=[{"ranks": self.ranks(1)}, TimeoutError()]
             )
             with self.assertRaises(TimeoutError):
-                await scan_kronos_rankings(
+                await scan_rankings(
                     failed_fetch,
                     store,
                     date(2026, 8, 16),
@@ -1218,7 +1235,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
             # 사용자가 /랭킹을 조회해도 자동 수집의 11위 재개 지점은 바뀌지 않습니다.
             store.save_snapshot(self.ranks(99, count=1)[0], date(2026, 8, 16))
             resumed_fetch = AsyncMock(return_value={"ranks": self.ranks(11)})
-            result = await scan_kronos_rankings(
+            result = await scan_rankings(
                 resumed_fetch,
                 store,
                 date(2026, 8, 16),
@@ -1234,7 +1251,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = RankingStore(Path(directory) / "ranking.db")
             first_fetch = AsyncMock(return_value={"ranks": self.ranks(1)})
-            first = await scan_kronos_rankings(
+            first = await scan_rankings(
                 first_fetch,
                 store,
                 date(2026, 8, 16),
@@ -1243,7 +1260,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
                 max_pages=1,
             )
             second_fetch = AsyncMock(return_value={"ranks": self.ranks(11)})
-            second = await scan_kronos_rankings(
+            second = await scan_rankings(
                 second_fetch,
                 store,
                 date(2026, 8, 17),
@@ -1257,11 +1274,107 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
         first_fetch.assert_awaited_once_with(1)
         second_fetch.assert_awaited_once_with(11)
 
+    async def test_batch_fetches_three_pages_together(self) -> None:
+        started: list[int] = []
+        all_started = asyncio.Event()
+
+        async def fetch_page(page_index: int) -> dict:
+            started.append(page_index)
+            if len(started) == 3:
+                all_started.set()
+            await asyncio.wait_for(all_started.wait(), timeout=0.1)
+            return {"ranks": self.ranks(page_index)}
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            result = await scan_rankings(
+                fetch_page,
+                store,
+                date(2026, 8, 16),
+                max_characters=None,
+                delay_seconds=0,
+                max_pages=3,
+            )
+
+            self.assertEqual(store.character_count(), 30)
+        self.assertEqual(started, [1, 11, 21])
+        self.assertEqual(result, {"saved": 30, "next_index": 31, "reason": "batch"})
+
+    async def test_worlds_keep_independent_checkpoints(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            kronos_fetch = AsyncMock(return_value={"ranks": self.ranks(1)})
+            bera_ranks = self.ranks(1)
+            for character in bera_ranks:
+                character["worldID"] = 1
+            bera_fetch = AsyncMock(return_value={"ranks": bera_ranks})
+
+            await scan_rankings(
+                kronos_fetch,
+                store,
+                date(2026, 8, 16),
+                max_characters=None,
+                delay_seconds=0,
+                max_pages=1,
+                scan_id=45,
+            )
+            await scan_rankings(
+                bera_fetch,
+                store,
+                date(2026, 8, 16),
+                max_characters=None,
+                delay_seconds=0,
+                max_pages=1,
+                scan_id=1,
+            )
+
+            self.assertEqual(store.start_scan(date(2026, 8, 16), world_id=45), 11)
+            self.assertEqual(store.start_scan(date(2026, 8, 16), world_id=1), 11)
+        kronos_fetch.assert_awaited_once_with(1)
+        bera_fetch.assert_awaited_once_with(1)
+
+    async def test_completed_scan_restarts_only_on_the_next_day(self) -> None:
+        boundary = self.ranks(1, count=5, level=260) + self.ranks(
+            6, count=5, level=259
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            await scan_rankings(
+                AsyncMock(return_value={"ranks": boundary}),
+                store,
+                date(2026, 8, 16),
+                max_characters=None,
+                delay_seconds=0,
+            )
+
+            same_day_fetch = AsyncMock()
+            same_day = await scan_rankings(
+                same_day_fetch,
+                store,
+                date(2026, 8, 16),
+                max_characters=None,
+                delay_seconds=0,
+            )
+            next_day_fetch = AsyncMock(return_value={"ranks": self.ranks(1)})
+            next_day = await scan_rankings(
+                next_day_fetch,
+                store,
+                date(2026, 8, 17),
+                max_characters=None,
+                delay_seconds=0,
+                max_pages=1,
+            )
+
+        same_day_fetch.assert_not_awaited()
+        self.assertEqual(same_day["reason"], "already_completed")
+        next_day_fetch.assert_awaited_once_with(1)
+        self.assertEqual(next_day["reason"], "batch")
+
     async def test_scan_stops_when_level_falls_below_260(self) -> None:
         ranks = self.ranks(1, count=5, level=260) + self.ranks(6, count=5, level=259)
         with tempfile.TemporaryDirectory() as directory:
             store = RankingStore(Path(directory) / "ranking.db")
-            result = await scan_kronos_rankings(
+            result = await scan_rankings(
                 AsyncMock(return_value={"ranks": ranks}),
                 store,
                 date(2026, 8, 16),

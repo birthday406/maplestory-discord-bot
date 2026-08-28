@@ -9,6 +9,7 @@ from maple_data import LEVEL_EXP
 
 KRONOS_WORLD_ID = 45
 MIN_TRACKED_LEVEL = 260
+RANKING_PAGE_SIZE = 10
 
 
 def ranking_total_exp(level: int, current_exp: int) -> int | None:
@@ -184,9 +185,8 @@ class RankingStore:
         self,
         scan_date: date,
         world_id: int = KRONOS_WORLD_ID,
-        restart_completed: bool = False,
     ) -> int | None:
-        """중단된 다음 순번부터 이어가고, 한 바퀴를 마치면 필요할 때 처음부터 시작합니다."""
+        """중단 지점부터 이어가고, 완료한 수집은 다음 날짜에만 다시 시작합니다."""
         day = scan_date.isoformat()
         with self._connect() as connection:
             row = connection.execute(
@@ -196,8 +196,13 @@ class RankingStore:
             if row is not None:
                 if not row["completed"]:
                     # 날짜가 바뀌어도 아직 끝나지 않은 전체 수집은 같은 순번에서 이어갑니다.
+                    if row["scan_date"] != day:
+                        connection.execute(
+                            "UPDATE ranking_scan_state SET scan_date = ? WHERE world_id = ?",
+                            (day, world_id),
+                        )
                     return row["next_index"]
-                if not restart_completed:
+                if row["scan_date"] == day:
                     return None
                 connection.execute(
                     """
@@ -380,17 +385,17 @@ class RankingStore:
             return connection.execute("SELECT COUNT(*) FROM characters").fetchone()[0]
 
 
-async def scan_kronos_rankings(
+async def scan_rankings(
     fetch_page: Callable[[int], Awaitable[dict]],
     store: RankingStore,
     scan_date: date,
     max_characters: int | None,
     delay_seconds: float = 1.0,
     max_pages: int | None = None,
-    restart_completed: bool = False,
+    scan_id: int = KRONOS_WORLD_ID,
 ) -> dict:
-    """상위 랭커부터 내려가며 지정한 분량 또는 Lv.260 경계에서 멈춥니다."""
-    cursor = store.start_scan(scan_date, restart_completed=restart_completed)
+    """한 월드의 상위 랭커부터 수집하고 Lv.260 경계에서 멈춥니다."""
+    cursor = store.start_scan(scan_date, world_id=scan_id)
     if cursor is None:
         return {"saved": 0, "next_index": None, "reason": "already_completed"}
 
@@ -398,31 +403,48 @@ async def scan_kronos_rankings(
     # page_index는 해당 순위부터 시작하므로 재시작 전 처리량도 시험 한도에 포함합니다.
     processed = max(cursor - 1, 0)
     reason = "limit"
-    pages = 0
     while max_characters is None or processed < max_characters:
-        payload = await fetch_page(cursor)
-        ranks = payload.get("ranks", [])
-        if not ranks:
-            reason = "end"
-            break
+        # 공식 API는 페이지당 10명을 반환합니다. 실행당 여러 페이지를 동시에 읽어
+        # 요청 간격은 유지하면서 한 번에 저장하는 인원을 늘립니다.
+        batch_size = max_pages or 1
+        page_indices = [
+            cursor + RANKING_PAGE_SIZE * offset for offset in range(batch_size)
+        ]
+        payloads = await asyncio.gather(*(fetch_page(index) for index in page_indices))
 
-        eligible = [item for item in ranks if item.get("level", 0) >= MIN_TRACKED_LEVEL]
-        remaining = len(eligible) if max_characters is None else max_characters - processed
-        page_to_save = eligible[:remaining]
-        next_cursor = cursor + len(ranks)
-        store.save_page(page_to_save, scan_date, next_cursor)
-        saved += len(page_to_save)
-        processed += len(ranks)
-        cursor = next_cursor
-        pages += 1
+        for page_index, payload in zip(page_indices, payloads):
+            ranks = payload.get("ranks", [])
+            if not ranks:
+                store.finish_scan(scan_date, world_id=scan_id)
+                return {"saved": saved, "next_index": cursor, "reason": "end"}
 
-        if len(eligible) < len(ranks):
-            reason = "level_boundary"
-            break
-        if max_pages is not None and pages >= max_pages:
+            eligible = [
+                item for item in ranks if item.get("level", 0) >= MIN_TRACKED_LEVEL
+            ]
+            remaining = len(ranks) if max_characters is None else max_characters - processed
+            page_to_save = eligible[:remaining]
+            next_cursor = page_index + len(ranks)
+            store.save_page(
+                page_to_save,
+                scan_date,
+                next_cursor,
+                world_id=scan_id,
+            )
+            saved += len(page_to_save)
+            processed += len(ranks)
+            cursor = next_cursor
+
+            if any(item.get("level", 0) < MIN_TRACKED_LEVEL for item in ranks):
+                store.finish_scan(scan_date, world_id=scan_id)
+                return {"saved": saved, "next_index": cursor, "reason": "level_boundary"}
+            if max_characters is not None and processed >= max_characters:
+                store.finish_scan(scan_date, world_id=scan_id)
+                return {"saved": saved, "next_index": cursor, "reason": "limit"}
+
+        if max_pages is not None:
             return {"saved": saved, "next_index": cursor, "reason": "batch"}
         if delay_seconds > 0 and (max_characters is None or processed < max_characters):
             await asyncio.sleep(delay_seconds)
 
-    store.finish_scan(scan_date)
+    store.finish_scan(scan_date, world_id=scan_id)
     return {"saved": saved, "next_index": cursor, "reason": reason}
