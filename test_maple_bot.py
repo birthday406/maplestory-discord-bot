@@ -46,6 +46,8 @@ from maple_bot import (
     LEVEL_EXP,
     RANKING_SCAN_INTERVAL_SECONDS,
     RANKING_PAGES_PER_BATCH,
+    MapleNewsBot,
+    RankingRateLimited,
     allocate_ranking_pages,
     build_miracle_time_embed,
     build_command_stats_embed,
@@ -166,6 +168,29 @@ class NewsFilteringTests(unittest.TestCase):
         allocation, offset = allocate_ranking_pages([45], offset)
         self.assertEqual(allocation, {45: 2})
         self.assertEqual(offset, 0)
+
+    def test_ranking_rate_limit_returns_without_sleeping_inside_fetch(self) -> None:
+        async def run() -> RankingRateLimited:
+            response = SimpleNamespace(status=403, headers={})
+            context = AsyncMock()
+            context.__aenter__.return_value = response
+            bot = object.__new__(MapleNewsBot)
+            bot.session = SimpleNamespace(get=Mock(return_value=context))
+
+            with self.assertRaises(RankingRateLimited) as caught:
+                await bot.fetch_ranking_page(19, 1)
+            return caught.exception
+
+        self.assertEqual(asyncio.run(run()).retry_after, 300)
+
+    def test_ranking_collection_skips_api_during_backoff(self) -> None:
+        async def run() -> None:
+            bot = object.__new__(MapleNewsBot)
+            bot._ranking_retry_at = asyncio.get_running_loop().time() + 60
+
+            await MapleNewsBot.collect_rankings.coro(bot)
+
+        asyncio.run(run())
 
     def test_pssb_rates_keep_gender_pair_in_one_reward_slot(self) -> None:
         source = """
