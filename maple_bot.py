@@ -24,7 +24,7 @@ from openai import AsyncOpenAI
 from PIL import Image, ImageDraw, ImageFont
 
 from familiar_store import FamiliarExpectationStore
-from ranking_store import RankingStore, scan_rankings
+from ranking_store import MIN_TRACKED_LEVEL, RankingStore, scan_rankings
 
 from maple_calculators import (
     calculate_arcane_symbol_completion,
@@ -100,6 +100,9 @@ RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.
 RANKING_SCAN_INTERVAL_SECONDS = 1
 RANKING_PAGES_PER_BATCH = 1
 RANKING_BACKUP_INTERVAL = timedelta(hours=1)
+RANKING_FORBIDDEN_BACKOFF_STEPS = (5 * 60, 15 * 60, 60 * 60, 6 * 60 * 60)
+RANKING_RATE_LIMIT_BACKOFF_SECONDS = 60
+RANKING_MAX_RATE_LIMIT_BACKOFF_SECONDS = 60 * 60
 SEED_RING_LEVELS = {
     4: {"stone": "생명의 연마석", "rate_per_stone": 10},
     5: {"stone": "신념의 연마석", "rate_per_stone": 5},
@@ -107,11 +110,30 @@ SEED_RING_LEVELS = {
 
 
 class RankingRateLimited(Exception):
-    def __init__(self, world_id: int, status: int, retry_after: int) -> None:
-        super().__init__(f"World {world_id} ranking request returned {status}.")
-        self.world_id = world_id
+    def __init__(self, target: int | str, status: int, retry_after: int | None) -> None:
+        super().__init__(f"Ranking target {target} returned {status}.")
+        self.target = target
         self.status = status
         self.retry_after = retry_after
+
+
+def ranking_backoff_seconds(
+    status: int,
+    retry_after: int | None,
+    consecutive_failures: int,
+) -> int:
+    """403은 장기 회로 차단, 429는 짧은 단계적 대기로 처리합니다."""
+    failures = max(consecutive_failures, 1)
+    if status == 403:
+        calculated = RANKING_FORBIDDEN_BACKOFF_STEPS[
+            min(failures - 1, len(RANKING_FORBIDDEN_BACKOFF_STEPS) - 1)
+        ]
+    else:
+        calculated = min(
+            RANKING_RATE_LIMIT_BACKOFF_SECONDS * 2 ** (failures - 1),
+            RANKING_MAX_RATE_LIMIT_BACKOFF_SECONDS,
+        )
+    return max(calculated, retry_after or 0)
 
 
 def allocate_ranking_pages(
@@ -3735,7 +3757,12 @@ class MapleNewsBot(commands.Bot):
         self._ranking_scan_date = None
         self._ranking_world_offset = 0
         self._completed_ranking_world_ids: set[int] = set()
-        self._ranking_retry_at = 0.0
+        (
+            self._ranking_limit_failures,
+            self._ranking_retry_until,
+        ) = self.ranking_store.get_collector_backoff()
+        self._ranking_request_lock = asyncio.Lock()
+        self._next_ranking_request_at = 0.0
         self.familiar_expectation_store = FamiliarExpectationStore(FAMILIAR_DB_PATH)
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
         self.openai = AsyncOpenAI()
@@ -3876,44 +3903,94 @@ class MapleNewsBot(commands.Bot):
         ranking_type: str,
         ranking_id: str | int,
         nickname: str,
+        rate_limit_target: int | str | None = None,
     ) -> dict | None:
         # 공식 GMS 랭킹 화면이 사용하는 공개 응답에서 닉네임 한 명만 찾습니다.
-        assert self.session is not None
-        async with self.session.get(
-            RANKING_API_URL.format(region=region),
-            params={
+        payload = await self.fetch_ranking_payload(
+            region,
+            {
                 "type": ranking_type,
                 "id": str(ranking_id),
                 "reboot_index": "0",
                 "page_index": "1",
                 "character_name": nickname,
             },
-            timeout=aiohttp.ClientTimeout(total=20),
-        ) as response:
-            response.raise_for_status()
-            return find_ranking_character(await response.json(), nickname)
+            rate_limit_target,
+        )
+        return find_ranking_character(payload, nickname)
 
     async def fetch_ranking_page(self, world_id: int, page_index: int) -> dict:
         """지정한 월드 랭킹 10명을 읽고 API 제한은 수집 루프에 알립니다."""
-        assert self.session is not None
-        async with self.session.get(
-            RANKING_API_URL.format(region="na"),
-            params={
+        return await self.fetch_ranking_payload(
+            "na",
+            {
                 "type": "world",
                 "id": str(world_id),
                 "reboot_index": "0",
                 "page_index": str(page_index),
             },
-            timeout=aiohttp.ClientTimeout(total=20),
-        ) as response:
-            if response.status in {403, 429}:
-                # 함수 안에서 오래 자면 주기 작업이 밀린 횟수를 따라잡으며 요청을 몰아냅니다.
-                retry_after = min(
-                    int(response.headers.get("Retry-After", "300")), 300
-                )
-                raise RankingRateLimited(world_id, response.status, retry_after)
-            response.raise_for_status()
-            return await response.json()
+            world_id,
+        )
+
+    async def fetch_ranking_payload(
+        self,
+        region: str,
+        params: dict[str, str],
+        rate_limit_target: int | str | None = None,
+    ) -> dict:
+        """모든 랭킹 요청을 한 통로로 보내 초당 한 번의 시작 간격을 지킵니다."""
+        assert self.session is not None
+        async with self._ranking_request_lock:
+            loop = asyncio.get_running_loop()
+            wait_seconds = self._next_ranking_request_at - loop.time()
+            if wait_seconds > 0:
+                await asyncio.sleep(wait_seconds)
+            self._next_ranking_request_at = loop.time() + RANKING_SCAN_INTERVAL_SECONDS
+            async with self.session.get(
+                RANKING_API_URL.format(region=region),
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as response:
+                if rate_limit_target is not None and response.status in {403, 429}:
+                    try:
+                        retry_after = int(response.headers.get("Retry-After", ""))
+                    except ValueError:
+                        retry_after = None
+                    raise RankingRateLimited(
+                        rate_limit_target, response.status, retry_after
+                    )
+                response.raise_for_status()
+                return await response.json()
+
+    def pause_ranking_collection(self, error: RankingRateLimited) -> int:
+        """API 제한 대기를 DB에 남겨 서비스 재시작 뒤에도 같은 요청을 막습니다."""
+        self._ranking_limit_failures += 1
+        retry_seconds = ranking_backoff_seconds(
+            error.status,
+            error.retry_after,
+            self._ranking_limit_failures,
+        )
+        self._ranking_retry_until = (
+            int(datetime.now(timezone.utc).timestamp()) + retry_seconds
+        )
+        self.ranking_store.set_collector_backoff(
+            self._ranking_limit_failures,
+            self._ranking_retry_until,
+        )
+        logging.warning(
+            "Ranking target %s returned %s; collection paused for %s seconds.",
+            error.target,
+            error.status,
+            retry_seconds,
+        )
+        return retry_seconds
+
+    def clear_ranking_backoff_after_success(self) -> None:
+        if not self._ranking_limit_failures:
+            return
+        self._ranking_limit_failures = 0
+        self._ranking_retry_until = 0
+        self.ranking_store.clear_collector_backoff()
 
     async def fetch_usd_exchange_rate(self) -> Decimal:
         # 네이버 금융 환율표는 JSON API가 아니므로 HTML에서 미국 USD 행만 읽습니다.
@@ -4834,8 +4911,8 @@ class MapleNewsBot(commands.Bot):
     @tasks.loop(seconds=RANKING_SCAN_INTERVAL_SECONDS)
     async def collect_rankings(self) -> None:
         """북미 주요 월드의 상위 랭킹을 번갈아 초당 10명씩 수집합니다."""
-        loop = asyncio.get_running_loop()
-        if loop.time() < self._ranking_retry_at:
+        now_timestamp = int(datetime.now(timezone.utc).timestamp())
+        if now_timestamp < self._ranking_retry_until:
             return
 
         scan_date = datetime.now(URSUS_TIMEZONE).date()
@@ -4843,6 +4920,85 @@ class MapleNewsBot(commands.Bot):
             self._ranking_scan_date = scan_date
             self._ranking_world_offset = 0
             self._completed_ranking_world_ids.clear()
+
+        priority_name = self.ranking_store.next_priority_character(scan_date)
+        if priority_name is not None:
+            try:
+                character = await self.fetch_ranking_character(
+                    "na",
+                    "overall",
+                    "weekly",
+                    priority_name,
+                    rate_limit_target=priority_name,
+                )
+                if character is not None:
+                    self.ranking_store.save_page(
+                        [character],
+                        scan_date,
+                        next_index=1,
+                        world_id=character["worldID"],
+                        update_checkpoint=False,
+                    )
+                self.ranking_store.mark_priority_refreshed(priority_name, scan_date)
+                self.clear_ranking_backoff_after_success()
+                logging.info("Priority ranking refreshed: %s.", priority_name)
+            except RankingRateLimited as error:
+                self.pause_ranking_collection(error)
+            except (
+                aiohttp.ClientError,
+                TimeoutError,
+                ValueError,
+                KeyError,
+                OSError,
+                sqlite3.Error,
+            ):
+                logging.exception("Priority ranking collection failed: %s.", priority_name)
+            return
+
+        self.ranking_store.prepare_active_pages(scan_date)
+        active_page = self.ranking_store.next_active_page(scan_date)
+        if active_page is not None:
+            world_id, page_index = active_page
+            try:
+                payload = await self.fetch_ranking_page(world_id, page_index)
+                ranks = payload.get("ranks", [])
+                eligible = [
+                    item for item in ranks
+                    if item.get("level", 0) >= MIN_TRACKED_LEVEL
+                ]
+                self.ranking_store.save_page(
+                    eligible,
+                    scan_date,
+                    next_index=page_index + len(ranks),
+                    world_id=world_id,
+                    update_checkpoint=False,
+                    source_page_index=page_index,
+                )
+                self.ranking_store.mark_active_page_refreshed(
+                    scan_date, world_id, page_index
+                )
+                self.clear_ranking_backoff_after_success()
+                logging.info(
+                    "Active ranking page refreshed: %s %s.",
+                    RANKING_WORLDS[world_id],
+                    page_index,
+                )
+            except RankingRateLimited as error:
+                self.pause_ranking_collection(error)
+            except (
+                aiohttp.ClientError,
+                TimeoutError,
+                ValueError,
+                KeyError,
+                OSError,
+                sqlite3.Error,
+            ):
+                logging.exception(
+                    "Active ranking page collection failed: %s %s.",
+                    world_id,
+                    page_index,
+                )
+            return
 
         active_world_ids = [
             world_id
@@ -4871,6 +5027,7 @@ class MapleNewsBot(commands.Bot):
                 for world_id, page_count in allocation.items()
             ]
             results = await asyncio.gather(*jobs)
+            self.clear_ranking_backoff_after_success()
             for world_id, result in zip(allocation, results):
                 if result["reason"] in {"already_completed", "level_boundary", "end"}:
                     self._completed_ranking_world_ids.add(world_id)
@@ -4898,17 +5055,10 @@ class MapleNewsBot(commands.Bot):
                 backup_rows,
             )
         except RankingRateLimited as error:
-            # 매초 루프는 계속 돌되 재개 시각 전에는 API를 호출하지 않아 밀린 작업이 없습니다.
-            self._ranking_retry_at = loop.time() + error.retry_after
+            self.pause_ranking_collection(error)
             self._ranking_world_offset = (
                 self._ranking_world_offset - RANKING_PAGES_PER_BATCH
             ) % len(active_world_ids)
-            logging.warning(
-                "World %s ranking request returned %s; collection paused for %s seconds.",
-                error.world_id,
-                error.status,
-                error.retry_after,
-            )
         except (aiohttp.ClientError, TimeoutError, ValueError, OSError, sqlite3.Error):
             # 중단 지점은 페이지마다 DB에 저장되므로 다음 실행에서 이어갈 수 있습니다.
             logging.exception("Main-world ranking collection failed.")

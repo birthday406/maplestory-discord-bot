@@ -3,7 +3,7 @@ import io
 import json
 import tempfile
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,6 +24,7 @@ from maple_data import (
     SYMBOL_REGIONS,
 )
 from familiar_store import FamiliarExpectationStore
+from tools.probe_ranking_update import rank_value, select_candidates
 from maple_bot import (
     ALERT_CASH_TRANSFER,
     ALERT_CUBE_SALE,
@@ -49,6 +50,7 @@ from maple_bot import (
     MapleNewsBot,
     RankingRateLimited,
     allocate_ranking_pages,
+    ranking_backoff_seconds,
     build_miracle_time_embed,
     build_command_stats_embed,
     build_exchange_rate_log_embed,
@@ -176,17 +178,28 @@ class NewsFilteringTests(unittest.TestCase):
             context.__aenter__.return_value = response
             bot = object.__new__(MapleNewsBot)
             bot.session = SimpleNamespace(get=Mock(return_value=context))
+            bot._ranking_request_lock = asyncio.Lock()
+            bot._next_ranking_request_at = 0.0
 
             with self.assertRaises(RankingRateLimited) as caught:
                 await bot.fetch_ranking_page(19, 1)
             return caught.exception
 
-        self.assertEqual(asyncio.run(run()).retry_after, 300)
+        self.assertIsNone(asyncio.run(run()).retry_after)
+
+    def test_ranking_backoff_separates_403_and_429(self) -> None:
+        self.assertEqual(ranking_backoff_seconds(403, None, 1), 5 * 60)
+        self.assertEqual(ranking_backoff_seconds(403, None, 2), 15 * 60)
+        self.assertEqual(ranking_backoff_seconds(403, None, 3), 60 * 60)
+        self.assertEqual(ranking_backoff_seconds(403, None, 4), 6 * 60 * 60)
+        self.assertEqual(ranking_backoff_seconds(403, None, 99), 6 * 60 * 60)
+        self.assertEqual(ranking_backoff_seconds(429, None, 1), 60)
+        self.assertEqual(ranking_backoff_seconds(429, 600, 1), 600)
 
     def test_ranking_collection_skips_api_during_backoff(self) -> None:
         async def run() -> None:
             bot = object.__new__(MapleNewsBot)
-            bot._ranking_retry_at = asyncio.get_running_loop().time() + 60
+            bot._ranking_retry_until = int(datetime.now(timezone.utc).timestamp()) + 60
 
             await MapleNewsBot.collect_rankings.coro(bot)
 
@@ -1223,6 +1236,26 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
             for rank in range(start, start + count)
         ]
 
+    @staticmethod
+    def save_rank_history(
+        store: RankingStore,
+        character: dict,
+        start: date,
+        days: int,
+        page_index: int,
+        changed_on: int | None = None,
+    ) -> None:
+        for offset in range(days):
+            saved = dict(character)
+            saved["exp"] = 200 if changed_on is not None and offset >= changed_on else 100
+            store.save_page(
+                [saved],
+                start + timedelta(days=offset),
+                next_index=1,
+                update_checkpoint=False,
+                source_page_index=page_index,
+            )
+
     async def test_trial_scans_from_top_and_stops_at_limit(self) -> None:
         fetch_page = AsyncMock(
             side_effect=[{"ranks": self.ranks(1)}, {"ranks": self.ranks(11)}]
@@ -1241,6 +1274,164 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(store.character_count(), 15)
         self.assertEqual(result["reason"], "limit")
         self.assertEqual([call.args[0] for call in fetch_page.await_args_list], [1, 11])
+
+    async def test_command_searched_character_is_collected_before_world_pages(self) -> None:
+        today = datetime.now(maple_bot.URSUS_TIMEZONE).date()
+        yesterday = date.fromordinal(today.toordinal() - 1)
+        character = self.ranks(1, count=1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(character, yesterday)
+            bot = object.__new__(MapleNewsBot)
+            bot.ranking_store = store
+            bot._ranking_retry_until = 0
+            bot._ranking_limit_failures = 0
+            bot._ranking_scan_date = today
+            bot._ranking_world_offset = 0
+            bot._completed_ranking_world_ids = set()
+            bot.fetch_ranking_character = AsyncMock(return_value=character)
+            bot.fetch_ranking_page = AsyncMock()
+
+            await MapleNewsBot.collect_rankings.coro(bot)
+
+            self.assertIsNone(store.next_priority_character(today))
+        bot.fetch_ranking_character.assert_awaited_once_with(
+            "na",
+            "overall",
+            "weekly",
+            character["characterName"],
+            rate_limit_target=character["characterName"],
+        )
+        bot.fetch_ranking_page.assert_not_awaited()
+
+    def test_active_pages_are_prepared_before_seven_day_unchanged_pages(self) -> None:
+        today = date(2026, 8, 10)
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            self.save_rank_history(store, self.ranks(1, 1)[0], date(2026, 8, 1), 9, 1)
+            self.save_rank_history(
+                store,
+                self.ranks(11, 1)[0],
+                date(2026, 8, 1),
+                9,
+                11,
+                changed_on=7,
+            )
+            self.save_rank_history(store, self.ranks(21, 1)[0], date(2026, 8, 9), 1, 21)
+
+            store.prepare_active_pages(today)
+
+            self.assertEqual(store.next_active_page(today), (45, 11))
+            store.mark_active_page_refreshed(today, 45, 11)
+            self.assertEqual(store.next_active_page(today), (45, 21))
+            store.mark_active_page_refreshed(today, 45, 21)
+            self.assertIsNone(store.next_active_page(today))
+
+    async def test_active_page_is_collected_before_sequential_pages(self) -> None:
+        today = datetime.now(maple_bot.URSUS_TIMEZONE).date()
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            self.save_rank_history(
+                store,
+                self.ranks(11, 1)[0],
+                today - timedelta(days=8),
+                9,
+                11,
+                changed_on=7,
+            )
+            bot = object.__new__(MapleNewsBot)
+            bot.ranking_store = store
+            bot._ranking_retry_until = 0
+            bot._ranking_limit_failures = 0
+            bot._ranking_scan_date = today
+            bot._ranking_world_offset = 0
+            bot._completed_ranking_world_ids = set()
+            bot.fetch_ranking_character = AsyncMock()
+            bot.fetch_ranking_page = AsyncMock(return_value={"ranks": self.ranks(11)})
+
+            await MapleNewsBot.collect_rankings.coro(bot)
+
+            self.assertIsNone(store.next_active_page(today))
+            self.assertEqual(store.start_scan(today, world_id=45), 1)
+        bot.fetch_ranking_character.assert_not_awaited()
+        bot.fetch_ranking_page.assert_awaited_once_with(45, 11)
+
+    async def test_sequential_scan_skips_an_active_page_already_refreshed(self) -> None:
+        today = date(2026, 8, 10)
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            self.save_rank_history(
+                store,
+                self.ranks(1, 1)[0],
+                date(2026, 8, 1),
+                9,
+                1,
+                changed_on=7,
+            )
+            store.prepare_active_pages(today)
+            store.mark_active_page_refreshed(today, 45, 1)
+            fetch_page = AsyncMock(return_value={"ranks": self.ranks(11)})
+
+            result = await scan_rankings(
+                fetch_page,
+                store,
+                today,
+                max_characters=None,
+                delay_seconds=0,
+                max_pages=1,
+            )
+
+            self.assertEqual(result["next_index"], 21)
+        fetch_page.assert_awaited_once_with(11)
+
+    def test_command_refresh_keeps_the_last_known_page(self) -> None:
+        character = self.ranks(31, 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_page(
+                [character],
+                date(2026, 8, 9),
+                next_index=41,
+                update_checkpoint=False,
+                source_page_index=31,
+            )
+            store.save_snapshot(character, date(2026, 8, 10))
+
+            connection = store._connect()
+            try:
+                page_index = connection.execute(
+                    "SELECT scan_page_index FROM characters WHERE name_key = ?",
+                    (character["characterName"].casefold(),),
+                ).fetchone()["scan_page_index"]
+            finally:
+                connection.close()
+
+        self.assertEqual(page_index, 31)
+
+    def test_update_probe_prefers_a_recently_changed_character(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ranking.db"
+            store = RankingStore(path)
+            inactive, active = self.ranks(1, 2)
+            store.save_page(
+                [inactive, active],
+                date(2026, 8, 28),
+                next_index=3,
+                update_checkpoint=False,
+            )
+            active = dict(active, exp=999)
+            store.save_page(
+                [inactive, active],
+                date(2026, 8, 29),
+                next_index=3,
+                update_checkpoint=False,
+            )
+
+            self.assertEqual(select_candidates(path, 1), [active["characterName"]])
+            self.assertEqual(
+                rank_value(active),
+                {"level": active["level"], "exp": 999, "rank": active["rank"]},
+            )
 
     async def test_interrupted_scan_resumes_from_saved_page(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1272,7 +1463,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
         resumed_fetch.assert_awaited_once_with(11)
         self.assertEqual(result["reason"], "limit")
 
-    async def test_batch_scan_keeps_cursor_after_a_day_changes(self) -> None:
+    async def test_batch_scan_restarts_from_top_after_a_day_changes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = RankingStore(Path(directory) / "ranking.db")
             first_fetch = AsyncMock(return_value={"ranks": self.ranks(1)})
@@ -1284,7 +1475,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
                 delay_seconds=0,
                 max_pages=1,
             )
-            second_fetch = AsyncMock(return_value={"ranks": self.ranks(11)})
+            second_fetch = AsyncMock(return_value={"ranks": self.ranks(1)})
             second = await scan_rankings(
                 second_fetch,
                 store,
@@ -1297,7 +1488,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["reason"], "batch")
         self.assertEqual(second["reason"], "batch")
         first_fetch.assert_awaited_once_with(1)
-        second_fetch.assert_awaited_once_with(11)
+        second_fetch.assert_awaited_once_with(1)
 
     async def test_batch_fetches_three_pages_together(self) -> None:
         started: list[int] = []
@@ -1420,6 +1611,33 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
             restored = RankingStore(backup_path)
 
             self.assertEqual(restored.character_count(), 1)
+
+    def test_collector_backoff_survives_store_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ranking.db"
+            store = RankingStore(path)
+            store.set_collector_backoff(2, 123456)
+
+            self.assertEqual(RankingStore(path).get_collector_backoff(), (2, 123456))
+
+            store.clear_collector_backoff()
+            self.assertEqual(RankingStore(path).get_collector_backoff(), (0, 0))
+
+    def test_command_searched_character_becomes_next_day_priority(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            first_day = date(2026, 8, 28)
+            second_day = date(2026, 8, 29)
+            character = self.ranks(1, count=1)[0]
+
+            store.save_snapshot(character, first_day)
+
+            self.assertIsNone(store.next_priority_character(first_day))
+            self.assertEqual(
+                store.next_priority_character(second_day), character["characterName"]
+            )
+            store.mark_priority_refreshed(character["characterName"], second_day)
+            self.assertIsNone(store.next_priority_character(second_day))
 
 
 class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):

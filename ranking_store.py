@@ -1,6 +1,6 @@
 import asyncio
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -49,6 +49,7 @@ class RankingStore:
                     legion_rank INTEGER,
                     achievement_score INTEGER NOT NULL DEFAULT 0,
                     achievement_rank INTEGER,
+                    scan_page_index INTEGER,
                     updated_date TEXT NOT NULL
                 );
 
@@ -68,9 +69,31 @@ class RankingStore:
                     completed INTEGER NOT NULL DEFAULT 0
                 );
 
+                CREATE TABLE IF NOT EXISTS ranking_collector_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    consecutive_limit_failures INTEGER NOT NULL DEFAULT 0,
+                    retry_until INTEGER NOT NULL DEFAULT 0,
+                    active_pages_date TEXT NOT NULL DEFAULT ''
+                );
+
                 CREATE TABLE IF NOT EXISTS ranking_preferences (
                     discord_user_id INTEGER PRIMARY KEY,
                     character_name TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS ranking_priority_characters (
+                    name_key TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    last_requested_at INTEGER NOT NULL,
+                    last_refreshed_date TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS ranking_active_pages (
+                    scan_date TEXT NOT NULL,
+                    world_id INTEGER NOT NULL,
+                    page_index INTEGER NOT NULL,
+                    refreshed INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (scan_date, world_id, page_index)
                 );
 
                 CREATE TABLE IF NOT EXISTS guild_ranking_members (
@@ -81,6 +104,10 @@ class RankingStore:
                     character_name_key TEXT NOT NULL,
                     PRIMARY KEY (guild_id, discord_user_id)
                 );
+
+                INSERT OR IGNORE INTO ranking_collector_state
+                    (id, consecutive_limit_failures, retry_until)
+                VALUES (1, 0, 0);
                 """
             )
             # 기존 ranking.db도 지우지 않고 메창력에 필요한 열만 안전하게 추가합니다.
@@ -93,9 +120,21 @@ class RankingStore:
                 ("legion_rank", "INTEGER"),
                 ("achievement_score", "INTEGER NOT NULL DEFAULT 0"),
                 ("achievement_rank", "INTEGER"),
+                ("scan_page_index", "INTEGER"),
             ):
                 if name not in columns:
                     connection.execute(f"ALTER TABLE characters ADD COLUMN {name} {definition}")
+            collector_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(ranking_collector_state)"
+                ).fetchall()
+            }
+            if "active_pages_date" not in collector_columns:
+                connection.execute(
+                    "ALTER TABLE ranking_collector_state "
+                    "ADD COLUMN active_pages_date TEXT NOT NULL DEFAULT ''"
+                )
 
     def save_default_character(self, discord_user_id: int, character_name: str) -> None:
         """사용자가 마지막으로 직접 조회한 캐릭터 이름을 기억합니다."""
@@ -194,25 +233,20 @@ class RankingStore:
                 (world_id,),
             ).fetchone()
             if row is not None:
+                if row["scan_date"] != day:
+                    # 매일 높은 레벨 캐릭터부터 먼저 갱신하고 남는 시간에 하위 순위를 읽습니다.
+                    connection.execute(
+                        """
+                        UPDATE ranking_scan_state
+                        SET scan_date = ?, next_index = 1, completed = 0
+                        WHERE world_id = ?
+                        """,
+                        (day, world_id),
+                    )
+                    return 1
                 if not row["completed"]:
-                    # 날짜가 바뀌어도 아직 끝나지 않은 전체 수집은 같은 순번에서 이어갑니다.
-                    if row["scan_date"] != day:
-                        connection.execute(
-                            "UPDATE ranking_scan_state SET scan_date = ? WHERE world_id = ?",
-                            (day, world_id),
-                        )
                     return row["next_index"]
-                if row["scan_date"] == day:
-                    return None
-                connection.execute(
-                    """
-                    UPDATE ranking_scan_state
-                    SET scan_date = ?, next_index = 1, completed = 0
-                    WHERE world_id = ?
-                    """,
-                    (day, world_id),
-                )
-                return 1
+                return None
             connection.execute(
                 """
                 INSERT INTO ranking_scan_state (world_id, scan_date, next_index, completed)
@@ -226,6 +260,173 @@ class RankingStore:
             )
         return 1
 
+    def get_collector_backoff(self) -> tuple[int, int]:
+        """재시작 뒤에도 차단 직후 요청을 반복하지 않도록 대기 상태를 읽습니다."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT consecutive_limit_failures, retry_until
+                FROM ranking_collector_state
+                WHERE id = 1
+                """
+            ).fetchone()
+        return row["consecutive_limit_failures"], row["retry_until"]
+
+    def set_collector_backoff(self, failures: int, retry_until: int) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE ranking_collector_state
+                SET consecutive_limit_failures = ?, retry_until = ?
+                WHERE id = 1
+                """,
+                (failures, retry_until),
+            )
+
+    def clear_collector_backoff(self) -> None:
+        self.set_collector_backoff(0, 0)
+
+    def prioritize_character(self, character_name: str, refreshed_date: date) -> None:
+        """Discord 명령어로 조회한 캐릭터를 다음 날 최우선 갱신 대상으로 기억합니다."""
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO ranking_priority_characters
+                    (name_key, name, last_requested_at, last_refreshed_date)
+                VALUES (?, ?, CAST(strftime('%s', 'now') AS INTEGER), ?)
+                ON CONFLICT(name_key) DO UPDATE SET
+                    name = excluded.name,
+                    last_requested_at = excluded.last_requested_at,
+                    last_refreshed_date = excluded.last_refreshed_date
+                """,
+                (character_name.casefold(), character_name, refreshed_date.isoformat()),
+            )
+
+    def next_priority_character(self, scan_date: date) -> str | None:
+        """오늘 아직 갱신하지 않은 명령어 조회 캐릭터 중 최근 조회 대상을 반환합니다."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT name
+                FROM ranking_priority_characters
+                WHERE last_refreshed_date < ?
+                ORDER BY last_requested_at DESC
+                LIMIT 1
+                """,
+                (scan_date.isoformat(),),
+            ).fetchone()
+        return row["name"] if row is not None else None
+
+    def mark_priority_refreshed(self, character_name: str, scan_date: date) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE ranking_priority_characters
+                SET last_refreshed_date = ?
+                WHERE name_key = ?
+                """,
+                (scan_date.isoformat(), character_name.casefold()),
+            )
+
+    def prepare_active_pages(self, scan_date: date) -> None:
+        """최근 7일 내 경험치가 변했거나 아직 판별 자료가 부족한 페이지를 준비합니다."""
+        day = scan_date.isoformat()
+        cutoff = (scan_date - timedelta(days=7)).isoformat()
+        with self._connect() as connection:
+            prepared = connection.execute(
+                "SELECT active_pages_date FROM ranking_collector_state WHERE id = 1"
+            ).fetchone()["active_pages_date"]
+            if prepared == day:
+                return
+            connection.execute("DELETE FROM ranking_active_pages")
+            connection.execute(
+                """
+                WITH activity AS (
+                    SELECT
+                        character.world_id,
+                        character.scan_page_index,
+                        MIN(snapshot.snapshot_date) AS first_snapshot,
+                        MAX(CASE
+                            WHEN snapshot.level != character.level
+                              OR snapshot.exp != character.exp
+                            THEN snapshot.snapshot_date
+                        END) AS last_change
+                    FROM characters AS character
+                    LEFT JOIN ranking_snapshots AS snapshot
+                        ON snapshot.name_key = character.name_key
+                    WHERE character.scan_page_index IS NOT NULL
+                      AND character.level >= ?
+                    GROUP BY character.name_key
+                )
+                INSERT OR IGNORE INTO ranking_active_pages
+                    (scan_date, world_id, page_index, refreshed)
+                SELECT ?, world_id, scan_page_index, 0
+                FROM activity
+                WHERE first_snapshot IS NULL
+                   OR first_snapshot > ?
+                   OR last_change >= ?
+                """,
+                (MIN_TRACKED_LEVEL, day, cutoff, cutoff),
+            )
+            connection.execute(
+                "UPDATE ranking_collector_state SET active_pages_date = ? WHERE id = 1",
+                (day,),
+            )
+
+    def next_active_page(self, scan_date: date) -> tuple[int, int] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT world_id, page_index
+                FROM ranking_active_pages
+                WHERE scan_date = ? AND refreshed = 0
+                ORDER BY page_index, world_id
+                LIMIT 1
+                """,
+                (scan_date.isoformat(),),
+            ).fetchone()
+        return (row["world_id"], row["page_index"]) if row is not None else None
+
+    def mark_active_page_refreshed(
+        self, scan_date: date, world_id: int, page_index: int
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE ranking_active_pages
+                SET refreshed = 1
+                WHERE scan_date = ? AND world_id = ? AND page_index = ?
+                """,
+                (scan_date.isoformat(), world_id, page_index),
+            )
+
+    def skip_refreshed_active_pages(
+        self, scan_date: date, world_id: int, page_index: int
+    ) -> int:
+        """우선 수집을 마친 연속 페이지를 순차 수집에서 다시 요청하지 않습니다."""
+        with self._connect() as connection:
+            refreshed = {
+                row["page_index"]
+                for row in connection.execute(
+                    """
+                    SELECT page_index
+                    FROM ranking_active_pages
+                    WHERE scan_date = ? AND world_id = ? AND refreshed = 1
+                      AND page_index >= ?
+                    """,
+                    (scan_date.isoformat(), world_id, page_index),
+                ).fetchall()
+            }
+            next_index = page_index
+            while next_index in refreshed:
+                next_index += RANKING_PAGE_SIZE
+            if next_index != page_index:
+                connection.execute(
+                    "UPDATE ranking_scan_state SET next_index = ? WHERE world_id = ?",
+                    (next_index, world_id),
+                )
+        return next_index
+
     def save_page(
         self,
         characters: list[dict],
@@ -233,6 +434,7 @@ class RankingStore:
         next_index: int,
         world_id: int = KRONOS_WORLD_ID,
         update_checkpoint: bool = True,
+        source_page_index: int | None = None,
     ) -> None:
         """한 페이지와 다음 시작 순번을 같은 작업으로 저장합니다."""
         day = scan_date.isoformat()
@@ -252,14 +454,16 @@ class RankingStore:
                     character.get("legionRank"),
                     character.get("achievementScore", 0),
                     character.get("achievementRank"),
+                    source_page_index,
                     day,
                 )
                 connection.execute(
                     """
                     INSERT INTO characters
                         (name_key, name, world_id, job_name, level, exp, ranking, image_url,
-                         legion_level, legion_rank, achievement_score, achievement_rank, updated_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         legion_level, legion_rank, achievement_score, achievement_rank,
+                         scan_page_index, updated_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name_key) DO UPDATE SET
                         name = excluded.name,
                         world_id = excluded.world_id,
@@ -279,6 +483,9 @@ class RankingStore:
                         END,
                         achievement_rank = COALESCE(
                             excluded.achievement_rank, characters.achievement_rank
+                        ),
+                        scan_page_index = COALESCE(
+                            excluded.scan_page_index, characters.scan_page_index
                         ),
                         updated_date = excluded.updated_date
                     """,
@@ -321,6 +528,7 @@ class RankingStore:
             world_id=character["worldID"],
             update_checkpoint=False,
         )
+        self.prioritize_character(character["characterName"], scan_date)
         return self.get_gains(character["characterName"])
 
     def finish_scan(self, scan_date: date, world_id: int = KRONOS_WORLD_ID) -> None:
@@ -399,6 +607,7 @@ async def scan_rankings(
     if cursor is None:
         return {"saved": 0, "next_index": None, "reason": "already_completed"}
 
+    cursor = store.skip_refreshed_active_pages(scan_date, scan_id, cursor)
     saved = 0
     # page_index는 해당 순위부터 시작하므로 재시작 전 처리량도 시험 한도에 포함합니다.
     processed = max(cursor - 1, 0)
@@ -429,10 +638,12 @@ async def scan_rankings(
                 scan_date,
                 next_cursor,
                 world_id=scan_id,
+                source_page_index=page_index,
             )
             saved += len(page_to_save)
             processed += len(ranks)
             cursor = next_cursor
+            cursor = store.skip_refreshed_active_pages(scan_date, scan_id, cursor)
 
             if any(item.get("level", 0) < MIN_TRACKED_LEVEL for item in ranks):
                 store.finish_scan(scan_date, world_id=scan_id)

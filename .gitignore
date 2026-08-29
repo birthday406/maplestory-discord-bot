@@ -9,5 +9,6 @@ ranking.db-wal
 familiar.db
 familiar.db-shm
 familiar.db-wal
+ranking-update-probe.json
 __pycache__/
 *.py[cod]
