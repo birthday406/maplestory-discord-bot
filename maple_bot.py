@@ -1391,6 +1391,8 @@ def summarize_exp_gains(gains: list[dict], period: int) -> tuple[int, int]:
 
 
 def format_top_percent(rank: int, total_count: int) -> str:
+    if rank == 1:
+        return "0%"
     percent = Decimal(rank) * 100 / Decimal(total_count)
     return "0.0001% 미만" if percent < Decimal("0.0001") else f"{percent:.4f}%"
 
