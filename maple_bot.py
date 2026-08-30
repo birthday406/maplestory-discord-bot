@@ -1394,7 +1394,7 @@ def format_top_percent(rank: int, total_count: int) -> str:
     if rank == 1:
         return "0%"
     percent = Decimal(rank) * 100 / Decimal(total_count)
-    return "0.0001% 미만" if percent < Decimal("0.0001") else f"{percent:.4f}%"
+    return "0.0001%" if percent < Decimal("0.0001") else f"{percent:.4f}%"
 
 
 def create_ranking_history_image(

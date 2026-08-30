@@ -1002,6 +1002,17 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         fields = {field.name: field.value for field in embed.fields}
         self.assertEqual(fields["월드 랭킹"], "1위 (상위 0%)")
 
+    def test_embed_uses_minimum_visible_percent_after_first_place(self) -> None:
+        embed = build_ranking_embed(
+            self.character(),
+            world_rank=2,
+            legion=None,
+            world_total_count=10_000_000,
+        )
+
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["월드 랭킹"], "2위 (상위 0.0001%)")
+
     def test_embed_hides_percent_when_search_result_count_is_not_world_total(self) -> None:
         embed = build_ranking_embed(
             self.character(),
