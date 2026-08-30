@@ -307,13 +307,15 @@ class RankingStore:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT name
-                FROM ranking_priority_characters
-                WHERE last_refreshed_date < ?
-                ORDER BY last_requested_at DESC
+                SELECT priority.name
+                FROM ranking_priority_characters AS priority
+                JOIN characters AS character ON character.name_key = priority.name_key
+                WHERE priority.last_refreshed_date < ?
+                  AND character.level >= ?
+                ORDER BY priority.last_requested_at DESC
                 LIMIT 1
                 """,
-                (scan_date.isoformat(),),
+                (scan_date.isoformat(), MIN_TRACKED_LEVEL),
             ).fetchone()
         return row["name"] if row is not None else None
 
@@ -528,7 +530,8 @@ class RankingStore:
             world_id=character["worldID"],
             update_checkpoint=False,
         )
-        self.prioritize_character(character["characterName"], scan_date)
+        if character["level"] >= MIN_TRACKED_LEVEL:
+            self.prioritize_character(character["characterName"], scan_date)
         return self.get_gains(character["characterName"])
 
     def finish_scan(self, scan_date: date, world_id: int = KRONOS_WORLD_ID) -> None:

@@ -3225,6 +3225,13 @@ async def ranking_command(
                 ephemeral=True,
             )
             return
+        if character.get("level", 0) < MIN_TRACKED_LEVEL:
+            await interaction.followup.send(
+                f"**{discord.utils.escape_markdown(character['characterName'])}** "
+                "캐릭터의 기록 데이터가 없습니다.",
+                ephemeral=True,
+            )
+            return
         # 직접 이름을 입력해 성공한 조회만 다음 /랭킹 기본값으로 기억합니다.
         interaction.client.ranking_store.save_default_character(
             interaction.user.id, character["characterName"]

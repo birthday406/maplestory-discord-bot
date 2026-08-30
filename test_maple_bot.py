@@ -1028,6 +1028,34 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         client.ranking_store.save_snapshot.assert_called_once()
         client.ranking_store.save_default_character.assert_called_once_with(123, "Home")
 
+    async def test_command_reports_no_data_below_level_260(self) -> None:
+        client = SimpleNamespace(
+            fetch_ranking_character=AsyncMock(return_value=self.character(level=259)),
+            ranking_store=SimpleNamespace(
+                save_snapshot=Mock(),
+                save_default_character=Mock(),
+            ),
+        )
+        interaction = SimpleNamespace(
+            client=client,
+            user=SimpleNamespace(id=123),
+            response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+        await ranking_command.callback(interaction, "Home")
+
+        self.assertEqual(
+            interaction.followup.send.await_args.args[0],
+            "**Home** 캐릭터의 기록 데이터가 없습니다.",
+        )
+        self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
+        client.fetch_ranking_character.assert_awaited_once_with(
+            "na", "overall", "weekly", "Home"
+        )
+        client.ranking_store.save_default_character.assert_not_called()
+        client.ranking_store.save_snapshot.assert_not_called()
+
     async def test_command_uses_saved_character_when_nickname_is_empty(self) -> None:
         character = self.character()
         client = SimpleNamespace(
@@ -1638,6 +1666,18 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
             )
             store.mark_priority_refreshed(character["characterName"], second_day)
             self.assertIsNone(store.next_priority_character(second_day))
+
+    def test_searched_character_below_260_is_not_prioritized(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            character = self.ranks(1, count=1, level=259)[0]
+            first_day = date(2026, 8, 28)
+
+            store.save_snapshot(character, first_day)
+
+            self.assertIsNone(
+                store.next_priority_character(first_day + timedelta(days=1))
+            )
 
 
 class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
