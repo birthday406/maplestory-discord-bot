@@ -84,6 +84,7 @@ from maple_bot import (
     extract_miracle_time,
     extract_maintenance_watch,
     extract_sunny_sunday,
+    fetch_cached_ranking_profile,
     format_exchange_channel_name,
     format_time_channel_name,
     format_sunny_sunday_date,
@@ -1040,6 +1041,30 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                 "page_index": "1",
             },
         )
+
+    async def test_profile_cache_reuses_recent_official_responses(self) -> None:
+        character = self.character()
+        client = SimpleNamespace(
+            _ranking_profile_cache={},
+            fetch_ranking_character=AsyncMock(
+                side_effect=[
+                    character,
+                    self.character(rank=1309),
+                    self.character(rank=2923, legionLevel=10221),
+                    self.character(rank=810, starSum=33370),
+                ]
+            ),
+            fetch_ranking_total_count=AsyncMock(return_value=1_000_000),
+            fetch_character_image=AsyncMock(return_value=b"image"),
+        )
+
+        first = await fetch_cached_ranking_profile(client, "Home")
+        second = await fetch_cached_ranking_profile(client, "home")
+
+        self.assertIs(first, second)
+        self.assertEqual(client.fetch_ranking_character.await_count, 4)
+        client.fetch_ranking_total_count.assert_awaited_once()
+        client.fetch_character_image.assert_awaited_once()
 
     async def test_command_loads_rankings_and_unfiltered_world_total(self) -> None:
         character = self.character()

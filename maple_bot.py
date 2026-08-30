@@ -12,6 +12,7 @@ import sqlite3
 import zipfile
 from datetime import datetime, time as datetime_time, timedelta, timezone
 from decimal import Decimal
+from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -99,6 +100,7 @@ RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.
 # 요청을 몰아서 보내지 않고 1초마다 한 페이지(최대 10명)씩 고르게 수집합니다.
 RANKING_SCAN_INTERVAL_SECONDS = 1
 RANKING_PAGES_PER_BATCH = 1
+RANKING_PROFILE_CACHE_SECONDS = 10 * 60
 RANKING_BACKUP_INTERVAL = timedelta(hours=1)
 RANKING_FORBIDDEN_BACKOFF_STEPS = (5 * 60, 15 * 60, 60 * 60, 6 * 60 * 60)
 RANKING_RATE_LIMIT_BACKOFF_SECONDS = 60
@@ -1397,6 +1399,11 @@ def format_top_percent(rank: int, total_count: int) -> str:
     return "0.0001%" if percent < Decimal("0.0001") else f"{percent:.4f}%"
 
 
+@lru_cache(maxsize=16)
+def ranking_font(name: str, size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(str(RANKING_FONT_PATHS[name]), size)
+
+
 def create_ranking_history_image(
     character: dict,
     gains: list[dict],
@@ -1411,18 +1418,15 @@ def create_ranking_history_image(
     width, height = 900, 740
     image = Image.new("RGB", (width * scale, height * scale), "#202830")
     draw = ImageDraw.Draw(image, "RGBA")
-    roboto_path = str(RANKING_FONT_PATHS["roboto"])
-    roboto_bold_path = str(RANKING_FONT_PATHS["roboto_bold"])
-    korean_path = str(RANKING_FONT_PATHS["korean"])
-    title_font = ImageFont.truetype(roboto_path, 28 * scale)
-    score_font = ImageFont.truetype(roboto_path, 20 * scale)
-    body_font = ImageFont.truetype(roboto_path, 15 * scale)
-    value_font = ImageFont.truetype(roboto_bold_path, 13 * scale)
-    small_font = ImageFont.truetype(roboto_path, 12 * scale)
-    korean_title_font = ImageFont.truetype(korean_path, 28 * scale)
-    korean_body_font = ImageFont.truetype(korean_path, 15 * scale)
-    korean_value_font = ImageFont.truetype(korean_path, 13 * scale)
-    korean_small_font = ImageFont.truetype(korean_path, 12 * scale)
+    title_font = ranking_font("roboto", 28 * scale)
+    score_font = ranking_font("roboto", 20 * scale)
+    body_font = ranking_font("roboto", 15 * scale)
+    value_font = ranking_font("roboto_bold", 13 * scale)
+    small_font = ranking_font("roboto", 12 * scale)
+    korean_title_font = ranking_font("korean", 28 * scale)
+    korean_body_font = ranking_font("korean", 15 * scale)
+    korean_value_font = ranking_font("korean", 13 * scale)
+    korean_small_font = ranking_font("korean", 12 * scale)
 
     draw.rounded_rectangle(
         (16 * scale, 16 * scale, (width - 16) * scale, (height - 16) * scale),
@@ -3493,6 +3497,60 @@ async def ursus_command(interaction: discord.Interaction) -> None:
     )
 
 
+async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
+    now = asyncio.get_running_loop().time()
+    cache = getattr(client, "_ranking_profile_cache", None)
+    if cache is None:
+        cache = client._ranking_profile_cache = {}
+    key = nickname.casefold()
+    cached = cache.get(key)
+    if cached is not None and now - cached[0] < RANKING_PROFILE_CACHE_SECONDS:
+        return cached[1]
+
+    character = await client.fetch_ranking_character(
+        "na", "overall", "legendary", nickname
+    )
+    profile = (character, None, None, None, None, None)
+    if character is not None and character.get("level", 0) >= MIN_TRACKED_LEVEL:
+        world_id = character["worldID"]
+        world_character = await client.fetch_ranking_character(
+            "na", "world", world_id, nickname
+        )
+        world_total_count = await client.fetch_ranking_total_count(
+            "na", "world", world_id
+        )
+        legion = await client.fetch_ranking_character(
+            "na", "legion", world_id, nickname
+        )
+        achievement = await client.fetch_ranking_character(
+            "na", "achievement", world_id, nickname
+        )
+        if achievement is not None:
+            achievement["score"] = achievement.get(
+                "starSum", achievement.get("score", 0)
+            )
+        fetch_character_image = getattr(client, "fetch_character_image", None)
+        character_image = (
+            await fetch_character_image(character.get("characterImgURL"))
+            if fetch_character_image is not None
+            else None
+        )
+        profile = (
+            character,
+            world_character,
+            world_total_count,
+            legion,
+            achievement,
+            character_image,
+        )
+
+    for cached_key, (cached_at, _) in list(cache.items()):
+        if now - cached_at >= RANKING_PROFILE_CACHE_SECONDS:
+            cache.pop(cached_key)
+    cache[key] = (now, profile)
+    return profile
+
+
 @app_commands.command(name="랭킹", description="GMS 캐릭터의 공식 레벨 랭킹을 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -3522,8 +3580,16 @@ async def ranking_command(
 
     await interaction.response.defer()
     try:
-        character = await interaction.client.fetch_ranking_character(
-            "na", "overall", "legendary", nickname
+        (
+            character,
+            world_character,
+            world_total_count,
+            legion,
+            achievement,
+            character_image,
+        ) = await fetch_cached_ranking_profile(
+            interaction.client,
+            nickname,
         )
         if character is None:
             await interaction.followup.send(
@@ -3542,22 +3608,6 @@ async def ranking_command(
         interaction.client.ranking_store.save_default_character(
             interaction.user.id, character["characterName"]
         )
-        world_id = character["worldID"]
-        world_character = await interaction.client.fetch_ranking_character(
-            "na", "world", world_id, nickname
-        )
-        world_total_count = await interaction.client.fetch_ranking_total_count(
-            "na", "world", world_id
-        )
-        legion = await interaction.client.fetch_ranking_character(
-            "na", "legion", world_id, nickname
-        )
-        achievement = await interaction.client.fetch_ranking_character(
-            "na", "achievement", world_id, nickname
-        )
-        if achievement is not None:
-            # 업적 API는 실제 업적 점수를 score가 아니라 starSum으로 반환합니다.
-            achievement["score"] = achievement.get("starSum", achievement.get("score", 0))
     except (aiohttp.ClientError, TimeoutError, ValueError, KeyError):
         logging.exception("Failed to load the official GMS character ranking.")
         await interaction.followup.send(
@@ -3576,24 +3626,20 @@ async def ranking_command(
     gains = interaction.client.ranking_store.save_snapshot(
         character, datetime.now(URSUS_TIMEZONE).date()
     )
-    fetch_character_image = getattr(interaction.client, "fetch_character_image", None)
-    character_image = (
-        await fetch_character_image(character.get("characterImgURL"))
-        if fetch_character_image is not None
-        else None
+    ranking_image = await asyncio.to_thread(
+        create_ranking_history_image,
+        character,
+        gains,
+        world_character["rank"] if world_character is not None else None,
+        legion,
+        achievement,
+        world_total_count,
+        character_image,
     )
     filename = "ranking-card.png"
     await interaction.followup.send(
         file=discord.File(
-            create_ranking_history_image(
-                character,
-                gains,
-                world_character["rank"] if world_character is not None else None,
-                legion,
-                achievement,
-                world_total_count,
-                character_image,
-            ),
+            ranking_image,
             filename=filename,
         ),
     )
@@ -4085,6 +4131,7 @@ class MapleNewsBot(commands.Bot):
         ) = self.ranking_store.get_collector_backoff()
         self._ranking_request_lock = asyncio.Lock()
         self._next_ranking_request_at = 0.0
+        self._ranking_profile_cache: dict[str, tuple[float, tuple]] = {}
         self.familiar_expectation_store = FamiliarExpectationStore(FAMILIAR_DB_PATH)
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
         self.openai = AsyncOpenAI()
