@@ -62,7 +62,7 @@ async def fetch_character(session: aiohttp.ClientSession, name: str) -> dict | N
         RANKING_API_URL,
         params={
             "type": "overall",
-            "id": "weekly",
+            "id": "legendary",
             "reboot_index": "0",
             "page_index": "1",
             "character_name": name,
