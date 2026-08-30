@@ -57,12 +57,14 @@ def select_candidates(database: Path, limit: int) -> list[str]:
     return [row[0] for row in rows]
 
 
-async def fetch_character(session: aiohttp.ClientSession, name: str) -> dict | None:
+async def fetch_character(
+    session: aiohttp.ClientSession, name: str, ranking_id: str
+) -> dict | None:
     async with session.get(
         RANKING_API_URL,
         params={
             "type": "overall",
-            "id": "legendary",
+            "id": ranking_id,
             "reboot_index": "0",
             "page_index": "1",
             "character_name": name,
@@ -93,7 +95,14 @@ def write_result(path: Path, result: dict) -> None:
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-async def probe(database: Path, output: Path, interval: int, hours: int, limit: int) -> int:
+async def probe(
+    database: Path,
+    output: Path,
+    interval: int,
+    hours: int,
+    limit: int,
+    ranking_id: str,
+) -> int:
     names = select_candidates(database, limit)
     started = datetime.now(timezone.utc)
     deadline = started + timedelta(hours=hours)
@@ -107,7 +116,7 @@ async def probe(database: Path, output: Path, interval: int, hours: int, limit: 
             current: dict[str, dict] = {}
             for name in names:
                 try:
-                    character = await fetch_character(session, name)
+                    character = await fetch_character(session, name, ranking_id)
                     if character is not None:
                         current[name] = rank_value(character)
                 except (aiohttp.ClientError, TimeoutError, ValueError) as error:
@@ -127,6 +136,7 @@ async def probe(database: Path, output: Path, interval: int, hours: int, limit: 
                 if changes:
                     result = {
                         "status": "detected",
+                        "ranking_id": ranking_id,
                         "started_at_kst": started.astimezone(KST).isoformat(),
                         "detected_at_kst": checked_at.astimezone(KST).isoformat(),
                         "poll_interval_minutes": interval / 60,
@@ -141,6 +151,7 @@ async def probe(database: Path, output: Path, interval: int, hours: int, limit: 
                 output,
                 {
                     "status": "watching",
+                    "ranking_id": ranking_id,
                     "started_at_kst": started.astimezone(KST).isoformat(),
                     "last_checked_at_kst": checked_at.astimezone(KST).isoformat(),
                     "poll_interval_minutes": interval / 60,
@@ -154,6 +165,7 @@ async def probe(database: Path, output: Path, interval: int, hours: int, limit: 
         output,
         {
             "status": "not_detected",
+            "ranking_id": ranking_id,
             "started_at_kst": started.astimezone(KST).isoformat(),
             "finished_at_kst": datetime.now(timezone.utc).astimezone(KST).isoformat(),
             "checks": checks,
@@ -171,9 +183,22 @@ def main() -> int:
     parser.add_argument("--interval", type=int, default=600, help="확인 간격(초)")
     parser.add_argument("--hours", type=int, default=24, help="최대 감시 시간")
     parser.add_argument("--candidates", type=int, default=5, help="감시 캐릭터 수")
+    parser.add_argument(
+        "--ranking-id",
+        choices=("weekly", "legendary"),
+        default="weekly",
+        help="감시할 종합 랭킹 피드",
+    )
     args = parser.parse_args()
     return asyncio.run(
-        probe(args.database, args.output, args.interval, args.hours, args.candidates)
+        probe(
+            args.database,
+            args.output,
+            args.interval,
+            args.hours,
+            args.candidates,
+            args.ranking_id,
+        )
     )
 
 
