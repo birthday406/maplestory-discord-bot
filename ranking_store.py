@@ -88,6 +88,14 @@ class RankingStore:
                     updated_at INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS ranking_populations (
+                    snapshot_date TEXT NOT NULL,
+                    metric TEXT NOT NULL,
+                    world_id INTEGER NOT NULL,
+                    population INTEGER NOT NULL,
+                    PRIMARY KEY (snapshot_date, metric, world_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS ranking_priority_characters (
                     name_key TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -197,6 +205,56 @@ class RankingStore:
             return None
         return tuple(profile) if len(profile) == 5 else None
 
+    def save_population(
+        self,
+        scan_date: date,
+        metric: str,
+        population: int,
+        world_id: int = 0,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO ranking_populations
+                    (snapshot_date, metric, world_id, population)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(snapshot_date, metric, world_id) DO UPDATE SET
+                    population = excluded.population
+                """,
+                (scan_date.isoformat(), metric, world_id, population),
+            )
+
+    def get_population(
+        self,
+        metric: str,
+        world_id: int = 0,
+        scan_date: date | None = None,
+    ) -> int | None:
+        conditions = "metric = ? AND world_id = ?"
+        parameters: list = [metric, world_id]
+        if scan_date is not None:
+            conditions += " AND snapshot_date = ?"
+            parameters.append(scan_date.isoformat())
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT population
+                FROM ranking_populations
+                WHERE {conditions}
+                ORDER BY snapshot_date DESC
+                LIMIT 1
+                """,
+                parameters,
+            ).fetchone()
+        return row["population"] if row is not None else None
+
+    def get_ai_score_populations(self, world_id: int) -> dict[str, int | None]:
+        return {
+            "level_population": self.get_population("level_260_plus"),
+            "legion_population": self.get_population("legion", world_id),
+            "achievement_population": self.get_population("achievement", world_id),
+        }
+
     def register_guild_character(
         self,
         guild_id: int,
@@ -242,6 +300,7 @@ class RankingStore:
                 SELECT
                     member.discord_display_name,
                     member.character_name,
+                    character.world_id,
                     character.level,
                     character.exp,
                     character.ranking,

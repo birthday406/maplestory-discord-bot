@@ -68,6 +68,7 @@ from maple_bot import (
     cash_shop_transfer_alert_command,
     cash_shop_transfer_command,
     channel_recommend_command,
+    count_eligible_ranking_characters,
     command_stats_command,
     cube_sale_alert_command,
     cube_sale_command,
@@ -1286,6 +1287,48 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(score, 99.9)
         self.assertEqual(title, "초월 메창")
 
+    def test_complete_population_data_uses_new_ai_score(self) -> None:
+        score, title = maple_addict_power(
+            {
+                "level": 300,
+                "exp": 0,
+                "ranking": 1,
+                "level_population": 786_171,
+                "legion_level": 12_000,
+                "legion_rank": 1,
+                "legion_population": 245_359,
+                "achievement_score": 40_000,
+                "achievement_rank": 1,
+                "achievement_population": 1_768_531,
+            }
+        )
+
+        self.assertEqual(score, 99.9)
+        self.assertEqual(title, "초월 메창")
+
+    def test_population_snapshots_are_saved_by_date_and_world(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            first_day = date(2026, 8, 30)
+            second_day = date(2026, 8, 31)
+            store.save_population(first_day, "level_260_plus", 786_171)
+            store.save_population(first_day, "legion", 245_359, 45)
+            store.save_population(first_day, "achievement", 1_768_531, 45)
+            store.save_population(second_day, "level_260_plus", 786_500)
+
+            self.assertEqual(
+                store.get_population("level_260_plus", scan_date=first_day), 786_171
+            )
+            self.assertEqual(store.get_population("level_260_plus"), 786_500)
+            self.assertEqual(
+                store.get_ai_score_populations(45),
+                {
+                    "level_population": 786_500,
+                    "legion_population": 245_359,
+                    "achievement_population": 1_768_531,
+                },
+            )
+
     def test_guild_registration_is_separated_by_discord_server(self) -> None:
         character = self.character(
             legionLevel=10221,
@@ -1387,7 +1430,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
 
         with Image.open(result) as image:
             self.assertEqual(image.format, "PNG")
-            self.assertEqual(image.size, (900, 740))
+            self.assertEqual(image.size, (1800, 1480))
             self.assertEqual(image.getpixel((0, 0)), (32, 40, 48))
 
     def test_history_graph_ignores_faint_character_image_padding(self) -> None:
@@ -1405,13 +1448,13 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         with Image.open(result) as image:
             red_pixels = [
                 (x, y)
-                for y in range(42, 177)
-                for x in range(42, 167)
+                for y in range(84, 354)
+                for x in range(84, 334)
                 if image.getpixel((x, y))[0] > 180
                 and image.getpixel((x, y))[1] < 100
                 and image.getpixel((x, y))[2] < 100
             ]
-        self.assertGreater(max(y for _, y in red_pixels) - min(y for _, y in red_pixels), 100)
+        self.assertGreater(max(y for _, y in red_pixels) - min(y for _, y in red_pixels), 200)
 
     def test_exp_summary_uses_requested_recent_period(self) -> None:
         gains = [{"exp": value} for value in range(1, 31)]
@@ -1477,6 +1520,51 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
                 next_index=1,
                 update_checkpoint=False,
                 source_page_index=page_index,
+            )
+
+    async def test_level_population_counts_tied_boundary_rows(self) -> None:
+        rows = [
+            {"level": 260, "rank": rank if rank <= 10 else 11}
+            for rank in range(1, 18)
+        ] + [
+            {"level": 259, "rank": rank}
+            for rank in range(18, 31)
+        ]
+
+        async def fetch_page(start_index: int) -> dict:
+            return {"ranks": rows[start_index - 1 : start_index + 9]}
+
+        self.assertEqual(
+            await count_eligible_ranking_characters(fetch_page, len(rows)),
+            17,
+        )
+
+    async def test_daily_population_refresh_saves_exact_level_count(self) -> None:
+        rows = [
+            {"level": 260, "rank": rank if rank <= 10 else 11}
+            for rank in range(1, 18)
+        ] + [
+            {"level": 259, "rank": rank}
+            for rank in range(18, 31)
+        ]
+
+        async def fetch_payload(region, params, target):
+            start_index = int(params["page_index"])
+            return {
+                "totalCount": len(rows),
+                "ranks": rows[start_index - 1 : start_index + 9],
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            bot = object.__new__(MapleNewsBot)
+            bot.ranking_store = store
+            bot.fetch_ranking_payload = AsyncMock(side_effect=fetch_payload)
+            scan_date = date(2026, 8, 31)
+
+            self.assertTrue(await bot.refresh_next_ranking_population(scan_date))
+            self.assertEqual(
+                store.get_population("level_260_plus", scan_date=scan_date), 17
             )
 
     async def test_trial_scans_from_top_and_stops_at_limit(self) -> None:
@@ -1578,6 +1666,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
             bot._completed_ranking_world_ids = set()
             bot.fetch_ranking_character = AsyncMock()
             bot.fetch_ranking_page = AsyncMock(return_value={"ranks": self.ranks(11)})
+            bot.refresh_next_ranking_population = AsyncMock(return_value=False)
 
             await MapleNewsBot.collect_rankings.coro(bot)
 

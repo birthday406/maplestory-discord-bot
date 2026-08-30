@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from PIL import Image, ImageDraw, ImageFont
 
+from ai_score import calculate_ai_score
 from familiar_store import FamiliarExpectationStore
 from ranking_store import MIN_TRACKED_LEVEL, RankingStore, scan_rankings
 
@@ -1369,6 +1370,39 @@ def find_ranking_character(payload: dict, nickname: str) -> dict | None:
     return None
 
 
+async def count_eligible_ranking_characters(
+    fetch_page,
+    total_count: int,
+    minimum_level: int = MIN_TRACKED_LEVEL,
+) -> int:
+    """정렬된 공식 랭킹에서 최소 레벨 경계를 찾아 실제 행 수를 반환합니다."""
+    page_size = 10
+    last_page = max(0, (total_count - 1) // page_size)
+    low, high = 0, last_page
+    pages = {}
+
+    async def get_page(page_number: int) -> list[dict]:
+        if page_number not in pages:
+            start_index = page_number * page_size + 1
+            pages[page_number] = (await fetch_page(start_index)).get("ranks", [])
+        return pages[page_number]
+
+    while low <= high:
+        middle = (low + high) // 2
+        ranks = await get_page(middle)
+        if ranks and ranks[0].get("level", 0) >= minimum_level:
+            low = middle + 1
+        else:
+            high = middle - 1
+
+    for page_number in range(max(0, high), min(last_page, high + 1) + 1):
+        start_index = page_number * page_size + 1
+        for offset, character in enumerate(await get_page(page_number)):
+            if character.get("level", 0) < minimum_level:
+                return start_index + offset - 1
+    return total_count
+
+
 def compact_exp(value: int) -> str:
     """그래프 수치를 게임에서 익숙한 K·M·B·T·Q 단위로 줄입니다."""
     for unit, size in (("Q", 10**15), ("T", 10**12), ("B", 10**9), ("M", 10**6), ("K", 10**3)):
@@ -1409,7 +1443,10 @@ def current_ranking_scan_date(now: datetime | None = None):
 
 @lru_cache(maxsize=16)
 def ranking_font(name: str, size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(str(RANKING_FONT_PATHS[name]), size)
+    font = ImageFont.truetype(str(RANKING_FONT_PATHS[name]), size)
+    if name == "korean":
+        font.set_variation_by_name("Medium")
+    return font
 
 
 def create_ranking_history_image(
@@ -1420,6 +1457,9 @@ def create_ranking_history_image(
     achievement: dict | None = None,
     world_total_count: int | None = None,
     character_image: bytes | None = None,
+    level_population: int | None = None,
+    legion_population: int | None = None,
+    achievement_population: int | None = None,
 ) -> io.BytesIO:
     """캐릭터 랭킹 정보와 최근 경험치 변화량을 한 장의 PNG로 만듭니다."""
     scale = 2
@@ -1430,11 +1470,11 @@ def create_ranking_history_image(
     score_font = ranking_font("roboto", 20 * scale)
     body_font = ranking_font("roboto", 15 * scale)
     value_font = ranking_font("roboto_bold", 13 * scale)
-    small_font = ranking_font("roboto", 12 * scale)
+    small_font = ranking_font("roboto", 13 * scale)
     korean_title_font = ranking_font("korean", 28 * scale)
     korean_body_font = ranking_font("korean", 15 * scale)
     korean_value_font = ranking_font("korean", 13 * scale)
-    korean_small_font = ranking_font("korean", 12 * scale)
+    korean_small_font = ranking_font("korean", 13 * scale)
 
     draw.rounded_rectangle(
         (16 * scale, 16 * scale, (width - 16) * scale, (height - 16) * scale),
@@ -1464,6 +1504,9 @@ def create_ranking_history_image(
             "legion_rank": legion.get("rank") if legion else None,
             "achievement_score": achievement.get("score") if achievement else None,
             "achievement_rank": achievement.get("rank") if achievement else None,
+            "level_population": level_population,
+            "legion_population": legion_population,
+            "achievement_population": achievement_population,
         }
     )
 
@@ -1484,8 +1527,8 @@ def create_ranking_history_image(
                 if visible_area:
                     avatar = avatar.crop(visible_area)
                 avatar_scale = min(
-                    (116 * scale) / avatar.width,
-                    (126 * scale) / avatar.height,
+                    (106 * scale) / avatar.width,
+                    (116 * scale) / avatar.height,
                 )
                 avatar = avatar.resize(
                     (
@@ -1549,7 +1592,7 @@ def create_ranking_history_image(
         (207 * scale, 159 * scale),
         "메창력",
         font=korean_value_font,
-        fill="#9FB0BE",
+        fill="#DCE7EE",
     )
     draw.text(
         (267 * scale, 154 * scale),
@@ -1566,7 +1609,7 @@ def create_ranking_history_image(
         (362 * scale, 159 * scale),
         "칭호",
         font=korean_value_font,
-        fill="#9FB0BE",
+        fill="#DCE7EE",
     )
     draw.text(
         (407 * scale, 159 * scale),
@@ -1639,8 +1682,6 @@ def create_ranking_history_image(
             heading,
             font=korean_body_font,
             fill="#FFFFFF",
-            stroke_width=1 * scale,
-            stroke_fill="#FFFFFF",
         )
         for index, period in enumerate((7, 14, 30)):
             average, total = summarize_exp_gains(gains, period)
@@ -1694,7 +1735,7 @@ def create_ranking_history_image(
                 ((left - 10) * scale, y * scale),
                 compact_exp(value),
                 font=small_font,
-                fill="#A8B5C0",
+                fill="#DCE7EE",
                 anchor="rm",
             )
 
@@ -1765,11 +1806,10 @@ def create_ranking_history_image(
                 (x * scale, (bottom + 14) * scale),
                 item["date"][5:].replace("-", "/"),
                 font=small_font,
-                fill="#A8B5C0",
+                fill="#DCE7EE",
                 anchor="ma",
             )
 
-    image = image.resize((width, height), Image.Resampling.LANCZOS)
     output = io.BytesIO()
     image.save(output, format="PNG")
     output.seek(0)
@@ -1839,6 +1879,28 @@ def ranking_position_score(rank: int | None) -> float:
 
 def maple_addict_power(entry: dict) -> tuple[float, str]:
     """레벨·유니온·업적의 수치와 순위를 합쳐 재미용 메창력과 칭호를 만듭니다."""
+    ai_result = calculate_ai_score(entry, LEVEL_EXP)
+    if ai_result["ai_score"] is not None:
+        score = ai_result["ai_score"]
+        specialty = {
+            "character_growth": "레벨 장인",
+            "union_growth": "유니온 장인",
+            "achievement": "업적 사냥꾼",
+        }
+        specialty_indices = {
+            name: ai_result["indices"][name] for name in specialty
+        }
+        spread = max(specialty_indices.values()) - min(specialty_indices.values())
+        if score >= 95:
+            title = "초월 메창"
+        elif score >= 80:
+            title = "메창"
+        elif min(specialty_indices.values()) >= 40 and spread <= 3:
+            title = "밸런스 메창"
+        else:
+            title = specialty[max(specialty_indices, key=specialty_indices.get)]
+        return score, title
+
     # 레벨·경험치와 전체 순위 40점, 유니온 30점, 업적 30점입니다.
     character_score = (
         ranking_progress_percent(entry["level"], entry["exp"]) * 0.20
@@ -3687,6 +3749,10 @@ async def ranking_command(
             character["characterName"]
         )
         refresh_requests.discard(refresh_key)
+    population_loader = getattr(
+        interaction.client.ranking_store, "get_ai_score_populations", None
+    )
+    populations = population_loader(character["worldID"]) if population_loader else {}
     ranking_image = await asyncio.to_thread(
         create_ranking_history_image,
         character,
@@ -3696,6 +3762,7 @@ async def ranking_command(
         achievement,
         world_total_count,
         character_image,
+        **populations,
     )
     filename = "ranking-card.png"
     await interaction.followup.send(
@@ -3776,6 +3843,13 @@ async def guild_ranking_command(
             ephemeral=True,
         )
         return
+    population_loader = getattr(
+        interaction.client.ranking_store, "get_ai_score_populations", None
+    )
+    if population_loader:
+        for entry in entries:
+            if entry.get("world_id") is not None:
+                entry.update(population_loader(entry["world_id"]))
     await interaction.response.send_message(
         embed=build_guild_ranking_embed(entries, nickname)
     )
@@ -4375,6 +4449,74 @@ class MapleNewsBot(commands.Bot):
             return int(payload["totalCount"])
         except (KeyError, TypeError, ValueError):
             return None
+
+    async def refresh_next_ranking_population(self, scan_date) -> bool:
+        """AI Score에 필요한 population 중 오늘 빠진 값 하나만 채웁니다."""
+        if self.ranking_store.get_population(
+            "level_260_plus", scan_date=scan_date
+        ) is None:
+            target = "population:level_260_plus"
+            first = await self.fetch_ranking_payload(
+                "na",
+                {
+                    "type": "overall",
+                    "id": "legendary",
+                    "reboot_index": "0",
+                    "page_index": "1",
+                },
+                target,
+            )
+            total_count = int(first["totalCount"])
+
+            async def fetch_page(page_index: int) -> dict:
+                return await self.fetch_ranking_payload(
+                    "na",
+                    {
+                        "type": "overall",
+                        "id": "legendary",
+                        "reboot_index": "0",
+                        "page_index": str(page_index),
+                    },
+                    target,
+                )
+
+            population = await count_eligible_ranking_characters(
+                fetch_page, total_count
+            )
+            self.ranking_store.save_population(
+                scan_date, "level_260_plus", population
+            )
+            logging.info("Lv.260+ ranking population saved: %s.", population)
+            return True
+
+        for world_id in RANKING_WORLDS:
+            for metric, ranking_type in (
+                ("legion", "legion"),
+                ("achievement", "achievement"),
+            ):
+                if self.ranking_store.get_population(
+                    metric, world_id, scan_date
+                ) is not None:
+                    continue
+                population = await self.fetch_ranking_total_count(
+                    "na",
+                    ranking_type,
+                    world_id,
+                    f"population:{metric}:{world_id}",
+                )
+                if population is None:
+                    raise ValueError(f"Missing {metric} population for world {world_id}.")
+                self.ranking_store.save_population(
+                    scan_date, metric, population, world_id
+                )
+                logging.info(
+                    "%s ranking population saved for world %s: %s.",
+                    metric,
+                    world_id,
+                    population,
+                )
+                return True
+        return False
 
     async def fetch_character_image(self, url: str | None) -> bytes | None:
         """공식 캐릭터 이미지를 카드에 넣되 실패해도 랭킹 조회는 유지합니다."""
@@ -5433,6 +5575,24 @@ class MapleNewsBot(commands.Bot):
                 sqlite3.Error,
             ):
                 logging.exception("Priority ranking collection failed: %s.", priority_name)
+            return
+
+        try:
+            if await self.refresh_next_ranking_population(scan_date):
+                self.clear_ranking_backoff_after_success()
+                return
+        except RankingRateLimited as error:
+            self.pause_ranking_collection(error)
+            return
+        except (
+            aiohttp.ClientError,
+            TimeoutError,
+            ValueError,
+            KeyError,
+            OSError,
+            sqlite3.Error,
+        ):
+            logging.exception("Ranking population collection failed.")
             return
 
         self.ranking_store.prepare_active_pages(scan_date)
