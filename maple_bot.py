@@ -1594,7 +1594,9 @@ def create_ranking_history_image(
             ((left + 16) * scale, 224 * scale),
             heading,
             font=korean_small_font,
-            fill="#7FA3BD",
+            fill="#E6EEF4",
+            stroke_width=1 * scale,
+            stroke_fill="#E6EEF4",
         )
         draw.text(
             ((left + 16) * scale, 247 * scale),
@@ -1606,7 +1608,7 @@ def create_ranking_history_image(
             ((left + 16) * scale, 279 * scale),
             detail,
             font=korean_small_font if re.search(r"[가-힣]", detail) else small_font,
-            fill="#A8B5C0",
+            fill="#F3F7FA",
         )
 
     draw.rounded_rectangle(
@@ -1626,7 +1628,9 @@ def create_ranking_history_image(
             (section_left * scale, 338 * scale),
             heading,
             font=korean_body_font,
-            fill="#EEF4F8",
+            fill="#FFFFFF",
+            stroke_width=1 * scale,
+            stroke_fill="#FFFFFF",
         )
         for index, period in enumerate((7, 14, 30)):
             average, total = summarize_exp_gains(gains, period)
@@ -1637,7 +1641,7 @@ def create_ranking_history_image(
                 (value_x * scale, 371 * scale),
                 f"{period}일",
                 font=korean_small_font,
-                fill="#9FB0BE",
+                fill="#DCE7EE",
             )
             draw.text(
                 ((value_x + 32) * scale, 367 * scale),
