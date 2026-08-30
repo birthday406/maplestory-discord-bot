@@ -5333,7 +5333,10 @@ class MapleNewsBot(commands.Bot):
                 self._last_ranking_backup_at is None
                 or now - self._last_ranking_backup_at >= RANKING_BACKUP_INTERVAL
             ):
-                backup_rows = self.ranking_store.backup_to(RANKING_BACKUP_PATH)
+                backup_rows = await asyncio.to_thread(
+                    self.ranking_store.backup_to,
+                    RANKING_BACKUP_PATH,
+                )
                 self._last_ranking_backup_at = now
             logging.info(
                 "Main-world rankings saved %s characters (%s); backup rows: %s.",
