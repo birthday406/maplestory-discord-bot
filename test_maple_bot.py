@@ -168,6 +168,10 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(allocation, {70: 1})
         self.assertEqual(offset, 0)
 
+        allocation, offset = allocate_ranking_pages([45], offset)
+        self.assertEqual(allocation, {45: 1})
+        self.assertEqual(offset, 0)
+
     def test_ranking_scan_day_changes_at_0210_kst(self) -> None:
         kst = maple_bot.INFO_CHANNEL_TIMEZONE
 
@@ -179,10 +183,6 @@ class NewsFilteringTests(unittest.TestCase):
             maple_bot.current_ranking_scan_date(datetime(2026, 8, 31, 2, 10, tzinfo=kst)),
             date(2026, 8, 31),
         )
-
-        allocation, offset = allocate_ranking_pages([45], offset)
-        self.assertEqual(allocation, {45: 1})
-        self.assertEqual(offset, 0)
 
     def test_ranking_rate_limit_returns_without_sleeping_inside_fetch(self) -> None:
         async def run() -> RankingRateLimited:
