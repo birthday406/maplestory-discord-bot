@@ -557,6 +557,10 @@ class RankingStore:
         with self._connect() as connection:
             for character in characters:
                 name_key = character["characterName"].casefold()
+                connection.execute(
+                    "DELETE FROM ranking_snapshots WHERE name_key = ? AND snapshot_date > ?",
+                    (name_key, day),
+                )
                 values = (
                     name_key,
                     character["characterName"],

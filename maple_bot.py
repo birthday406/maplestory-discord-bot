@@ -10,7 +10,7 @@ import random
 import re
 import sqlite3
 import zipfile
-from datetime import datetime, time as datetime_time, timedelta, timezone
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
@@ -102,7 +102,7 @@ RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.
 RANKING_SCAN_INTERVAL_SECONDS = 1
 RANKING_PAGES_PER_BATCH = 1
 RANKING_PROFILE_CACHE_SECONDS = 10 * 60
-RANKING_DAILY_START = timedelta(hours=2, minutes=10)
+RANKING_DAILY_START = timedelta(minutes=10)
 RANKING_BACKUP_INTERVAL = timedelta(hours=1)
 RANKING_FORBIDDEN_BACKOFF_STEPS = (5 * 60, 15 * 60, 60 * 60, 6 * 60 * 60)
 RANKING_RATE_LIMIT_BACKOFF_SECONDS = 60
@@ -1435,9 +1435,7 @@ def format_top_percent(rank: int, total_count: int) -> str:
 
 
 def current_ranking_scan_date(now: datetime | None = None):
-    current = (now or datetime.now(INFO_CHANNEL_TIMEZONE)).astimezone(
-        INFO_CHANNEL_TIMEZONE
-    )
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     return (current - RANKING_DAILY_START).date()
 
 
@@ -1460,10 +1458,11 @@ def create_ranking_history_image(
     level_population: int | None = None,
     legion_population: int | None = None,
     achievement_population: int | None = None,
+    updated_date: date | str | None = None,
 ) -> io.BytesIO:
     """캐릭터 랭킹 정보와 최근 경험치 변화량을 한 장의 PNG로 만듭니다."""
     scale = 2
-    width, height = 900, 740
+    width, height = 900, 764
     image = Image.new("RGB", (width * scale, height * scale), "#202830")
     draw = ImageDraw.Draw(image, "RGBA")
     title_font = ranking_font("roboto", 28 * scale)
@@ -1475,6 +1474,7 @@ def create_ranking_history_image(
     korean_body_font = ranking_font("korean", 15 * scale)
     korean_value_font = ranking_font("korean", 13 * scale)
     korean_small_font = ranking_font("korean", 13 * scale)
+    footer_font = ranking_font("korean", 11 * scale)
 
     draw.rounded_rectangle(
         (16 * scale, 16 * scale, (width - 16) * scale, (height - 16) * scale),
@@ -1809,6 +1809,20 @@ def create_ranking_history_image(
                 fill="#DCE7EE",
                 anchor="ma",
             )
+
+    if updated_date is not None:
+        update_text = (
+            updated_date.isoformat()
+            if isinstance(updated_date, date)
+            else str(updated_date)
+        )
+        draw.text(
+            (width * scale // 2, 736 * scale),
+            f"기록 업데이트: {update_text} (UTC)",
+            font=footer_font,
+            fill="#9FB0BE",
+            anchor="mm",
+        )
 
     output = io.BytesIO()
     image.save(output, format="PNG")
@@ -2926,10 +2940,18 @@ async def help_command(interaction: discord.Interaction) -> None:
     )
     embed.add_field(
         name="편의",
-        value="`/랭킹` `/랭킹등록` `/랭킹해제` `/서버랭킹` `/ㅁ`",
+        value="`/랭킹` `/랭킹등록` `/랭킹해제` `/서버랭킹` `/ㅁ` `/심볼`",
         inline=False,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+QUICK_COPY_TEXT = (
+    "```text\nSacred Symbol/claim\n```\n"
+    "```text\nArcane Symbol/claim\n```\n"
+    "```text\nSol Erda Fragment\n```\n"
+    "```text\n/partyleave\n```"
+)
 
 
 @app_commands.command(name="ㅁ", description="자주 쓰는 메이플 문구를 복사하기 쉽게 보여줍니다.")
@@ -2937,13 +2959,21 @@ async def help_command(interaction: discord.Interaction) -> None:
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def quick_copy_command(interaction: discord.Interaction) -> None:
     """각 문구에 Discord의 코드 블록 복사 버튼이 따로 생기게 표시합니다."""
-    await interaction.response.send_message(
-        "```text\nSacred Symbol/claim\n```\n"
-        "```text\nArcane Symbol/claim\n```\n"
-        "```text\nSol Erda Fragment\n```\n"
-        "```text\n/partyleave\n```",
-        ephemeral=True,
-    )
+    await interaction.response.send_message(QUICK_COPY_TEXT, ephemeral=True)
+
+
+@app_commands.command(name="심볼", description="자주 쓰는 메이플 문구를 복사하기 쉽게 보여줍니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def quick_copy_symbol_command(interaction: discord.Interaction) -> None:
+    """`/ㅁ`과 같은 문구를 한글 명령어로 표시합니다."""
+    await interaction.response.send_message(QUICK_COPY_TEXT, ephemeral=True)
+
+
+@commands.command(name="심볼")
+async def quick_copy_symbol_prefix_command(context: commands.Context) -> None:
+    """메시지 명령어 `!심볼`에서도 같은 문구를 표시합니다."""
+    await context.send(QUICK_COPY_TEXT)
 
 
 def record_command_usage(
@@ -3739,9 +3769,8 @@ async def ranking_command(
     if achievement is not None:
         character["achievementScore"] = achievement["score"]
         character["achievementRank"] = achievement["rank"]
-    gains = interaction.client.ranking_store.save_snapshot(
-        character, current_ranking_scan_date()
-    )
+    scan_date = current_ranking_scan_date()
+    gains = interaction.client.ranking_store.save_snapshot(character, scan_date)
     refresh_requests = getattr(client, "_ranking_profile_refresh_requests", set())
     refresh_key = character["characterName"].casefold()
     if refresh_key in refresh_requests:
@@ -3762,6 +3791,7 @@ async def ranking_command(
         achievement,
         world_total_count,
         character_image,
+        updated_date=scan_date,
         **populations,
     )
     filename = "ranking-card.png"
@@ -4229,7 +4259,9 @@ def save_state(
 
 class MapleNewsBot(commands.Bot):
     def __init__(self, channel_id: int) -> None:
-        super().__init__(command_prefix="!", intents=discord.Intents.default())
+        intents = discord.Intents.default()
+        intents.message_content = True
+        super().__init__(command_prefix="!", intents=intents)
         stored_sunny_channel_id = os.getenv("SUNNY_SUNDAY_CHANNEL_ID")
         sunny_channel_id = (
             int(stored_sunny_channel_id) if stored_sunny_channel_id else channel_id
@@ -4283,6 +4315,7 @@ class MapleNewsBot(commands.Bot):
         for command in (
             help_command,
             quick_copy_command,
+            quick_copy_symbol_command,
             command_stats_command,
             seed_ring_command,
             hexa_command,
@@ -4323,6 +4356,7 @@ class MapleNewsBot(commands.Bot):
             info_channel_command,
         ):
             self.tree.add_command(command)
+        self.add_command(quick_copy_symbol_prefix_command)
         await self.tree.sync()
         self.persist_state()
 

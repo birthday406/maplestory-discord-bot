@@ -117,6 +117,8 @@ from maple_bot import (
     pssb_cash_item,
     pssb_command,
     quick_copy_command,
+    quick_copy_symbol_command,
+    quick_copy_symbol_prefix_command,
     ranking_command,
     guild_ranking_command,
     guild_ranking_register_command,
@@ -173,15 +175,23 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(allocation, {45: 1})
         self.assertEqual(offset, 0)
 
-    def test_ranking_scan_day_changes_at_0210_kst(self) -> None:
-        kst = maple_bot.INFO_CHANNEL_TIMEZONE
+    def test_ranking_scan_day_uses_utc(self) -> None:
+        pacific = maple_bot.URSUS_TIMEZONE
 
         self.assertEqual(
-            maple_bot.current_ranking_scan_date(datetime(2026, 8, 31, 2, 9, tzinfo=kst)),
+            maple_bot.current_ranking_scan_date(datetime(2026, 8, 29, 17, 9, tzinfo=pacific)),
+            date(2026, 8, 29),
+        )
+        self.assertEqual(
+            maple_bot.current_ranking_scan_date(datetime(2026, 8, 29, 17, 10, tzinfo=pacific)),
             date(2026, 8, 30),
         )
         self.assertEqual(
-            maple_bot.current_ranking_scan_date(datetime(2026, 8, 31, 2, 10, tzinfo=kst)),
+            maple_bot.current_ranking_scan_date(datetime(2026, 8, 30, 17, 9, tzinfo=pacific)),
+            date(2026, 8, 30),
+        )
+        self.assertEqual(
+            maple_bot.current_ranking_scan_date(datetime(2026, 8, 30, 17, 10, tzinfo=pacific)),
             date(2026, 8, 31),
         )
 
@@ -1243,6 +1253,16 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(gains, [{"date": "2026-08-16", "exp": 150}])
 
+    def test_snapshot_repairs_a_future_dated_record(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(self.character(exp=100), date(2026, 8, 29))
+            store.save_snapshot(self.character(exp=100), date(2026, 8, 30))
+            store.save_snapshot(self.character(exp=200), date(2026, 8, 31))
+            gains = store.save_snapshot(self.character(exp=200), date(2026, 8, 30))
+
+        self.assertEqual(gains, [{"date": "2026-08-30", "exp": 100}])
+
     def test_default_character_is_saved_per_discord_user(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = RankingStore(Path(directory) / "ranking.db")
@@ -1426,11 +1446,12 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             legion={"legionLevel": 10221, "rank": 2923},
             achievement={"score": 33370, "rank": 810},
             world_total_count=1_000_000,
+            updated_date=date(2026, 8, 30),
         )
 
         with Image.open(result) as image:
             self.assertEqual(image.format, "PNG")
-            self.assertEqual(image.size, (1800, 1480))
+            self.assertEqual(image.size, (1800, 1528))
             self.assertEqual(image.getpixel((0, 0)), (32, 40, 48))
 
     def test_history_graph_ignores_faint_character_image_padding(self) -> None:
@@ -3334,6 +3355,7 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/랭킹", field_text)
         self.assertIn("/시드링", field_text)
         self.assertIn("/ㅁ", field_text)
+        self.assertIn("/심볼", field_text)
         self.assertNotIn("/공지알림", field_text)
 
     async def test_quick_copy_shows_four_separate_code_blocks(self) -> None:
@@ -3351,6 +3373,20 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Arcane Symbol/claim", message)
         self.assertIn("Sol Erda Fragment", message)
         self.assertIn("/partyleave", message)
+
+    async def test_quick_copy_aliases_show_the_same_message(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+        context = SimpleNamespace(send=AsyncMock())
+
+        await quick_copy_symbol_command.callback(interaction)
+        await quick_copy_symbol_prefix_command.callback(context)
+
+        slash_message = interaction.response.send_message.await_args.args[0]
+        prefix_message = context.send.await_args.args[0]
+        self.assertEqual(slash_message, prefix_message)
+        self.assertEqual(slash_message.count("```text"), 4)
 
 
 class CommandStatsTests(unittest.IsolatedAsyncioTestCase):
@@ -3469,6 +3505,7 @@ class AppearanceSearchTests(unittest.IsolatedAsyncioTestCase):
                 add_command=Mock(),
                 sync=AsyncMock(),
             ),
+            add_command=Mock(),
             persist_state=Mock(),
         )
 
@@ -3476,6 +3513,8 @@ class AppearanceSearchTests(unittest.IsolatedAsyncioTestCase):
             await maple_bot.MapleNewsBot.setup_hook(bot)
 
         bot.tree.add_command.assert_any_call(appearance_search_command)
+        bot.tree.add_command.assert_any_call(quick_copy_symbol_command)
+        bot.add_command.assert_called_once_with(quick_copy_symbol_prefix_command)
 
     def test_search_filters_hair_and_face(self) -> None:
         hair = search_cash_items("30000", category="Hair", limit=1)
