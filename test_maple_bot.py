@@ -206,6 +206,15 @@ class NewsFilteringTests(unittest.TestCase):
 
         asyncio.run(run())
 
+    def test_ranking_collection_yields_to_interactive_lookup(self) -> None:
+        async def run() -> None:
+            bot = object.__new__(MapleNewsBot)
+            bot._ranking_interactive_requests = 1
+
+            await MapleNewsBot.collect_rankings.coro(bot)
+
+        asyncio.run(run())
+
     def test_pssb_rates_keep_gender_pair_in_one_reward_slot(self) -> None:
         source = """
         <table><tbody>

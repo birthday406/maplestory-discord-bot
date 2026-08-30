@@ -1599,8 +1599,6 @@ def create_ranking_history_image(
             heading,
             font=korean_small_font,
             fill="#E6EEF4",
-            stroke_width=1 * scale,
-            stroke_fill="#E6EEF4",
         )
         draw.text(
             ((left + 16) * scale, 247 * scale),
@@ -3579,18 +3577,20 @@ async def ranking_command(
         return
 
     await interaction.response.defer()
+    client = interaction.client
+    client._ranking_interactive_requests = (
+        getattr(client, "_ranking_interactive_requests", 0) + 1
+    )
     try:
-        (
-            character,
-            world_character,
-            world_total_count,
-            legion,
-            achievement,
-            character_image,
-        ) = await fetch_cached_ranking_profile(
-            interaction.client,
-            nickname,
-        )
+        async with asyncio.timeout(45):
+            (
+                character,
+                world_character,
+                world_total_count,
+                legion,
+                achievement,
+                character_image,
+            ) = await fetch_cached_ranking_profile(client, nickname)
         if character is None:
             await interaction.followup.send(
                 f"**{discord.utils.escape_markdown(nickname)}** 캐릭터를 찾지 못했습니다.",
@@ -3615,6 +3615,8 @@ async def ranking_command(
             ephemeral=True,
         )
         return
+    finally:
+        client._ranking_interactive_requests -= 1
 
     # 서버 랭킹과 메창력도 같은 최신 조회값을 쓰도록 캐릭터 기록에 함께 저장합니다.
     if legion is not None:
@@ -4131,6 +4133,7 @@ class MapleNewsBot(commands.Bot):
         ) = self.ranking_store.get_collector_backoff()
         self._ranking_request_lock = asyncio.Lock()
         self._next_ranking_request_at = 0.0
+        self._ranking_interactive_requests = 0
         self._ranking_profile_cache: dict[str, tuple[float, tuple]] = {}
         self.familiar_expectation_store = FamiliarExpectationStore(FAMILIAR_DB_PATH)
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
@@ -5316,6 +5319,8 @@ class MapleNewsBot(commands.Bot):
     @tasks.loop(seconds=RANKING_SCAN_INTERVAL_SECONDS)
     async def collect_rankings(self) -> None:
         """북미 주요 월드의 상위 랭킹을 번갈아 초당 10명씩 수집합니다."""
+        if getattr(self, "_ranking_interactive_requests", 0):
+            return
         now_timestamp = int(datetime.now(timezone.utc).timestamp())
         if now_timestamp < self._ranking_retry_until:
             return
