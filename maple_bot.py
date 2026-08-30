@@ -1448,7 +1448,7 @@ def create_ranking_history_image(
         try:
             with Image.open(io.BytesIO(character_image)) as source:
                 avatar = source.convert("RGBA")
-                visible_area = avatar.getbbox()
+                visible_area = avatar.getchannel("A").getbbox()
                 if visible_area:
                     avatar = avatar.crop(visible_area)
                 avatar.thumbnail((116 * scale, 126 * scale), Image.Resampling.LANCZOS)
