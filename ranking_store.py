@@ -532,7 +532,7 @@ class RankingStore:
         )
         if character["level"] >= MIN_TRACKED_LEVEL:
             self.prioritize_character(character["characterName"], scan_date)
-        return self.get_gains(character["characterName"])
+        return self.get_gains(character["characterName"], limit=30)
 
     def finish_scan(self, scan_date: date, world_id: int = KRONOS_WORLD_ID) -> None:
         with self._connect() as connection:
@@ -546,7 +546,7 @@ class RankingStore:
             )
 
     def get_gains(self, character_name: str, limit: int = 14) -> list[dict]:
-        """최근 15개 기록을 비교해 날짜별 경험치 증가량을 반환합니다."""
+        """최근 15개 일별 기록을 비교해 최대 14일치 경험치 증가량을 반환합니다."""
         with self._connect() as connection:
             rows = connection.execute(
                 """

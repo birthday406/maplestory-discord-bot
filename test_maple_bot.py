@@ -1024,18 +1024,9 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                 ("na", "achievement", 45, "Home"),
             ],
         )
-        self.assertEqual(
-            interaction.followup.send.await_args.kwargs["embed"].title, "Home"
-        )
-        self.assertEqual(
-            interaction.followup.send.await_args.kwargs["embed"].image.url,
-            "attachment://ranking-history.png",
-        )
-        fields = {
-            field.name: field.value
-            for field in interaction.followup.send.await_args.kwargs["embed"].fields
-        }
-        self.assertEqual(fields["업적 점수"], "33,370")
+        sent = interaction.followup.send.await_args.kwargs
+        self.assertNotIn("embed", sent)
+        self.assertEqual(sent["file"].filename, "ranking-card.png")
         self.assertEqual(
             client.ranking_store.save_snapshot.call_args.args[0]["achievementScore"],
             33370,
@@ -1238,16 +1229,37 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
 
     def test_history_graph_is_rendered_as_png(self) -> None:
         result = create_ranking_history_image(
-            "Home",
+            self.character(),
             [
                 {"date": "2026-08-15", "exp": 1_200_000_000_000},
                 {"date": "2026-08-16", "exp": 2_500_000_000_000},
             ],
+            world_rank=1309,
+            legion={"legionLevel": 10221, "rank": 2923},
+            achievement={"score": 33370, "rank": 810},
+            world_total_count=1_000_000,
         )
 
         with Image.open(result) as image:
             self.assertEqual(image.format, "PNG")
-            self.assertEqual(image.size, (900, 360))
+            self.assertEqual(image.size, (900, 740))
+            self.assertEqual(image.getpixel((0, 0)), (32, 40, 48))
+
+    def test_exp_summary_uses_requested_recent_period(self) -> None:
+        gains = [{"exp": value} for value in range(1, 31)]
+
+        self.assertEqual(maple_bot.summarize_exp_gains(gains, 7), (27, 189))
+        self.assertEqual(maple_bot.summarize_exp_gains(gains, 30), (16, 465))
+
+    def test_history_graph_axis_uses_readable_t_steps(self) -> None:
+        self.assertEqual(
+            maple_bot.ranking_axis_scale(15_600_000_000_000),
+            (2_000_000_000_000, 16_000_000_000_000),
+        )
+        self.assertEqual(
+            maple_bot.ranking_axis_scale(86_360_000_000_000),
+            (10_000_000_000_000, 90_000_000_000_000),
+        )
 
     async def test_missing_character_returns_short_private_message(self) -> None:
         interaction = SimpleNamespace(
@@ -3680,6 +3692,11 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ChannelRecommendationTests(unittest.IsolatedAsyncioTestCase):
+    def test_vocative_suffix_uses_final_hangul_batchim(self) -> None:
+        self.assertEqual(maple_bot.korean_vocative_suffix("슈빈"), "아")
+        self.assertEqual(maple_bot.korean_vocative_suffix("슈비"), "야")
+        self.assertEqual(maple_bot.korean_vocative_suffix("슈비✨"), "야")
+
     async def test_command_uses_display_name_and_channel_between_1_and_40(self) -> None:
         interaction = SimpleNamespace(
             user=SimpleNamespace(display_name="류*게이"),
@@ -3703,3 +3720,5 @@ class ChannelRecommendationTests(unittest.IsolatedAsyncioTestCase):
 
     def test_twenty_messages_are_available(self) -> None:
         self.assertEqual(len(maple_bot.CHANNEL_RECOMMEND_MESSAGES), 20)
+        for template in maple_bot.CHANNEL_RECOMMEND_MESSAGES:
+            template.format(display_name="슈빈", vocative="아", channel_number=27)

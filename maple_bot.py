@@ -1369,82 +1369,306 @@ def compact_exp(value: int) -> str:
     return str(value)
 
 
-def create_ranking_history_image(character_name: str, gains: list[dict]) -> io.BytesIO:
-    """최근 경험치 변화량을 보라색 영역 그래프 PNG로 만듭니다."""
+def ranking_axis_scale(maximum: int) -> tuple[int, int]:
+    """경험치 그래프에 약 8칸이 보이도록 보기 좋은 눈금과 상한을 계산합니다."""
+    raw_step = max(maximum, 1) / 8
+    magnitude = 10 ** math.floor(math.log10(raw_step))
+    candidates = [max(1, round(unit * magnitude)) for unit in (1, 2, 5, 10)]
+    step = min(candidates, key=lambda value: abs(math.ceil(maximum / value) - 8))
+    return step, math.ceil(maximum / step) * step
+
+
+def summarize_exp_gains(gains: list[dict], period: int) -> tuple[int, int]:
+    """최근 기간의 일평균과 누적 획득 경험치를 반환합니다."""
+    recent = gains[-period:]
+    total = sum(item["exp"] for item in recent)
+    return (round(total / len(recent)) if recent else 0), total
+
+
+def create_ranking_history_image(
+    character: dict,
+    gains: list[dict],
+    world_rank: int | None = None,
+    legion: dict | None = None,
+    achievement: dict | None = None,
+    world_total_count: int | None = None,
+    character_image: bytes | None = None,
+) -> io.BytesIO:
+    """캐릭터 랭킹 정보와 최근 경험치 변화량을 한 장의 PNG로 만듭니다."""
     scale = 2
-    width, height = 900, 360
-    image = Image.new("RGB", (width * scale, height * scale), "#111827")
+    width, height = 900, 740
+    image = Image.new("RGB", (width * scale, height * scale), "#202830")
     draw = ImageDraw.Draw(image, "RGBA")
     font_path = str(FAMILIAR_ASSET_PATHS["font"])
-    title_font = ImageFont.truetype(font_path, 25 * scale)
+    title_font = ImageFont.truetype(font_path, 28 * scale)
+    score_font = ImageFont.truetype(font_path, 20 * scale)
     body_font = ImageFont.truetype(font_path, 15 * scale)
+    value_font = ImageFont.truetype(font_path, 13 * scale)
     small_font = ImageFont.truetype(font_path, 12 * scale)
 
     draw.rounded_rectangle(
         (16 * scale, 16 * scale, (width - 16) * scale, (height - 16) * scale),
         radius=20 * scale,
-        fill="#17122B",
-        outline="#8B5CF6",
+        fill="#29333E",
+        outline="#405361",
         width=2 * scale,
     )
-    draw.text((42 * scale, 34 * scale), character_name, font=title_font, fill="#F5F3FF")
-    draw.text(
-        (42 * scale, 72 * scale),
-        "최근 경험치 변화 · 공식 랭킹 수집 기록",
-        font=body_font,
-        fill="#A78BFA",
+
+    character_name = character["characterName"]
+    level = character["level"]
+    current_exp = character.get("exp", 0)
+    world = RANKING_WORLDS.get(character["worldID"], f"월드 ID {character['worldID']}")
+    level_progress = 0.0
+    if 200 <= level < 300:
+        level_progress = min(
+            1.0,
+            float(Decimal(current_exp) / Decimal(LEVEL_EXP[level - 200])),
+        )
+    level_text = f"Lv. {level}"
+    score, title = maple_addict_power(
+        {
+            "level": level,
+            "exp": current_exp,
+            "ranking": character["rank"],
+            "legion_level": legion.get("legionLevel") if legion else None,
+            "legion_rank": legion.get("rank") if legion else None,
+            "achievement_score": achievement.get("score") if achievement else None,
+            "achievement_rank": achievement.get("rank") if achievement else None,
+        }
     )
 
-    if not gains:
+    draw.rounded_rectangle(
+        (42 * scale, 42 * scale, 166 * scale, 176 * scale),
+        radius=14 * scale,
+        fill="#202830",
+        outline="#405361",
+        width=2 * scale,
+    )
+    if character_image:
+        try:
+            with Image.open(io.BytesIO(character_image)) as source:
+                avatar = source.convert("RGBA")
+                visible_area = avatar.getbbox()
+                if visible_area:
+                    avatar = avatar.crop(visible_area)
+                avatar.thumbnail((116 * scale, 126 * scale), Image.Resampling.LANCZOS)
+                avatar_x = (104 * scale) - avatar.width // 2
+                avatar_y = (109 * scale) - avatar.height // 2
+                image.paste(avatar, (avatar_x, avatar_y), avatar)
+        except (OSError, ValueError):
+            logging.warning("Failed to render ranking character image for %s.", character_name)
+
+    draw.text((190 * scale, 42 * scale), character_name, font=title_font, fill="#E6FF00")
+    draw.text(
+        (190 * scale, 84 * scale),
+        f"{level_text}  ·  {character['jobName']}  ·  {world}",
+        font=body_font,
+        fill="#EEF4F8",
+    )
+    draw.rounded_rectangle(
+        (190 * scale, 108 * scale, 820 * scale, 136 * scale),
+        radius=8 * scale,
+        fill="#1A222B",
+    )
+    draw.rounded_rectangle(
+        (190 * scale, 108 * scale, (190 + 630 * level_progress) * scale, 136 * scale),
+        radius=8 * scale,
+        fill="#6EB6D9",
+    )
+    if 200 <= level < 300:
+        progress_text = (
+            f"{level_progress * 100:.3f}%  "
+            f"({compact_exp(current_exp)} / {compact_exp(LEVEL_EXP[level - 200])})"
+        )
         draw.text(
-            (width * scale // 2, 196 * scale),
+            (505 * scale, 122 * scale),
+            progress_text,
+            font=value_font,
+            fill="#F8FBFD",
+            anchor="mm",
+            stroke_width=2 * scale,
+            stroke_fill="#202830",
+        )
+    draw.rounded_rectangle(
+        (190 * scale, 148 * scale, 548 * scale, 184 * scale),
+        radius=10 * scale,
+        fill="#34404D",
+        outline="#526878",
+        width=1 * scale,
+    )
+    draw.text(
+        (207 * scale, 159 * scale),
+        "메창력",
+        font=value_font,
+        fill="#9FB0BE",
+    )
+    draw.text(
+        (267 * scale, 154 * scale),
+        f"{score:.2f}",
+        font=score_font,
+        fill="#E6FF00",
+    )
+    draw.line(
+        (345 * scale, 157 * scale, 345 * scale, 176 * scale),
+        fill="#526878",
+        width=1 * scale,
+    )
+    draw.text(
+        (362 * scale, 159 * scale),
+        "칭호",
+        font=value_font,
+        fill="#9FB0BE",
+    )
+    draw.text(
+        (407 * scale, 159 * scale),
+        title,
+        font=value_font,
+        fill="#EEF4F8",
+    )
+
+    world_rank_text = f"{world_rank:,}위" if world_rank is not None else "확인 불가"
+    if world_rank is not None and world_total_count:
+        top_percent = Decimal(world_rank) * 100 / Decimal(world_total_count)
+        world_rank_text += f" · 상위 {top_percent:.4f}%"
+    stats = (
+        ("전체 랭킹", f"{character['rank']:,}위", f"{world} {world_rank_text}"),
+        (
+            "유니온",
+            f"Lv. {legion['legionLevel']:,}" if legion else "확인 불가",
+            f"{legion['rank']:,}위" if legion else "순위 확인 불가",
+        ),
+        (
+            "업적",
+            f"{achievement['score']:,}점" if achievement else "확인 불가",
+            f"{achievement['rank']:,}위" if achievement else "순위 확인 불가",
+        ),
+    )
+    for index, (heading, main_value, detail) in enumerate(stats):
+        left = 42 + index * 262
+        draw.rounded_rectangle(
+            (left * scale, 210 * scale, (left + 246) * scale, 304 * scale),
+            radius=12 * scale,
+            fill="#34404D",
+        )
+        draw.text(
+            ((left + 16) * scale, 224 * scale),
+            heading,
+            font=small_font,
+            fill="#7FA3BD",
+        )
+        draw.text(
+            ((left + 16) * scale, 247 * scale),
+            main_value,
+            font=score_font,
+            fill="#EEF4F8",
+        )
+        draw.text(
+            ((left + 16) * scale, 279 * scale),
+            detail,
+            font=small_font,
+            fill="#A8B5C0",
+        )
+
+    draw.rounded_rectangle(
+        (42 * scale, 324 * scale, 858 * scale, 420 * scale),
+        radius=12 * scale,
+        fill="#34404D",
+    )
+    draw.line(
+        (450 * scale, 340 * scale, 450 * scale, 404 * scale),
+        fill="#526878",
+        width=1 * scale,
+    )
+    summary_colors = ("#E6FF00", "#6EB6D9", "#EEF4F8")
+    for section, heading in enumerate(("일평균 획득 경험치", "누적 획득 경험치")):
+        section_left = 58 + section * 408
+        draw.text(
+            (section_left * scale, 338 * scale),
+            heading,
+            font=body_font,
+            fill="#EEF4F8",
+        )
+        for index, period in enumerate((7, 14, 30)):
+            average, total = summarize_exp_gains(gains, period)
+            value = average if section == 0 else total
+            display_value = compact_exp(value) if gains else "-"
+            value_x = section_left + index * 122
+            draw.text(
+                (value_x * scale, 371 * scale),
+                f"{period}일",
+                font=small_font,
+                fill="#9FB0BE",
+            )
+            draw.text(
+                ((value_x + 32) * scale, 367 * scale),
+                display_value,
+                font=score_font,
+                fill=summary_colors[index],
+            )
+
+    graph_gains = gains[-14:]
+
+    if not graph_gains:
+        draw.text(
+            (width * scale // 2, 545 * scale),
             "첫 기록을 저장했습니다",
             font=title_font,
-            fill="#EDE9FE",
+            fill="#EEF4F8",
             anchor="mm",
         )
         draw.text(
-            (width * scale // 2, 235 * scale),
+            (width * scale // 2, 585 * scale),
             "다음 날짜의 수집 기록부터 경험치 변화가 표시됩니다",
             font=body_font,
-            fill="#9CA3AF",
+            fill="#9FB0BE",
             anchor="mm",
         )
     else:
-        left, top, right, bottom = 70, 115, 850, 300
-        maximum = max(item["exp"] for item in gains) or 1
-        for index in range(5):
-            y = top + (bottom - top) * index / 4
+        left, top, right, bottom = 82, 470, 850, 680
+        maximum = max(item["exp"] for item in graph_gains) or 1
+        tick_step, axis_maximum = ranking_axis_scale(maximum)
+        tick_count = axis_maximum // tick_step
+        for index in range(tick_count + 1):
+            value = axis_maximum - tick_step * index
+            y = top + (bottom - top) * index / tick_count
             draw.line(
                 (left * scale, y * scale, right * scale, y * scale),
-                fill="#312E4D",
+                fill="#3A4857",
                 width=1 * scale,
             )
+            draw.text(
+                ((left - 10) * scale, y * scale),
+                compact_exp(value),
+                font=small_font,
+                fill="#A8B5C0",
+                anchor="rm",
+            )
 
-        if len(gains) == 1:
-            x_positions = [(left + right) / 2]
+        plot_left, plot_right = left + 24, right - 24
+        if len(graph_gains) == 1:
+            x_positions = [(plot_left + plot_right) / 2]
         else:
             x_positions = [
-                left + (right - left) * index / (len(gains) - 1)
-                for index in range(len(gains))
+                plot_left + (plot_right - plot_left) * index / (len(graph_gains) - 1)
+                for index in range(len(graph_gains))
             ]
         points = [
-            (x, bottom - (bottom - top) * item["exp"] / maximum)
-            for x, item in zip(x_positions, gains)
+            (x, bottom - (bottom - top) * item["exp"] / axis_maximum)
+            for x, item in zip(x_positions, graph_gains)
         ]
-        area = [(left, bottom), *points, (right, bottom)]
+        area = [(plot_left, bottom), *points, (plot_right, bottom)]
         draw.polygon(
             [(x * scale, y * scale) for x, y in area],
-            fill=(124, 58, 237, 70),
+            fill=(92, 156, 189, 78),
         )
         if len(points) > 1:
             draw.line(
                 [(x * scale, y * scale) for x, y in points],
-                fill="#A78BFA",
+                fill="#6EB6D9",
                 width=4 * scale,
                 joint="curve",
             )
-        for (x, y), item in zip(points, gains):
+        for (x, y), item in zip(points, graph_gains):
             draw.ellipse(
                 (
                     (x - 6) * scale,
@@ -1452,22 +1676,42 @@ def create_ranking_history_image(character_name: str, gains: list[dict]) -> io.B
                     (x + 6) * scale,
                     (y + 6) * scale,
                 ),
-                fill="#22D3EE",
-                outline="#E0F2FE",
+                fill="#DDFE38",
+                outline="#F6FFC7",
                 width=2 * scale,
             )
+            exp_text = compact_exp(item["exp"])
+            exp_position = (x * scale, (y - 16) * scale)
+            exp_box = draw.textbbox(
+                exp_position,
+                exp_text,
+                font=value_font,
+                anchor="ms",
+            )
+            draw.rounded_rectangle(
+                (
+                    exp_box[0] - 5 * scale,
+                    exp_box[1] - 3 * scale,
+                    exp_box[2] + 5 * scale,
+                    exp_box[3] + 3 * scale,
+                ),
+                radius=5 * scale,
+                fill="#1A222B",
+                outline="#526878",
+                width=1 * scale,
+            )
             draw.text(
-                (x * scale, (y - 14) * scale),
-                compact_exp(item["exp"]),
-                font=small_font,
-                fill="#F5F3FF",
+                exp_position,
+                exp_text,
+                font=value_font,
+                fill="#F8FBFD",
                 anchor="ms",
             )
             draw.text(
                 (x * scale, (bottom + 14) * scale),
                 item["date"][5:].replace("-", "/"),
                 font=small_font,
-                fill="#9CA3AF",
+                fill="#A8B5C0",
                 anchor="ma",
             )
 
@@ -2318,28 +2562,37 @@ async def appearance_search_autocomplete(
     return choices
 
 
+def korean_vocative_suffix(name: str) -> str:
+    """닉네임의 마지막 한글 음절에 받침이 있으면 '아', 없으면 '야'를 반환합니다."""
+    for character in reversed(name.strip()):
+        code = ord(character)
+        if 0xAC00 <= code <= 0xD7A3:
+            return "아" if (code - 0xAC00) % 28 else "야"
+    return "야"
+
+
 CHANNEL_RECOMMEND_MESSAGES = (
-    "헐 **{display_name}**야 오늘도 많이 힘들었구나 어떡해 ㅠㅠ\n"
+    "헐 **{display_name}**{vocative} 오늘도 많이 힘들었구나 어떡해 ㅠㅠ\n"
     "불쌍하니까 **광휘나 칠흑 잘 뜨는 채널** 점지해줄게 ✨\n\n"
     "오늘의 추천 채널은 바로\n**[ {channel_number}채널 ]** 이야\n\n"
     "광휘나 칠흑 꼭 먹고 나 보스 캐리해줘야 돼 ㅋㅋ",
-    "어이구 **{display_name}**야 오늘도 보스한테 탈탈 털렸구나 ㅠㅠ\n"
+    "어이구 **{display_name}**{vocative} 오늘도 보스한테 탈탈 털렸구나 ㅠㅠ\n"
     "내가 특별히 **대박 터지는 채널** 하나 골라줄게 🍀\n\n"
     "오늘은\n**[ {channel_number}채널 ]** 로 가봐\n\n"
     "여기서 칠흑 먹으면 내 덕인 거 알지? ㅋㅋ",
-    "**{display_name}**야 잠깐만... 지금 신호가 왔어 🔮\n"
+    "**{display_name}**{vocative} 잠깐만... 지금 신호가 왔어 🔮\n"
     "오늘 광휘 먹을 수 있는 채널이 딱 하나 보인다\n\n"
     "바로\n**[ {channel_number}채널 ]** 이야\n\n"
     "의심하지 말고 들어가서 보스부터 잡아봐 ㅋㅋ",
-    "헉 **{display_name}**야 오늘 운이 심상치 않은데? ✨\n"
+    "헉 **{display_name}**{vocative} 오늘 운이 심상치 않은데? ✨\n"
     "느낌 좋은 채널을 내가 직접 점지해줄게\n\n"
     "행운의 채널은\n**[ {channel_number}채널 ]** 이야\n\n"
     "오늘 칠흑 뜨면 자랑하러 와야 돼 ㅋㅋ",
-    "**{display_name}**야 요즘 보상이 너무 짜지 ㅠㅠ\n"
+    "**{display_name}**{vocative} 요즘 보상이 너무 짜지 ㅠㅠ\n"
     "불쌍해서 오늘만 특별히 **축복받은 채널** 알려줄게 🙏\n\n"
     "**[ {channel_number}채널 ]** 로 가봐\n\n"
     "광휘 하나 먹고 인생 좀 펴보자 ㅋㅋ",
-    "잠깐 **{display_name}**야, 채널 아무 데나 들어가면 안 돼\n"
+    "잠깐 **{display_name}**{vocative}, 채널 아무 데나 들어가면 안 돼\n"
     "오늘은 내가 계산까지 다 해봤거든 🤓\n\n"
     "정답은\n**[ {channel_number}채널 ]** 이야\n\n"
     "여기서 보스 잡으면 뭔가 하나는 뜰 거 같은데? ㅋㅋ",
@@ -2347,31 +2600,31 @@ CHANNEL_RECOMMEND_MESSAGES = (
     "간절한 마음을 담아 행운의 채널을 점지해줄게 ✨\n\n"
     "오늘의 추천 채널은\n**[ {channel_number}채널 ]** 이야\n\n"
     "여기서 꼭 광휘나 칠흑 먹고 행복해져야 돼 ㅋㅋ",
-    "**{display_name}**야 오늘 보스 갈 거지?\n"
+    "**{display_name}**{vocative} 오늘 보스 갈 거지?\n"
     "그냥 가지 말고 내가 골라준 채널에서 잡아봐 😎\n\n"
     "오늘의 대박 채널은\n**[ {channel_number}채널 ]** 이야\n\n"
     "칠흑 뜨면 수수료로 보스 캐리 한 번만 부탁해 ㅋㅋ",
-    "헐 **{display_name}**야 방금 메이플의 기운이 느껴졌어 ⚡\n"
+    "헐 **{display_name}**{vocative} 방금 메이플의 기운이 느껴졌어 ⚡\n"
     "오늘 유난히 보상이 잘 뜨는 채널이 있대\n\n"
     "그 채널은 바로\n**[ {channel_number}채널 ]** 이야\n\n"
     "늦기 전에 들어가서 광휘부터 챙겨 ㅋㅋ",
-    "**{display_name}**야 오늘도 빈손으로 나오면 너무 슬프잖아 ㅠㅠ\n"
+    "**{display_name}**{vocative} 오늘도 빈손으로 나오면 너무 슬프잖아 ㅠㅠ\n"
     "그래서 내가 진짜 열심히 골라봤어\n\n"
     "오늘의 행운 채널은\n**[ {channel_number}채널 ]** 이야 🍀\n\n"
     "제발 뭐라도 하나 먹고 웃으면서 돌아와 ㅋㅋ",
-    "쉿 **{display_name}**야, 이건 너한테만 알려주는 비밀인데 🤫\n"
+    "쉿 **{display_name}**{vocative}, 이건 너한테만 알려주는 비밀인데 🤫\n"
     "오늘 보상이 몰려 있는 채널을 찾았어\n\n"
     "바로\n**[ {channel_number}채널 ]** 이야\n\n"
     "사람들 몰리기 전에 빨리 가서 칠흑 챙겨 ㅋㅋ",
-    "**{display_name}**야 오늘은 왠지 될 것 같아\n"
+    "**{display_name}**{vocative} 오늘은 왠지 될 것 같아\n"
     "내가 보기엔 광휘가 너 기다리고 있거든 ✨\n\n"
     "광휘가 숨어 있는 곳은\n**[ {channel_number}채널 ]** 이야\n\n"
     "잡고 나서 아무것도 안 뜨면... 한 번만 더 믿어줘 ㅋㅋ",
-    "아이고 **{display_name}**야 그동안 고생 많았다 ㅠㅠ\n"
+    "아이고 **{display_name}**{vocative} 그동안 고생 많았다 ㅠㅠ\n"
     "오늘은 보상 하나쯤 먹을 때도 됐잖아\n\n"
     "내가 골라준 채널은\n**[ {channel_number}채널 ]** 이야\n\n"
     "오늘 여기서 칠흑 먹고 졸업하자 ㅋㅋ",
-    "**{display_name}**야 채널 선택부터가 보스 공략인 거 몰랐어?\n"
+    "**{display_name}**{vocative} 채널 선택부터가 보스 공략인 거 몰랐어?\n"
     "아무 데나 들어가지 말고 내 말을 믿어봐 😏\n\n"
     "오늘의 정답은\n**[ {channel_number}채널 ]** 이야\n\n"
     "광휘 뜨면 역시 내 선택이었다고 인정해줘 ㅋㅋ",
@@ -2379,23 +2632,23 @@ CHANNEL_RECOMMEND_MESSAGES = (
     "**{display_name}**를 위한 오늘의 행운 채널을 발표합니다\n\n"
     "결과는 바로\n**[ {channel_number}채널 ]** 입니다 ✨\n\n"
     "오늘은 진짜 칠흑 하나 먹을 수 있을 것 같은데? ㅋㅋ",
-    "**{display_name}**야 오늘 운세 확인해봤는데 대박이래 🔮\n"
+    "**{display_name}**{vocative} 오늘 운세 확인해봤는데 대박이래 🔮\n"
     "특히 이 채널에서 보스를 잡으면 뭔가 뜬다는데?\n\n"
     "추천 채널은\n**[ {channel_number}채널 ]** 이야\n\n"
     "광휘 먹고 나한테 큰절 한 번 하면 돼 ㅋㅋ",
-    "헐 **{display_name}**야 아직도 채널 못 정했어?\n"
+    "헐 **{display_name}**{vocative} 아직도 채널 못 정했어?\n"
     "그런 건 고민할 필요 없이 나한테 맡기면 되지 😌\n\n"
     "오늘은\n**[ {channel_number}채널 ]** 로 가\n\n"
     "칠흑 먹을 준비하고 보스부터 잡아버려 ㅋㅋ",
-    "**{display_name}**야 오늘은 내가 느낌이 진짜 좋아\n"
+    "**{display_name}**{vocative} 오늘은 내가 느낌이 진짜 좋아\n"
     "이 채널에서 보스 잡으면 빈손으로 나오진 않을 것 같아 ✨\n\n"
     "그곳은 바로\n**[ {channel_number}채널 ]** 이야\n\n"
     "광휘든 칠흑이든 하나만 딱 먹고 오자 ㅋㅋ",
-    "어라 **{display_name}**야? 네 이름 옆에 행운의 숫자가 보이는데? 👀\n"
+    "어라 **{display_name}**{vocative}? 네 이름 옆에 행운의 숫자가 보이는데? 👀\n"
     "아무래도 오늘 갈 채널이 정해진 것 같아\n\n"
     "행운의 숫자는\n**[ {channel_number}채널 ]** 이야\n\n"
     "여기서 대박 터뜨리고 자랑하러 와 ㅋㅋ",
-    "**{display_name}**야 오늘의 메이플 신탁이 내려왔어 🙏\n"
+    "**{display_name}**{vocative} 오늘의 메이플 신탁이 내려왔어 🙏\n"
     "광휘와 칠흑의 기운이 한 채널에 모이고 있대\n\n"
     "신탁이 가리킨 곳은\n**[ {channel_number}채널 ]** 이야\n\n"
     "오늘 꼭 득템하고 나 보스 캐리해줘야 돼 ㅋㅋ",
@@ -2755,13 +3008,15 @@ async def traffic_light_command(
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def channel_recommend_command(interaction: discord.Interaction) -> None:
     # Discord 닉네임에 마크다운 문자가 있어도 메시지 모양이 깨지지 않게 처리합니다.
-    display_name = discord.utils.escape_markdown(interaction.user.display_name)
+    raw_display_name = interaction.user.display_name
+    display_name = discord.utils.escape_markdown(raw_display_name)
     # 메이플스토리 게임 채널 1번부터 40번까지 중 하나를 같은 확률로 선택합니다.
     channel_number = random.randint(1, 40)
 
     # 위의 문구 20개 중 하나를 같은 확률로 고른 뒤 닉네임과 채널 번호를 채웁니다.
     message = random.choice(CHANNEL_RECOMMEND_MESSAGES).format(
         display_name=display_name,
+        vocative=korean_vocative_suffix(raw_display_name),
         channel_number=channel_number,
     )
     await interaction.response.send_message(message)
@@ -3271,19 +3526,24 @@ async def ranking_command(
     gains = interaction.client.ranking_store.save_snapshot(
         character, datetime.now(URSUS_TIMEZONE).date()
     )
-    embed = build_ranking_embed(
-        character,
-        world_character["rank"] if world_character is not None else None,
-        legion,
-        achievement,
-        world_character.get("totalCount") if world_character is not None else None,
+    fetch_character_image = getattr(interaction.client, "fetch_character_image", None)
+    character_image = (
+        await fetch_character_image(character.get("characterImgURL"))
+        if fetch_character_image is not None
+        else None
     )
-    filename = "ranking-history.png"
-    embed.set_image(url=f"attachment://{filename}")
+    filename = "ranking-card.png"
     await interaction.followup.send(
-        embed=embed,
         file=discord.File(
-            create_ranking_history_image(character["characterName"], gains),
+            create_ranking_history_image(
+                character,
+                gains,
+                world_character["rank"] if world_character is not None else None,
+                legion,
+                achievement,
+                world_character.get("totalCount") if world_character is not None else None,
+                character_image,
+            ),
             filename=filename,
         ),
     )
@@ -3930,6 +4190,21 @@ class MapleNewsBot(commands.Bot):
             rate_limit_target,
         )
         return find_ranking_character(payload, nickname)
+
+    async def fetch_character_image(self, url: str | None) -> bytes | None:
+        """공식 캐릭터 이미지를 카드에 넣되 실패해도 랭킹 조회는 유지합니다."""
+        if not url or self.session is None:
+            return None
+        try:
+            async with self.session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                response.raise_for_status()
+                return await response.read()
+        except (aiohttp.ClientError, TimeoutError):
+            logging.warning("Failed to download ranking character image: %s", url)
+            return None
 
     async def fetch_ranking_page(self, world_id: int, page_index: int) -> dict:
         """지정한 월드 랭킹 10명을 읽고 API 제한은 수집 루프에 알립니다."""
