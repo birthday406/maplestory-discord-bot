@@ -991,6 +991,17 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         fields = {field.name: field.value for field in embed.fields}
         self.assertEqual(fields["월드 랭킹"], "17위 (상위 0.0017%)")
 
+    def test_embed_does_not_round_first_place_percent_to_zero(self) -> None:
+        embed = build_ranking_embed(
+            self.character(),
+            world_rank=1,
+            legion=None,
+            world_total_count=2_000_000,
+        )
+
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["월드 랭킹"], "1위 (상위 0.0001% 미만)")
+
     def test_embed_hides_percent_when_search_result_count_is_not_world_total(self) -> None:
         embed = build_ranking_embed(
             self.character(),
@@ -1047,7 +1058,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [call.args for call in client.fetch_ranking_character.await_args_list],
             [
-                ("na", "overall", "weekly", "Home"),
+                ("na", "overall", "legendary", "Home"),
                 ("na", "world", 45, "Home"),
                 ("na", "legion", 45, "Home"),
                 ("na", "achievement", 45, "Home"),
@@ -1087,7 +1098,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
         client.fetch_ranking_character.assert_awaited_once_with(
-            "na", "overall", "weekly", "Home"
+            "na", "overall", "legendary", "Home"
         )
         client.ranking_store.save_default_character.assert_not_called()
         client.ranking_store.save_snapshot.assert_not_called()
@@ -1407,7 +1418,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
         bot.fetch_ranking_character.assert_awaited_once_with(
             "na",
             "overall",
-            "weekly",
+            "legendary",
             character["characterName"],
             rate_limit_target=character["characterName"],
         )

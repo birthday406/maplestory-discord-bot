@@ -1390,6 +1390,11 @@ def summarize_exp_gains(gains: list[dict], period: int) -> tuple[int, int]:
     return (round(total / len(recent)) if recent else 0), total
 
 
+def format_top_percent(rank: int, total_count: int) -> str:
+    percent = Decimal(rank) * 100 / Decimal(total_count)
+    return "0.0001% 미만" if percent < Decimal("0.0001") else f"{percent:.4f}%"
+
+
 def create_ranking_history_image(
     character: dict,
     gains: list[dict],
@@ -1562,8 +1567,7 @@ def create_ranking_history_image(
         and world_total_count
         and world_total_count >= world_rank
     ):
-        top_percent = Decimal(world_rank) * 100 / Decimal(world_total_count)
-        world_rank_text += f" · 상위 {top_percent:.4f}%"
+        world_rank_text += f" · 상위 {format_top_percent(world_rank, world_total_count)}"
     stats = (
         ("전체 랭킹", f"{character['rank']:,}위", f"{world} {world_rank_text}"),
         (
@@ -1786,8 +1790,7 @@ def build_ranking_embed(
         and world_total_count
         and world_total_count >= world_rank
     ):
-        top_percent = Decimal(world_rank) * 100 / Decimal(world_total_count)
-        world_rank_text += f" (상위 {top_percent:.4f}%)"
+        world_rank_text += f" (상위 {format_top_percent(world_rank, world_total_count)})"
     embed.add_field(name="월드 랭킹", value=world_rank_text)
     if legion is not None:
         embed.add_field(name="유니온 레벨", value=f"{legion['legionLevel']:,}")
@@ -3514,7 +3517,7 @@ async def ranking_command(
     await interaction.response.defer()
     try:
         character = await interaction.client.fetch_ranking_character(
-            "na", "overall", "weekly", nickname
+            "na", "overall", "legendary", nickname
         )
         if character is None:
             await interaction.followup.send(
@@ -5276,7 +5279,7 @@ class MapleNewsBot(commands.Bot):
                 character = await self.fetch_ranking_character(
                     "na",
                     "overall",
-                    "weekly",
+                    "legendary",
                     priority_name,
                     rate_limit_target=priority_name,
                 )
