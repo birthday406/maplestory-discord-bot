@@ -101,6 +101,7 @@ RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.
 RANKING_SCAN_INTERVAL_SECONDS = 1
 RANKING_PAGES_PER_BATCH = 1
 RANKING_PROFILE_CACHE_SECONDS = 10 * 60
+RANKING_DAILY_START = timedelta(hours=2, minutes=10)
 RANKING_BACKUP_INTERVAL = timedelta(hours=1)
 RANKING_FORBIDDEN_BACKOFF_STEPS = (5 * 60, 15 * 60, 60 * 60, 6 * 60 * 60)
 RANKING_RATE_LIMIT_BACKOFF_SECONDS = 60
@@ -1397,6 +1398,13 @@ def format_top_percent(rank: int, total_count: int) -> str:
         return "0%"
     percent = Decimal(rank) * 100 / Decimal(total_count)
     return "0.0001%" if percent < Decimal("0.0001") else f"{percent:.4f}%"
+
+
+def current_ranking_scan_date(now: datetime | None = None):
+    current = (now or datetime.now(INFO_CHANNEL_TIMEZONE)).astimezone(
+        INFO_CHANNEL_TIMEZONE
+    )
+    return (current - RANKING_DAILY_START).date()
 
 
 @lru_cache(maxsize=16)
@@ -3626,7 +3634,7 @@ async def ranking_command(
         character["achievementScore"] = achievement["score"]
         character["achievementRank"] = achievement["rank"]
     gains = interaction.client.ranking_store.save_snapshot(
-        character, datetime.now(URSUS_TIMEZONE).date()
+        character, current_ranking_scan_date()
     )
     ranking_image = await asyncio.to_thread(
         create_ranking_history_image,
@@ -5325,7 +5333,7 @@ class MapleNewsBot(commands.Bot):
         if now_timestamp < self._ranking_retry_until:
             return
 
-        scan_date = datetime.now(URSUS_TIMEZONE).date()
+        scan_date = current_ranking_scan_date()
         if self._ranking_scan_date != scan_date:
             self._ranking_scan_date = scan_date
             self._ranking_world_offset = 0
