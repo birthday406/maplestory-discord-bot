@@ -217,6 +217,11 @@ FAMILIAR_ASSET_PATHS = {
     "sherbet": Path(__file__).parent / "assets" / "familiar-sherbet.png",
     "font": Path(__file__).parent / "assets" / "NanumGothic.ttf",
 }
+RANKING_FONT_PATHS = {
+    "roboto": Path(__file__).parent / "assets" / "Roboto-Regular.ttf",
+    "roboto_bold": Path(__file__).parent / "assets" / "Roboto-Bold.ttf",
+    "korean": Path(__file__).parent / "assets" / "NotoSansKR-VF.ttf",
+}
 URSUS_TIMEZONE = ZoneInfo("America/Los_Angeles")
 INFO_CHANNEL_TIMEZONE = ZoneInfo("Asia/Seoul")
 POLL_INTERVAL_MINUTES = 5
@@ -1399,12 +1404,18 @@ def create_ranking_history_image(
     width, height = 900, 740
     image = Image.new("RGB", (width * scale, height * scale), "#202830")
     draw = ImageDraw.Draw(image, "RGBA")
-    font_path = str(FAMILIAR_ASSET_PATHS["font"])
-    title_font = ImageFont.truetype(font_path, 28 * scale)
-    score_font = ImageFont.truetype(font_path, 20 * scale)
-    body_font = ImageFont.truetype(font_path, 15 * scale)
-    value_font = ImageFont.truetype(font_path, 13 * scale)
-    small_font = ImageFont.truetype(font_path, 12 * scale)
+    roboto_path = str(RANKING_FONT_PATHS["roboto"])
+    roboto_bold_path = str(RANKING_FONT_PATHS["roboto_bold"])
+    korean_path = str(RANKING_FONT_PATHS["korean"])
+    title_font = ImageFont.truetype(roboto_path, 28 * scale)
+    score_font = ImageFont.truetype(roboto_path, 20 * scale)
+    body_font = ImageFont.truetype(roboto_path, 15 * scale)
+    value_font = ImageFont.truetype(roboto_bold_path, 13 * scale)
+    small_font = ImageFont.truetype(roboto_path, 12 * scale)
+    korean_title_font = ImageFont.truetype(korean_path, 28 * scale)
+    korean_body_font = ImageFont.truetype(korean_path, 15 * scale)
+    korean_value_font = ImageFont.truetype(korean_path, 13 * scale)
+    korean_small_font = ImageFont.truetype(korean_path, 12 * scale)
 
     draw.rounded_rectangle(
         (16 * scale, 16 * scale, (width - 16) * scale, (height - 16) * scale),
@@ -1472,7 +1483,12 @@ def create_ranking_history_image(
         except (OSError, ValueError):
             logging.warning("Failed to render ranking character image for %s.", character_name)
 
-    draw.text((190 * scale, 42 * scale), character_name, font=title_font, fill="#E6FF00")
+    draw.text(
+        (190 * scale, 42 * scale),
+        character_name,
+        font=korean_title_font if re.search(r"[가-힣]", character_name) else title_font,
+        fill="#E6FF00",
+    )
     draw.text(
         (190 * scale, 84 * scale),
         f"{level_text}  ·  {character['jobName']}  ·  {world}",
@@ -1513,7 +1529,7 @@ def create_ranking_history_image(
     draw.text(
         (207 * scale, 159 * scale),
         "메창력",
-        font=value_font,
+        font=korean_value_font,
         fill="#9FB0BE",
     )
     draw.text(
@@ -1530,13 +1546,13 @@ def create_ranking_history_image(
     draw.text(
         (362 * scale, 159 * scale),
         "칭호",
-        font=value_font,
+        font=korean_value_font,
         fill="#9FB0BE",
     )
     draw.text(
         (407 * scale, 159 * scale),
         title,
-        font=value_font,
+        font=korean_value_font if re.search(r"[가-힣]", title) else value_font,
         fill="#EEF4F8",
     )
 
@@ -1571,7 +1587,7 @@ def create_ranking_history_image(
         draw.text(
             ((left + 16) * scale, 224 * scale),
             heading,
-            font=small_font,
+            font=korean_small_font,
             fill="#7FA3BD",
         )
         draw.text(
@@ -1583,7 +1599,7 @@ def create_ranking_history_image(
         draw.text(
             ((left + 16) * scale, 279 * scale),
             detail,
-            font=small_font,
+            font=korean_small_font if re.search(r"[가-힣]", detail) else small_font,
             fill="#A8B5C0",
         )
 
@@ -1603,7 +1619,7 @@ def create_ranking_history_image(
         draw.text(
             (section_left * scale, 338 * scale),
             heading,
-            font=body_font,
+            font=korean_body_font,
             fill="#EEF4F8",
         )
         for index, period in enumerate((7, 14, 30)):
@@ -1614,7 +1630,7 @@ def create_ranking_history_image(
             draw.text(
                 (value_x * scale, 371 * scale),
                 f"{period}일",
-                font=small_font,
+                font=korean_small_font,
                 fill="#9FB0BE",
             )
             draw.text(
@@ -1630,14 +1646,14 @@ def create_ranking_history_image(
         draw.text(
             (width * scale // 2, 545 * scale),
             "첫 기록을 저장했습니다",
-            font=title_font,
+            font=korean_title_font,
             fill="#EEF4F8",
             anchor="mm",
         )
         draw.text(
             (width * scale // 2, 585 * scale),
             "다음 날짜의 수집 기록부터 경험치 변화가 표시됩니다",
-            font=body_font,
+            font=korean_body_font,
             fill="#9FB0BE",
             anchor="mm",
         )
