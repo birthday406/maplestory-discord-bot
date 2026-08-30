@@ -991,7 +991,35 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         fields = {field.name: field.value for field in embed.fields}
         self.assertEqual(fields["월드 랭킹"], "17위 (상위 0.0017%)")
 
-    async def test_command_loads_four_na_rankings(self) -> None:
+    def test_embed_hides_percent_when_search_result_count_is_not_world_total(self) -> None:
+        embed = build_ranking_embed(
+            self.character(),
+            world_rank=1128,
+            legion=None,
+            world_total_count=1,
+        )
+
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["월드 랭킹"], "1,128위")
+
+    async def test_world_total_count_uses_unfiltered_ranking_page(self) -> None:
+        bot = object.__new__(MapleNewsBot)
+        bot.fetch_ranking_payload = AsyncMock(return_value={"totalCount": 654_321})
+
+        result = await bot.fetch_ranking_total_count("na", "world", 45)
+
+        self.assertEqual(result, 654_321)
+        bot.fetch_ranking_payload.assert_awaited_once_with(
+            "na",
+            {
+                "type": "world",
+                "id": "45",
+                "reboot_index": "0",
+                "page_index": "1",
+            },
+        )
+
+    async def test_command_loads_rankings_and_unfiltered_world_total(self) -> None:
         character = self.character()
         world_character = self.character(rank=1309)
         legion = self.character(rank=2923, legionLevel=10221)
@@ -1000,6 +1028,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             fetch_ranking_character=AsyncMock(
                 side_effect=[character, world_character, legion, achievement]
             ),
+            fetch_ranking_total_count=AsyncMock(return_value=1_000_000),
             ranking_store=SimpleNamespace(
                 save_snapshot=Mock(return_value=[]),
                 save_default_character=Mock(),
@@ -1024,6 +1053,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                 ("na", "achievement", 45, "Home"),
             ],
         )
+        client.fetch_ranking_total_count.assert_awaited_once_with("na", "world", 45)
         sent = interaction.followup.send.await_args.kwargs
         self.assertNotIn("embed", sent)
         self.assertEqual(sent["file"].filename, "ranking-card.png")
@@ -1073,6 +1103,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                     self.character(rank=810, score=12340),
                 ]
             ),
+            fetch_ranking_total_count=AsyncMock(return_value=1_000_000),
             ranking_store=SimpleNamespace(
                 get_default_character=Mock(return_value="Home"),
                 save_default_character=Mock(),
@@ -1244,6 +1275,29 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(image.format, "PNG")
             self.assertEqual(image.size, (900, 740))
             self.assertEqual(image.getpixel((0, 0)), (32, 40, 48))
+
+    def test_history_graph_ignores_faint_character_image_padding(self) -> None:
+        source = Image.new("RGBA", (100, 100), (255, 255, 255, 1))
+        source.paste((255, 0, 0, 255), (40, 30, 60, 70))
+        character_image = io.BytesIO()
+        source.save(character_image, format="PNG")
+
+        result = create_ranking_history_image(
+            self.character(),
+            [],
+            character_image=character_image.getvalue(),
+        )
+
+        with Image.open(result) as image:
+            red_pixels = [
+                (x, y)
+                for y in range(42, 177)
+                for x in range(42, 167)
+                if image.getpixel((x, y))[0] > 180
+                and image.getpixel((x, y))[1] < 100
+                and image.getpixel((x, y))[2] < 100
+            ]
+        self.assertGreater(max(y for _, y in red_pixels) - min(y for _, y in red_pixels), 100)
 
     def test_exp_summary_uses_requested_recent_period(self) -> None:
         gains = [{"exp": value} for value in range(1, 31)]

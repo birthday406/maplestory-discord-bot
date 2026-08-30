@@ -1448,10 +1448,24 @@ def create_ranking_history_image(
         try:
             with Image.open(io.BytesIO(character_image)) as source:
                 avatar = source.convert("RGBA")
-                visible_area = avatar.getchannel("A").getbbox()
+                visible_area = avatar.getchannel("A").point(
+                    lambda alpha: 255 if alpha >= 64 else 0
+                ).getbbox()
                 if visible_area:
                     avatar = avatar.crop(visible_area)
-                avatar.thumbnail((116 * scale, 126 * scale), Image.Resampling.LANCZOS)
+                avatar_scale = min(
+                    (116 * scale) / avatar.width,
+                    (126 * scale) / avatar.height,
+                )
+                avatar = avatar.resize(
+                    (
+                        max(1, round(avatar.width * avatar_scale)),
+                        max(1, round(avatar.height * avatar_scale)),
+                    ),
+                    Image.Resampling.NEAREST
+                    if avatar_scale >= 1
+                    else Image.Resampling.LANCZOS,
+                )
                 avatar_x = (104 * scale) - avatar.width // 2
                 avatar_y = (109 * scale) - avatar.height // 2
                 image.paste(avatar, (avatar_x, avatar_y), avatar)
@@ -1527,7 +1541,11 @@ def create_ranking_history_image(
     )
 
     world_rank_text = f"{world_rank:,}위" if world_rank is not None else "확인 불가"
-    if world_rank is not None and world_total_count:
+    if (
+        world_rank is not None
+        and world_total_count
+        and world_total_count >= world_rank
+    ):
         top_percent = Decimal(world_rank) * 100 / Decimal(world_total_count)
         world_rank_text += f" · 상위 {top_percent:.4f}%"
     stats = (
@@ -1747,7 +1765,11 @@ def build_ranking_embed(
     embed.set_author(name="MapleStory | CHARACTER RANKING")
     embed.add_field(name="전체 순위", value=f"{character['rank']:,}위")
     world_rank_text = f"{world_rank:,}위" if world_rank is not None else "확인 불가"
-    if world_rank is not None and world_total_count:
+    if (
+        world_rank is not None
+        and world_total_count
+        and world_total_count >= world_rank
+    ):
         top_percent = Decimal(world_rank) * 100 / Decimal(world_total_count)
         world_rank_text += f" (상위 {top_percent:.4f}%)"
     embed.add_field(name="월드 랭킹", value=world_rank_text)
@@ -3499,6 +3521,9 @@ async def ranking_command(
         world_character = await interaction.client.fetch_ranking_character(
             "na", "world", world_id, nickname
         )
+        world_total_count = await interaction.client.fetch_ranking_total_count(
+            "na", "world", world_id
+        )
         legion = await interaction.client.fetch_ranking_character(
             "na", "legion", world_id, nickname
         )
@@ -3541,7 +3566,7 @@ async def ranking_command(
                 world_character["rank"] if world_character is not None else None,
                 legion,
                 achievement,
-                world_character.get("totalCount") if world_character is not None else None,
+                world_total_count,
                 character_image,
             ),
             filename=filename,
@@ -4190,6 +4215,27 @@ class MapleNewsBot(commands.Bot):
             rate_limit_target,
         )
         return find_ranking_character(payload, nickname)
+
+    async def fetch_ranking_total_count(
+        self,
+        region: str,
+        ranking_type: str,
+        ranking_id: str | int,
+    ) -> int | None:
+        """캐릭터 검색 필터가 없는 공식 랭킹의 전체 인원수를 읽습니다."""
+        payload = await self.fetch_ranking_payload(
+            region,
+            {
+                "type": ranking_type,
+                "id": str(ranking_id),
+                "reboot_index": "0",
+                "page_index": "1",
+            },
+        )
+        try:
+            return int(payload["totalCount"])
+        except (KeyError, TypeError, ValueError):
+            return None
 
     async def fetch_character_image(self, url: str | None) -> bytes | None:
         """공식 캐릭터 이미지를 카드에 넣되 실패해도 랭킹 조회는 유지합니다."""
