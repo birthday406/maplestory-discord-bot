@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
@@ -81,6 +82,12 @@ class RankingStore:
                     character_name TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS ranking_profiles (
+                    name_key TEXT PRIMARY KEY,
+                    profile_json TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS ranking_priority_characters (
                     name_key TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -157,6 +164,38 @@ class RankingStore:
                 (discord_user_id,),
             ).fetchone()
         return row["character_name"] if row is not None else None
+
+    def save_ranking_profile(self, character_name: str, profile: tuple) -> None:
+        """명령어 카드에 필요한 공식 랭킹 응답을 다음 조회용으로 저장합니다."""
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO ranking_profiles (name_key, profile_json, updated_at)
+                VALUES (?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+                ON CONFLICT(name_key) DO UPDATE SET
+                    profile_json = excluded.profile_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    character_name.casefold(),
+                    json.dumps(profile[:5], ensure_ascii=False),
+                ),
+            )
+
+    def get_ranking_profile(self, character_name: str) -> tuple | None:
+        """마지막으로 정상 조회한 전체 프로필을 반환합니다."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT profile_json FROM ranking_profiles WHERE name_key = ?",
+                (character_name.casefold(),),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            profile = json.loads(row["profile_json"])
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return tuple(profile) if len(profile) == 5 else None
 
     def register_guild_character(
         self,
@@ -300,6 +339,22 @@ class RankingStore:
                     last_refreshed_date = excluded.last_refreshed_date
                 """,
                 (character_name.casefold(), character_name, refreshed_date.isoformat()),
+            )
+
+    def queue_priority_refresh(self, character_name: str) -> None:
+        """저장값은 바로 보여주되 공식 프로필은 수집 루프에서 다시 읽게 합니다."""
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO ranking_priority_characters
+                    (name_key, name, last_requested_at, last_refreshed_date)
+                VALUES (?, ?, CAST(strftime('%s', 'now') AS INTEGER), '')
+                ON CONFLICT(name_key) DO UPDATE SET
+                    name = excluded.name,
+                    last_requested_at = excluded.last_requested_at,
+                    last_refreshed_date = ''
+                """,
+                (character_name.casefold(), character_name),
             )
 
     def next_priority_character(self, scan_date: date) -> str | None:

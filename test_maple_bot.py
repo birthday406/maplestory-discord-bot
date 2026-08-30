@@ -1087,6 +1087,34 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         client.fetch_ranking_total_count.assert_awaited_once()
         client.fetch_character_image.assert_awaited_once()
 
+    async def test_saved_profile_skips_official_ranking_requests(self) -> None:
+        character = self.character()
+        store = SimpleNamespace(
+            get_ranking_profile=Mock(
+                return_value=(
+                    character,
+                    self.character(rank=1309),
+                    1_000_000,
+                    self.character(rank=2923, legionLevel=10221),
+                    self.character(rank=810, score=33370),
+                )
+            ),
+            queue_priority_refresh=Mock(),
+        )
+        client = SimpleNamespace(
+            ranking_store=store,
+            _ranking_profile_cache={},
+            fetch_ranking_character=AsyncMock(),
+            fetch_character_image=AsyncMock(return_value=b"image"),
+        )
+
+        profile = await fetch_cached_ranking_profile(client, "Home")
+
+        self.assertEqual(profile[0]["characterName"], "Home")
+        client.fetch_ranking_character.assert_not_awaited()
+        store.queue_priority_refresh.assert_not_called()
+        self.assertEqual(client._ranking_profile_refresh_requests, {"home"})
+
     async def test_command_loads_rankings_and_unfiltered_world_total(self) -> None:
         character = self.character()
         world_character = self.character(rank=1309)
@@ -1223,6 +1251,24 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(store.get_default_character(1), "Akanelize")
             self.assertEqual(store.get_default_character(2), "Home")
             self.assertIsNone(store.get_default_character(3))
+
+    def test_full_ranking_profile_survives_store_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ranking.db"
+            store = RankingStore(path)
+            profile = (
+                self.character(),
+                self.character(rank=1309),
+                1_000_000,
+                self.character(rank=2923, legionLevel=10221),
+                self.character(rank=810, score=33370),
+                b"not stored",
+            )
+            store.save_ranking_profile("Home", profile)
+
+            restored = RankingStore(path).get_ranking_profile("home")
+
+        self.assertEqual(restored, profile[:5])
 
     def test_all_first_place_rankings_have_max_maple_addict_power(self) -> None:
         score, title = maple_addict_power(
@@ -1466,18 +1512,25 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
             bot._ranking_scan_date = today
             bot._ranking_world_offset = 0
             bot._completed_ranking_world_ids = set()
-            bot.fetch_ranking_character = AsyncMock(return_value=character)
+            bot._ranking_profile_cache = {}
+            bot.fetch_ranking_character = AsyncMock(
+                side_effect=[
+                    character,
+                    self.ranks(1, count=1)[0],
+                    {**character, "legionLevel": 10_000},
+                    {**character, "starSum": 30_000},
+                ]
+            )
+            bot.fetch_ranking_total_count = AsyncMock(return_value=1_000_000)
+            bot.fetch_character_image = AsyncMock(return_value=b"image")
             bot.fetch_ranking_page = AsyncMock()
 
             await MapleNewsBot.collect_rankings.coro(bot)
 
             self.assertIsNone(store.next_priority_character(today))
-        bot.fetch_ranking_character.assert_awaited_once_with(
-            "na",
-            "overall",
-            "legendary",
-            character["characterName"],
-            rate_limit_target=character["characterName"],
+        self.assertEqual(bot.fetch_ranking_character.await_count, 4)
+        bot.fetch_ranking_total_count.assert_awaited_once_with(
+            "na", "world", character["worldID"], character["characterName"]
         )
         bot.fetch_ranking_page.assert_not_awaited()
 

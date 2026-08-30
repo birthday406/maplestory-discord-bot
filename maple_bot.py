@@ -3503,34 +3503,35 @@ async def ursus_command(interaction: discord.Interaction) -> None:
     )
 
 
-async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
-    now = asyncio.get_running_loop().time()
-    cache = getattr(client, "_ranking_profile_cache", None)
-    if cache is None:
-        cache = client._ranking_profile_cache = {}
-    key = nickname.casefold()
-    cached = cache.get(key)
-    if cached is not None and now - cached[0] < RANKING_PROFILE_CACHE_SECONDS:
-        return cached[1]
+async def fetch_live_ranking_profile(
+    client,
+    nickname: str,
+    rate_limit_target: int | str | None = None,
+) -> tuple:
+    async def fetch_character(ranking_type: str, ranking_id: str | int):
+        if rate_limit_target is None:
+            return await client.fetch_ranking_character(
+                "na", ranking_type, ranking_id, nickname
+            )
+        return await client.fetch_ranking_character(
+            "na", ranking_type, ranking_id, nickname, rate_limit_target
+        )
 
-    character = await client.fetch_ranking_character(
-        "na", "overall", "legendary", nickname
-    )
+    character = await fetch_character("overall", "legendary")
     profile = (character, None, None, None, None, None)
     if character is not None and character.get("level", 0) >= MIN_TRACKED_LEVEL:
         world_id = character["worldID"]
-        world_character = await client.fetch_ranking_character(
-            "na", "world", world_id, nickname
-        )
-        world_total_count = await client.fetch_ranking_total_count(
-            "na", "world", world_id
-        )
-        legion = await client.fetch_ranking_character(
-            "na", "legion", world_id, nickname
-        )
-        achievement = await client.fetch_ranking_character(
-            "na", "achievement", world_id, nickname
-        )
+        world_character = await fetch_character("world", world_id)
+        if rate_limit_target is None:
+            world_total_count = await client.fetch_ranking_total_count(
+                "na", "world", world_id
+            )
+        else:
+            world_total_count = await client.fetch_ranking_total_count(
+                "na", "world", world_id, rate_limit_target
+            )
+        legion = await fetch_character("legion", world_id)
+        achievement = await fetch_character("achievement", world_id)
         if achievement is not None:
             achievement["score"] = achievement.get(
                 "starSum", achievement.get("score", 0)
@@ -3549,6 +3550,49 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
             achievement,
             character_image,
         )
+    return profile
+
+
+async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
+    now = asyncio.get_running_loop().time()
+    cache = getattr(client, "_ranking_profile_cache", None)
+    if cache is None:
+        cache = client._ranking_profile_cache = {}
+    key = nickname.casefold()
+    cached = cache.get(key)
+    if cached is not None and now - cached[0] < RANKING_PROFILE_CACHE_SECONDS:
+        return cached[1]
+
+    ranking_store = getattr(client, "ranking_store", None)
+    stored = (
+        ranking_store.get_ranking_profile(nickname)
+        if ranking_store is not None
+        and hasattr(ranking_store, "get_ranking_profile")
+        else None
+    )
+    if stored is not None:
+        character = stored[0]
+        refresh_requests = getattr(client, "_ranking_profile_refresh_requests", None)
+        if refresh_requests is None:
+            refresh_requests = client._ranking_profile_refresh_requests = set()
+        refresh_requests.add(character["characterName"].casefold())
+        fetch_character_image = getattr(client, "fetch_character_image", None)
+        character_image = (
+            await fetch_character_image(character.get("characterImgURL"))
+            if fetch_character_image is not None
+            else None
+        )
+        profile = (*stored, character_image)
+    else:
+        profile = await fetch_live_ranking_profile(client, nickname)
+        if (
+            profile[0] is not None
+            and ranking_store is not None
+            and hasattr(ranking_store, "save_ranking_profile")
+        ):
+            ranking_store.save_ranking_profile(
+                profile[0]["characterName"], profile
+            )
 
     for cached_key, (cached_at, _) in list(cache.items()):
         if now - cached_at >= RANKING_PROFILE_CACHE_SECONDS:
@@ -3636,6 +3680,13 @@ async def ranking_command(
     gains = interaction.client.ranking_store.save_snapshot(
         character, current_ranking_scan_date()
     )
+    refresh_requests = getattr(client, "_ranking_profile_refresh_requests", set())
+    refresh_key = character["characterName"].casefold()
+    if refresh_key in refresh_requests:
+        interaction.client.ranking_store.queue_priority_refresh(
+            character["characterName"]
+        )
+        refresh_requests.discard(refresh_key)
     ranking_image = await asyncio.to_thread(
         create_ranking_history_image,
         character,
@@ -4143,6 +4194,7 @@ class MapleNewsBot(commands.Bot):
         self._next_ranking_request_at = 0.0
         self._ranking_interactive_requests = 0
         self._ranking_profile_cache: dict[str, tuple[float, tuple]] = {}
+        self._ranking_profile_refresh_requests: set[str] = set()
         self.familiar_expectation_store = FamiliarExpectationStore(FAMILIAR_DB_PATH)
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
         self.openai = AsyncOpenAI()
@@ -4304,17 +4356,21 @@ class MapleNewsBot(commands.Bot):
         region: str,
         ranking_type: str,
         ranking_id: str | int,
+        rate_limit_target: int | str | None = None,
     ) -> int | None:
         """캐릭터 검색 필터가 없는 공식 랭킹의 전체 인원수를 읽습니다."""
-        payload = await self.fetch_ranking_payload(
-            region,
-            {
-                "type": ranking_type,
-                "id": str(ranking_id),
-                "reboot_index": "0",
-                "page_index": "1",
-            },
-        )
+        params = {
+            "type": ranking_type,
+            "id": str(ranking_id),
+            "reboot_index": "0",
+            "page_index": "1",
+        }
+        if rate_limit_target is None:
+            payload = await self.fetch_ranking_payload(region, params)
+        else:
+            payload = await self.fetch_ranking_payload(
+                region, params, rate_limit_target
+            )
         try:
             return int(payload["totalCount"])
         except (KeyError, TypeError, ValueError):
@@ -5342,20 +5398,26 @@ class MapleNewsBot(commands.Bot):
         priority_name = self.ranking_store.next_priority_character(scan_date)
         if priority_name is not None:
             try:
-                character = await self.fetch_ranking_character(
-                    "na",
-                    "overall",
-                    "legendary",
+                profile = await fetch_live_ranking_profile(
+                    self,
                     priority_name,
                     rate_limit_target=priority_name,
                 )
+                character, _, _, legion, achievement, _ = profile
                 if character is not None:
-                    self.ranking_store.save_page(
-                        [character],
-                        scan_date,
-                        next_index=1,
-                        world_id=character["worldID"],
-                        update_checkpoint=False,
+                    if legion is not None:
+                        character["legionLevel"] = legion["legionLevel"]
+                        character["legionRank"] = legion["rank"]
+                    if achievement is not None:
+                        character["achievementScore"] = achievement["score"]
+                        character["achievementRank"] = achievement["rank"]
+                    self.ranking_store.save_ranking_profile(
+                        character["characterName"], profile
+                    )
+                    self.ranking_store.save_snapshot(character, scan_date)
+                    self._ranking_profile_cache[priority_name.casefold()] = (
+                        asyncio.get_running_loop().time(),
+                        profile,
                     )
                 self.ranking_store.mark_priority_refreshed(priority_name, scan_date)
                 self.clear_ranking_backoff_after_success()
