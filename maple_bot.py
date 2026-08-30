@@ -1639,9 +1639,9 @@ def create_ranking_history_image(
         ),
     )
     for index, (heading, main_value, detail) in enumerate(stats):
-        left = 42 + index * 262
+        left = 42 + index * 280
         draw.rounded_rectangle(
-            (left * scale, 210 * scale, (left + 246) * scale, 304 * scale),
+            (left * scale, 210 * scale, (left + 256) * scale, 304 * scale),
             radius=12 * scale,
             fill="#34404D",
         )
