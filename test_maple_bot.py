@@ -955,9 +955,13 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         return character
 
     def test_exact_character_is_selected_from_official_response(self) -> None:
-        payload = {"ranks": [self.character(characterName="Other"), self.character()]}
+        payload = {
+            "totalCount": 1_000_000,
+            "ranks": [self.character(characterName="Other"), self.character()],
+        }
 
         self.assertEqual(find_ranking_character(payload, "home")["rank"], 8926)
+        self.assertEqual(find_ranking_character(payload, "home")["totalCount"], 1_000_000)
         self.assertIsNone(find_ranking_character(payload, "Missing"))
 
     def test_embed_shows_level_progress_and_available_ranks(self) -> None:
@@ -972,9 +976,20 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Kronos", embed.description)
         fields = {field.name: field.value for field in embed.fields}
         self.assertEqual(fields["전체 순위"], "8,926위")
-        self.assertEqual(fields["월드 순위"], "1,309위")
+        self.assertEqual(fields["월드 랭킹"], "1,309위")
         self.assertEqual(fields["유니온 레벨"], "10,221")
         self.assertEqual(embed.thumbnail.url, "https://example.com/home.png")
+
+    def test_embed_shows_world_rank_top_percent(self) -> None:
+        embed = build_ranking_embed(
+            self.character(),
+            world_rank=17,
+            legion=None,
+            world_total_count=1_000_000,
+        )
+
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["월드 랭킹"], "17위 (상위 0.0017%)")
 
     async def test_command_loads_four_na_rankings(self) -> None:
         character = self.character()

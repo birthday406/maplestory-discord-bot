@@ -1355,7 +1355,9 @@ def find_ranking_character(payload: dict, nickname: str) -> dict | None:
     """공식 랭킹 응답에서 입력한 닉네임과 정확히 같은 캐릭터만 찾습니다."""
     for character in payload.get("ranks", []):
         if character.get("characterName", "").casefold() == nickname.casefold():
-            return character
+            result = dict(character)
+            result["totalCount"] = payload.get("totalCount")
+            return result
     return None
 
 
@@ -1481,6 +1483,7 @@ def build_ranking_embed(
     world_rank: int | None,
     legion: dict | None,
     achievement: dict | None = None,
+    world_total_count: int | None = None,
 ) -> discord.Embed:
     """공식 랭킹에서 확인한 캐릭터 정보를 Discord 한 화면으로 정리합니다."""
     level = character["level"]
@@ -1499,10 +1502,11 @@ def build_ranking_embed(
     )
     embed.set_author(name="MapleStory | CHARACTER RANKING")
     embed.add_field(name="전체 순위", value=f"{character['rank']:,}위")
-    embed.add_field(
-        name="월드 순위",
-        value=f"{world_rank:,}위" if world_rank is not None else "확인 불가",
-    )
+    world_rank_text = f"{world_rank:,}위" if world_rank is not None else "확인 불가"
+    if world_rank is not None and world_total_count:
+        top_percent = Decimal(world_rank) * 100 / Decimal(world_total_count)
+        world_rank_text += f" (상위 {top_percent:.4f}%)"
+    embed.add_field(name="월드 랭킹", value=world_rank_text)
     if legion is not None:
         embed.add_field(name="유니온 레벨", value=f"{legion['legionLevel']:,}")
         embed.add_field(name="유니온 순위", value=f"{legion['rank']:,}위")
@@ -3272,6 +3276,7 @@ async def ranking_command(
         world_character["rank"] if world_character is not None else None,
         legion,
         achievement,
+        world_character.get("totalCount") if world_character is not None else None,
     )
     filename = "ranking-history.png"
     embed.set_image(url=f"attachment://{filename}")
