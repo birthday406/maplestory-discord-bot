@@ -12,7 +12,7 @@ from tools.backfill_maplebot import collect, reconstruction_plan
 
 class MapleBotBackfillTests(unittest.TestCase):
     def test_transient_failures_retry_and_success_resets_error_streak(self):
-        failures = {"Retry": 2, "FailA": 99, "Good": 0, "FailB": 99}
+        failures = {"Retry": 2, "FailA": 3, "FailB": 3, "Good": 0}
         attempts = {name: 0 for name in failures}
         gains = [
             {"date": (date(2026, 8, 1) + timedelta(days=day)).isoformat(), "exp": 0}
@@ -33,6 +33,12 @@ class MapleBotBackfillTests(unittest.TestCase):
                 attempts[self.name] += 1
                 if attempts[self.name] <= failures[self.name]:
                     raise TimeoutError("temporary render timeout")
+
+            def count(self):
+                return 0
+
+            def title(self):
+                return self.name
 
             def evaluate(self, _script):
                 return gains
@@ -66,16 +72,23 @@ class MapleBotBackfillTests(unittest.TestCase):
             edge=None,
             retries=2,
             max_errors=2,
+            recovery_delay=0,
+            max_recoveries=3,
         )
         characters = [{"name": name, "region": "GMS"} for name in failures]
 
         with tempfile.TemporaryDirectory() as directory:
             args.checkpoint = f"{directory}/checkpoint.jsonl"
-            with patch.dict(sys.modules, {"playwright.sync_api": fake_sync_api}):
+            with patch.dict(sys.modules, {"playwright.sync_api": fake_sync_api}), patch(
+                "tools.backfill_maplebot.time.sleep"
+            ):
                 results = collect(args, characters)
 
-        self.assertEqual([item["name"] for item in results], ["Retry", "Good"])
-        self.assertEqual(attempts, {"Retry": 3, "FailA": 3, "Good": 1, "FailB": 3})
+        self.assertEqual(
+            [item["name"] for item in results],
+            ["Retry", "Good", "FailA", "FailB"],
+        )
+        self.assertEqual(attempts, {"Retry": 3, "FailA": 4, "Good": 1, "FailB": 4})
 
     def test_conflicting_newer_snapshot_only_fills_before_first_anchor(self):
         gains = [

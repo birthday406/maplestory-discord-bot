@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 from bisect import bisect_right
+from collections import deque
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Iterable
@@ -317,9 +318,12 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
     targets = [item for item in characters if item["name"].casefold() not in saved]
     if args.limit is not None:
         targets = targets[: args.limit]
+    pending = deque(targets)
     blocked = []
     started = time.monotonic() - args.delay
     errors = 0
+    recovery_count = 0
+    character_failures: dict[str, int] = {}
     with sync_playwright() as playwright:
         launch_options = {"headless": True}
         if args.edge or os.name == "nt":
@@ -338,14 +342,20 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
             return result
 
         page = new_page()
-        for index, character in enumerate(targets, 1):
+        completed = 0
+        while pending:
+            character = pending.popleft()
             wait = args.delay - (time.monotonic() - started)
             if wait > 0:
                 time.sleep(wait)
             name = character["name"]
+            name_key = name.casefold()
             started = time.monotonic()
+            succeeded = False
+            not_found = False
             for attempt in range(args.retries + 1):
                 try:
+                    blocked.clear()
                     page.goto(
                         f"https://maplebot.io/character/{quote(name)}?region={character['region']}",
                         wait_until="domcontentloaded",
@@ -356,33 +366,82 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
                     validate_series(gains)
                     item = {"name": name, "gains": gains}
                     append_checkpoint(checkpoint, item)
-                    saved[name.casefold()] = item
+                    saved[name_key] = item
                     errors = 0
-                    print(f"[{index}/{len(targets)}] {name}: ok", flush=True)
+                    recovery_count = 0
+                    character_failures.pop(name_key, None)
+                    completed += 1
+                    succeeded = True
+                    print(f"[{completed}/{len(targets)}] {name}: ok", flush=True)
                     break
                 except Exception as error:
                     if blocked:
                         raise RuntimeError(f"blocked by MapleBot: {blocked[-1]}")
+                    not_found = False
+                    try:
+                        not_found = bool(
+                            page.get_by_text("Character not found", exact=True).count()
+                        )
+                        page_title = page.title()
+                    except Exception:
+                        page_title = "unavailable"
                     page.close()
                     page = new_page()
                     if attempt < args.retries:
                         print(
-                            f"[{index}/{len(targets)}] {name}: retry "
+                            f"[{completed + 1}/{len(targets)}] {name}: retry "
                             f"{attempt + 1}/{args.retries}",
                             file=sys.stderr,
                             flush=True,
                         )
                         time.sleep(args.delay)
                         continue
-                    errors += 1
-                    append_checkpoint(checkpoint, {"name": name, "error": str(error)})
+                    character_failures[name_key] = character_failures.get(name_key, 0) + 1
+                    detail = (
+                        f"{error}; title={page_title!r}; not_found={not_found}"
+                    )
+                    append_checkpoint(checkpoint, {"name": name, "error": detail})
                     print(
-                        f"[{index}/{len(targets)}] {name}: {error}",
+                        f"[{completed + 1}/{len(targets)}] {name}: {detail}",
                         file=sys.stderr,
                         flush=True,
                     )
-            if errors >= args.max_errors:
-                raise RuntimeError(f"stopped after {errors} consecutive errors")
+            if succeeded:
+                continue
+
+            # 실제 미검색 결과는 한 번 더 확인한 뒤 건너뛰고 사이트 장애로 세지 않습니다.
+            if not_found and character_failures[name_key] >= 2:
+                completed += 1
+                errors = 0
+                print(
+                    f"[{completed}/{len(targets)}] {name}: skipped after repeated not found",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+
+            pending.append(character)
+            errors += 1
+            if errors < args.max_errors:
+                continue
+
+            recovery_count += 1
+            if recovery_count > args.max_recoveries:
+                raise RuntimeError(
+                    f"stopped after {recovery_count - 1} recovery waits"
+                )
+            recovery_wait = args.recovery_delay * (5 ** (recovery_count - 1))
+            print(
+                f"MapleBot temporarily unavailable; rebuilding browser and "
+                f"waiting {recovery_wait} seconds",
+                file=sys.stderr,
+                flush=True,
+            )
+            browser.close()
+            time.sleep(recovery_wait)
+            browser = playwright.chromium.launch(**launch_options)
+            page = new_page()
+            errors = 0
         browser.close()
     return list(saved.values())
 
@@ -401,6 +460,8 @@ def main() -> None:
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--max-errors", type=int, default=3)
+    parser.add_argument("--recovery-delay", type=int, default=120)
+    parser.add_argument("--max-recoveries", type=int, default=3)
     parser.add_argument("--checkpoint")
     parser.add_argument("--check-integrity", action="store_true")
     parser.add_argument("--local", action="store_true")
