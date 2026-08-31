@@ -125,7 +125,7 @@ class RankingStore:
                 VALUES (1, 0, 0);
                 """
             )
-            # 기존 ranking.db도 지우지 않고 메창력에 필요한 열만 안전하게 추가합니다.
+            # 기존 ranking.db도 지우지 않고 종합 지수에 필요한 열만 안전하게 추가합니다.
             columns = {
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(characters)").fetchall()

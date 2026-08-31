@@ -54,7 +54,6 @@ from maple_bot import (
     build_miracle_time_embed,
     build_command_stats_embed,
     build_exchange_rate_log_embed,
-    build_guild_ranking_embed,
     build_ranking_embed,
     build_server_status_embed,
     build_ursus_embed,
@@ -120,9 +119,6 @@ from maple_bot import (
     quick_copy_symbol_command,
     quick_copy_symbol_prefix_command,
     ranking_command,
-    guild_ranking_command,
-    guild_ranking_register_command,
-    guild_ranking_unregister_command,
     maple_addict_power,
     record_command_usage,
     record_exchange_rate,
@@ -1082,8 +1078,6 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=[
                     character,
                     self.character(rank=1309),
-                    self.character(rank=2923, legionLevel=10221),
-                    self.character(rank=810, starSum=33370),
                 ]
             ),
             fetch_ranking_total_count=AsyncMock(return_value=1_000_000),
@@ -1094,9 +1088,12 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         second = await fetch_cached_ranking_profile(client, "home")
 
         self.assertIs(first, second)
-        self.assertEqual(client.fetch_ranking_character.await_count, 4)
+        self.assertEqual(client.fetch_ranking_character.await_count, 2)
         client.fetch_ranking_total_count.assert_awaited_once()
         client.fetch_character_image.assert_awaited_once()
+        self.assertIsNone(first[3])
+        self.assertIsNone(first[4])
+        self.assertEqual(client._ranking_profile_refresh_requests, {"home"})
 
     async def test_saved_profile_skips_official_ranking_requests(self) -> None:
         character = self.character()
@@ -1129,16 +1126,15 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_command_loads_rankings_and_unfiltered_world_total(self) -> None:
         character = self.character()
         world_character = self.character(rank=1309)
-        legion = self.character(rank=2923, legionLevel=10221)
-        achievement = self.character(rank=810, score=0, starSum=33370)
         client = SimpleNamespace(
             fetch_ranking_character=AsyncMock(
-                side_effect=[character, world_character, legion, achievement]
+                side_effect=[character, world_character]
             ),
             fetch_ranking_total_count=AsyncMock(return_value=1_000_000),
             ranking_store=SimpleNamespace(
                 save_snapshot=Mock(return_value=[]),
                 save_default_character=Mock(),
+                queue_priority_refresh=Mock(),
             ),
         )
         interaction = SimpleNamespace(
@@ -1156,20 +1152,18 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             [
                 ("na", "overall", "legendary", "Home"),
                 ("na", "world", 45, "Home"),
-                ("na", "legion", 45, "Home"),
-                ("na", "achievement", 45, "Home"),
             ],
         )
         client.fetch_ranking_total_count.assert_awaited_once_with("na", "world", 45)
         sent = interaction.followup.send.await_args.kwargs
         self.assertNotIn("embed", sent)
         self.assertEqual(sent["file"].filename, "ranking-card.png")
-        self.assertEqual(
-            client.ranking_store.save_snapshot.call_args.args[0]["achievementScore"],
-            33370,
+        self.assertNotIn(
+            "achievementScore", client.ranking_store.save_snapshot.call_args.args[0]
         )
         client.ranking_store.save_snapshot.assert_called_once()
         client.ranking_store.save_default_character.assert_called_once_with(123, "Home")
+        client.ranking_store.queue_priority_refresh.assert_called_once_with("Home")
 
     async def test_command_reports_no_data_below_level_260(self) -> None:
         client = SimpleNamespace(
@@ -1206,8 +1200,6 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=[
                     character,
                     self.character(rank=1309),
-                    self.character(rank=2923, legionLevel=10221),
-                    self.character(rank=810, score=12340),
                 ]
             ),
             fetch_ranking_total_count=AsyncMock(return_value=1_000_000),
@@ -1215,6 +1207,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                 get_default_character=Mock(return_value="Home"),
                 save_default_character=Mock(),
                 save_snapshot=Mock(return_value=[]),
+                queue_priority_refresh=Mock(),
             ),
         )
         interaction = SimpleNamespace(
@@ -1227,7 +1220,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         await ranking_command.callback(interaction)
 
         client.ranking_store.get_default_character.assert_called_once_with(123)
-        client.fetch_ranking_character.assert_awaited_with("na", "achievement", 45, "Home")
+        self.assertEqual(client.fetch_ranking_character.await_count, 2)
 
     async def test_command_without_saved_character_explains_first_lookup(self) -> None:
         interaction = SimpleNamespace(
@@ -1292,7 +1285,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restored, profile[:5])
 
     def test_all_first_place_rankings_have_max_maple_addict_power(self) -> None:
-        score, title = maple_addict_power(
+        score, tags = maple_addict_power(
             {
                 "level": 250,
                 "exp": 0,
@@ -1305,10 +1298,10 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(score, 99.9)
-        self.assertEqual(title, "초월 메창")
+        self.assertEqual(tags, ["메이플 마스터", "레벨 장인"])
 
     def test_complete_population_data_uses_new_ai_score(self) -> None:
-        score, title = maple_addict_power(
+        score, tags = maple_addict_power(
             {
                 "level": 300,
                 "exp": 0,
@@ -1324,7 +1317,31 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(score, 99.9)
-        self.assertEqual(title, "초월 메창")
+        self.assertEqual(tags, ["메이플 마스터", "균형의 달인", "레벨 장인"])
+
+    def test_character_without_legion_and_achievement_is_tagged_as_alt(self) -> None:
+        _, tags = maple_addict_power(
+            {
+                "level": 295,
+                "exp": 0,
+                "ranking": 8_926,
+            }
+        )
+
+        self.assertEqual(tags[-1], "부캐")
+
+    def test_character_with_representative_ranking_is_not_tagged_as_alt(self) -> None:
+        _, tags = maple_addict_power(
+            {
+                "level": 295,
+                "exp": 0,
+                "ranking": 8_926,
+                "legion_level": 10_221,
+                "legion_rank": 2_923,
+            }
+        )
+
+        self.assertNotIn("부캐", tags)
 
     def test_population_snapshots_are_saved_by_date_and_world(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1367,73 +1384,6 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(store.unregister_guild_character(100, 1))
             self.assertEqual(store.get_guild_rankings(100), [])
             self.assertEqual(len(store.get_guild_rankings(200)), 1)
-
-    async def test_guild_register_uses_last_directly_looked_up_character(self) -> None:
-        store = SimpleNamespace(
-            get_default_character=Mock(return_value="Home"),
-            register_guild_character=Mock(),
-        )
-        interaction = SimpleNamespace(
-            guild_id=100,
-            client=SimpleNamespace(ranking_store=store),
-            user=SimpleNamespace(id=123, display_name="슈비"),
-            response=SimpleNamespace(send_message=AsyncMock()),
-        )
-
-        await guild_ranking_register_command.callback(interaction)
-
-        store.register_guild_character.assert_called_once_with(100, 123, "슈비", "Home")
-
-    async def test_guild_ranking_never_sends_a_discord_mention(self) -> None:
-        entries = [
-            {
-                "discord_display_name": "슈비",
-                "character_name": "Home",
-                "level": 295,
-                "exp": LEVEL_EXP[95] // 2,
-                "ranking": 8926,
-                "legion_level": 10221,
-                "legion_rank": 2923,
-                "achievement_score": 12340,
-                "achievement_rank": 810,
-                "updated_date": "2026-08-16",
-            }
-        ]
-        interaction = SimpleNamespace(
-            guild_id=100,
-            client=SimpleNamespace(ranking_store=SimpleNamespace(get_guild_rankings=Mock(return_value=entries))),
-            response=SimpleNamespace(send_message=AsyncMock()),
-        )
-
-        await guild_ranking_command.callback(interaction)
-
-        embed = interaction.response.send_message.await_args.kwargs["embed"]
-        self.assertIn("슈비 (Home)", embed.fields[0].name)
-        self.assertNotIn("<@", embed.fields[0].value)
-
-    def test_guild_ranking_shows_five_above_and_below_target(self) -> None:
-        entries = [
-            {
-                "discord_display_name": f"사용자{rank}",
-                "character_name": f"Rank{rank}",
-                "level": 295,
-                "exp": 0,
-                "ranking": rank,
-                "legion_level": 10_000,
-                "legion_rank": rank,
-                "achievement_score": 20_000,
-                "achievement_rank": rank,
-                "updated_date": "2026-08-27",
-            }
-            for rank in range(1, 13)
-        ]
-
-        embed = build_guild_ranking_embed(entries, "rank7")
-
-        self.assertEqual(len(embed.fields), 11)
-        self.assertTrue(embed.fields[0].name.startswith("2."))
-        self.assertTrue(embed.fields[5].name.startswith("👉 7."))
-        self.assertTrue(embed.fields[-1].name.startswith("12."))
 
     def test_history_graph_is_rendered_as_png(self) -> None:
         result = create_ranking_history_image(
@@ -3356,6 +3306,7 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/시드링", field_text)
         self.assertIn("/ㅁ", field_text)
         self.assertIn("/심볼", field_text)
+        self.assertNotIn("/서버랭킹", field_text)
         self.assertNotIn("/공지알림", field_text)
 
     async def test_quick_copy_shows_four_separate_code_blocks(self) -> None:

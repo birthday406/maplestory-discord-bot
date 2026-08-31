@@ -1495,7 +1495,7 @@ def create_ranking_history_image(
             float(Decimal(current_exp) / Decimal(LEVEL_EXP[level - 200])),
         )
     level_text = f"Lv. {level}"
-    score, title = maple_addict_power(
+    score, tags = maple_addict_power(
         {
             "level": level,
             "exp": current_exp,
@@ -1582,7 +1582,7 @@ def create_ranking_history_image(
             stroke_fill="#202830",
         )
     draw.rounded_rectangle(
-        (190 * scale, 148 * scale, 548 * scale, 184 * scale),
+        (190 * scale, 148 * scale, 820 * scale, 184 * scale),
         radius=10 * scale,
         fill="#34404D",
         outline="#526878",
@@ -1590,31 +1590,31 @@ def create_ranking_history_image(
     )
     draw.text(
         (207 * scale, 159 * scale),
-        "메창력",
+        "메이플 종합 지수",
         font=korean_value_font,
         fill="#DCE7EE",
     )
     draw.text(
-        (267 * scale, 154 * scale),
+        (330 * scale, 154 * scale),
         f"{score:.2f}",
         font=score_font,
         fill="#E6FF00",
     )
     draw.line(
-        (345 * scale, 157 * scale, 345 * scale, 176 * scale),
+        (410 * scale, 157 * scale, 410 * scale, 176 * scale),
         fill="#526878",
         width=1 * scale,
     )
     draw.text(
-        (362 * scale, 159 * scale),
-        "칭호",
+        (427 * scale, 159 * scale),
+        "태그",
         font=korean_value_font,
         fill="#DCE7EE",
     )
     draw.text(
-        (407 * scale, 159 * scale),
-        title,
-        font=korean_value_font if re.search(r"[가-힣]", title) else value_font,
+        (472 * scale, 159 * scale),
+        " · ".join(tags),
+        font=korean_value_font,
         fill="#EEF4F8",
     )
 
@@ -1629,13 +1629,13 @@ def create_ranking_history_image(
         ("전체 랭킹", f"{character['rank']:,}위", f"{world} {world_rank_text}"),
         (
             "유니온",
-            f"Lv. {legion['legionLevel']:,}" if legion else "확인 불가",
-            f"{legion['rank']:,}위" if legion else "순위 확인 불가",
+            f"Lv. {legion['legionLevel']:,}" if legion else "대표 캐릭터만",
+            f"{legion['rank']:,}위" if legion else "확인 가능",
         ),
         (
             "업적",
-            f"{achievement['score']:,}점" if achievement else "확인 불가",
-            f"{achievement['rank']:,}위" if achievement else "순위 확인 불가",
+            f"{achievement['score']:,}점" if achievement else "대표 캐릭터만",
+            f"{achievement['rank']:,}위" if achievement else "확인 가능",
         ),
     )
     for index, (heading, main_value, detail) in enumerate(stats):
@@ -1891,29 +1891,54 @@ def ranking_position_score(rank: int | None) -> float:
     return 100 / (1 + math.log10(rank) / 4)
 
 
-def maple_addict_power(entry: dict) -> tuple[float, str]:
-    """레벨·유니온·업적의 수치와 순위를 합쳐 재미용 메창력과 칭호를 만듭니다."""
+def maple_index_tags(
+    score: float, indices: dict[str, float], *, is_alt_character: bool = False
+) -> list[str]:
+    if score >= 95:
+        tier = "메이플 마스터"
+    elif score >= 80:
+        tier = "메이플 베테랑"
+    elif score >= 60:
+        tier = "메이플 숙련자"
+    elif score >= 40:
+        tier = "메이플 모험가"
+    else:
+        tier = "성장 중"
+    specialties = {
+        "character_growth": "레벨 장인",
+        "union_growth": "유니온 장인",
+        "achievement": "업적 사냥꾼",
+    }
+    tags = [tier]
+    if min(indices.values()) >= 40 and max(indices.values()) - min(indices.values()) <= 3:
+        tags.append("균형의 달인")
+    tags.append(specialties[max(indices, key=indices.get)])
+    if is_alt_character:
+        tags.append("부캐")
+    return tags
+
+
+def maple_addict_power(entry: dict) -> tuple[float, list[str]]:
+    """레벨·유니온·업적을 합쳐 재미용 메이플 종합 지수와 태그를 만듭니다."""
+    is_alt_character = all(
+        entry.get(key) is None
+        for key in (
+            "legion_level",
+            "legion_rank",
+            "achievement_score",
+            "achievement_rank",
+        )
+    )
     ai_result = calculate_ai_score(entry, LEVEL_EXP)
     if ai_result["ai_score"] is not None:
         score = ai_result["ai_score"]
-        specialty = {
-            "character_growth": "레벨 장인",
-            "union_growth": "유니온 장인",
-            "achievement": "업적 사냥꾼",
+        indices = {
+            name: ai_result["indices"][name]
+            for name in ("character_growth", "union_growth", "achievement")
         }
-        specialty_indices = {
-            name: ai_result["indices"][name] for name in specialty
-        }
-        spread = max(specialty_indices.values()) - min(specialty_indices.values())
-        if score >= 95:
-            title = "초월 메창"
-        elif score >= 80:
-            title = "메창"
-        elif min(specialty_indices.values()) >= 40 and spread <= 3:
-            title = "밸런스 메창"
-        else:
-            title = specialty[max(specialty_indices, key=specialty_indices.get)]
-        return score, title
+        return score, maple_index_tags(
+            score, indices, is_alt_character=is_alt_character
+        )
 
     # 레벨·경험치와 전체 순위 40점, 유니온 30점, 업적 30점입니다.
     character_score = (
@@ -1934,89 +1959,16 @@ def maple_addict_power(entry: dict) -> tuple[float, str]:
     )
     score = 99.9 if all_first else min(99.8, character_score + union_score + achievement_score)
 
-    highest = max(
-        (character_score, "레벨 장인"),
-        (union_score, "유니온 장인"),
-        (achievement_score, "업적 사냥꾼"),
+    score = round(score, 2)
+    return score, maple_index_tags(
+        score,
+        {
+            "character_growth": character_score,
+            "union_growth": union_score,
+            "achievement": achievement_score,
+        },
+        is_alt_character=is_alt_character,
     )
-    if score >= 95:
-        title = "초월 메창"
-    elif score >= 80:
-        title = "메창"
-    elif max(character_score, union_score, achievement_score) - min(
-        character_score, union_score, achievement_score
-    ) <= 3:
-        title = "밸런스 메창"
-    else:
-        title = highest[1]
-    return round(score, 2), title
-
-
-def build_guild_ranking_embed(
-    entries: list[dict], target_nickname: str | None = None
-) -> discord.Embed:
-    """한 Discord 서버에 직접 등록한 캐릭터만 메창력 순으로 보여줍니다."""
-    ranked = []
-    for entry in entries:
-        if entry["level"] is not None:
-            score, title = maple_addict_power(entry)
-            ranked.append((score, title, entry))
-    ranked.sort(key=lambda item: (-item[0], -item[2]["level"], -item[2]["exp"], item[2]["ranking"]))
-
-    embed = discord.Embed(
-        title="서버 메창력 랭킹",
-        description="등록한 캐릭터의 마지막 `/랭킹` 조회 기준입니다.",
-        color=0xF1C40F,
-    )
-    start = 0
-    visible_ranked = ranked[:20]
-    target_key = target_nickname.strip().casefold() if target_nickname else None
-    if target_key:
-        target_index = next(
-            (
-                index
-                for index, (_, _, entry) in enumerate(ranked)
-                if entry["character_name"].casefold() == target_key
-            ),
-            None,
-        )
-        if target_index is None:
-            embed.description = (
-                f"**{discord.utils.escape_markdown(target_nickname.strip())}** 캐릭터가 "
-                "이 서버 랭킹에 없거나 랭킹 정보를 다시 조회해야 합니다."
-            )
-            return embed
-        # 찾은 캐릭터를 가운데에 두고 위아래 순위를 최대 5명씩 보여줍니다.
-        start = max(0, target_index - 5)
-        visible_ranked = ranked[start : target_index + 6]
-        embed.description = (
-            f"**{discord.utils.escape_markdown(ranked[target_index][2]['character_name'])}** 기준 "
-            "위·아래 최대 5명입니다."
-        )
-
-    for position, (score, title, entry) in enumerate(visible_ranked, start=start + 1):
-        exp_text = ""
-        if 200 <= entry["level"] < 300:
-            exp_text = f" ({ranking_progress_percent(entry['level'], entry['exp']) % 1 * 100:.3f}%)"
-        union_text = f"{entry['legion_level']:,}" if entry["legion_level"] else "확인 불가"
-        achievement_text = (
-            f"{entry['achievement_score']:,}" if entry["achievement_score"] else "확인 불가"
-        )
-        marker = "👉 " if target_key == entry["character_name"].casefold() else ""
-        embed.add_field(
-            name=f"{marker}{position}. {entry['discord_display_name']} ({entry['character_name']})",
-            value=(
-                f"Lv. {entry['level']}{exp_text} · 전체 {entry['ranking']:,}위\n"
-                f"유니온 {union_text} · 업적 {achievement_text}\n"
-                f"**메창력 {score:.2f} · {title}**"
-            ),
-            inline=False,
-        )
-    if not ranked:
-        embed.description = "등록된 캐릭터의 랭킹 정보가 없습니다. 먼저 `/랭킹` 후 `/랭킹등록`을 실행해주세요."
-    elif len(entries) > len(ranked):
-        embed.set_footer(text="일부 등록 캐릭터는 랭킹 정보를 다시 조회해야 합니다.")
-    return embed
 
 
 def simulate_seed_ring(level: int, stone_count: int, roll: int | None = None) -> dict:
@@ -2940,7 +2892,7 @@ async def help_command(interaction: discord.Interaction) -> None:
     )
     embed.add_field(
         name="편의",
-        value="`/랭킹` `/랭킹등록` `/랭킹해제` `/서버랭킹` `/ㅁ` `/심볼`",
+        value="`/랭킹` `/ㅁ` `/심볼`",
         inline=False,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -3599,6 +3551,8 @@ async def fetch_live_ranking_profile(
     client,
     nickname: str,
     rate_limit_target: int | str | None = None,
+    *,
+    include_representative_rankings: bool = True,
 ) -> tuple:
     async def fetch_character(ranking_type: str, ranking_id: str | int):
         if rate_limit_target is None:
@@ -3622,8 +3576,11 @@ async def fetch_live_ranking_profile(
             world_total_count = await client.fetch_ranking_total_count(
                 "na", "world", world_id, rate_limit_target
             )
-        legion = await fetch_character("legion", world_id)
-        achievement = await fetch_character("achievement", world_id)
+        legion = None
+        achievement = None
+        if include_representative_rankings:
+            legion = await fetch_character("legion", world_id)
+            achievement = await fetch_character("achievement", world_id)
         if achievement is not None:
             achievement["score"] = achievement.get(
                 "starSum", achievement.get("score", 0)
@@ -3664,10 +3621,6 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
     )
     if stored is not None:
         character = stored[0]
-        refresh_requests = getattr(client, "_ranking_profile_refresh_requests", None)
-        if refresh_requests is None:
-            refresh_requests = client._ranking_profile_refresh_requests = set()
-        refresh_requests.add(character["characterName"].casefold())
         fetch_character_image = getattr(client, "fetch_character_image", None)
         character_image = (
             await fetch_character_image(character.get("characterImgURL"))
@@ -3676,7 +3629,13 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
         )
         profile = (*stored, character_image)
     else:
-        profile = await fetch_live_ranking_profile(client, nickname)
+        # 명령어는 대표 캐릭터 전용 유니온·업적 조회를 기다리지 않습니다.
+        # 이 두 값은 우선 수집기가 뒤에서 확인해 저장합니다.
+        profile = await fetch_live_ranking_profile(
+            client,
+            nickname,
+            include_representative_rankings=False,
+        )
         if (
             profile[0] is not None
             and ranking_store is not None
@@ -3685,6 +3644,13 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
             ranking_store.save_ranking_profile(
                 profile[0]["characterName"], profile
             )
+
+    character = profile[0]
+    if character is not None:
+        refresh_requests = getattr(client, "_ranking_profile_refresh_requests", None)
+        if refresh_requests is None:
+            refresh_requests = client._ranking_profile_refresh_requests = set()
+        refresh_requests.add(character["characterName"].casefold())
 
     for cached_key, (cached_at, _) in list(cache.items()):
         if now - cached_at >= RANKING_PROFILE_CACHE_SECONDS:
@@ -3762,7 +3728,7 @@ async def ranking_command(
     finally:
         client._ranking_interactive_requests -= 1
 
-    # 서버 랭킹과 메창력도 같은 최신 조회값을 쓰도록 캐릭터 기록에 함께 저장합니다.
+    # 서버 랭킹과 메이플 종합 지수도 같은 최신 조회값을 쓰도록 함께 저장합니다.
     if legion is not None:
         character["legionLevel"] = legion["legionLevel"]
         character["legionRank"] = legion["rank"]
@@ -3800,88 +3766,6 @@ async def ranking_command(
             ranking_image,
             filename=filename,
         ),
-    )
-
-
-def guild_id_or_none(interaction: discord.Interaction) -> int | None:
-    """서버 전용 랭킹 명령어가 DM에서 실행되지 않게 확인합니다."""
-    return interaction.guild_id
-
-
-@app_commands.command(name="랭킹등록", description="현재 기본 캐릭터를 이 서버 랭킹에 등록합니다.")
-@app_commands.allowed_installs(guilds=True)
-@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
-async def guild_ranking_register_command(interaction: discord.Interaction) -> None:
-    """다른 서버와 섞이지 않게 현재 서버의 등록 목록만 갱신합니다."""
-    guild_id = guild_id_or_none(interaction)
-    if guild_id is None:
-        await interaction.response.send_message("이 명령어는 Discord 서버에서만 사용할 수 있습니다.", ephemeral=True)
-        return
-    character_name = interaction.client.ranking_store.get_default_character(interaction.user.id)
-    if character_name is None:
-        await interaction.response.send_message(
-            "먼저 `/랭킹 닉네임:캐릭터명`으로 캐릭터를 조회해주세요.", ephemeral=True
-        )
-        return
-    interaction.client.ranking_store.register_guild_character(
-        guild_id,
-        interaction.user.id,
-        interaction.user.display_name,
-        character_name,
-    )
-    await interaction.response.send_message(
-        f"**{discord.utils.escape_markdown(character_name)}** 캐릭터를 이 서버 랭킹에 등록했습니다.",
-        ephemeral=True,
-    )
-
-
-@app_commands.command(name="랭킹해제", description="현재 서버의 내 랭킹 등록을 해제합니다.")
-@app_commands.allowed_installs(guilds=True)
-@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
-async def guild_ranking_unregister_command(interaction: discord.Interaction) -> None:
-    """현재 서버의 사용자 한 명만 해제하며 다른 서버 등록은 건드리지 않습니다."""
-    guild_id = guild_id_or_none(interaction)
-    if guild_id is None:
-        await interaction.response.send_message("이 명령어는 Discord 서버에서만 사용할 수 있습니다.", ephemeral=True)
-        return
-    removed = interaction.client.ranking_store.unregister_guild_character(
-        guild_id, interaction.user.id
-    )
-    await interaction.response.send_message(
-        "이 서버의 랭킹 등록을 해제했습니다." if removed else "이 서버에 등록된 캐릭터가 없습니다.",
-        ephemeral=True,
-    )
-
-
-@app_commands.command(name="서버랭킹", description="이 서버에 등록된 캐릭터의 메창력 랭킹을 봅니다.")
-@app_commands.allowed_installs(guilds=True)
-@app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
-@app_commands.rename(nickname="닉네임")
-@app_commands.describe(nickname="입력하면 해당 캐릭터의 위·아래 순위를 보여줍니다")
-async def guild_ranking_command(
-    interaction: discord.Interaction, nickname: str | None = None
-) -> None:
-    """등록된 사용자만 비교하며 Discord 멘션 대신 서버 표시명을 보여줍니다."""
-    guild_id = guild_id_or_none(interaction)
-    if guild_id is None:
-        await interaction.response.send_message("이 명령어는 Discord 서버에서만 사용할 수 있습니다.", ephemeral=True)
-        return
-    entries = interaction.client.ranking_store.get_guild_rankings(guild_id)
-    if not entries:
-        await interaction.response.send_message(
-            "아직 이 서버에 등록된 캐릭터가 없습니다. `/랭킹` 후 `/랭킹등록`을 실행해주세요.",
-            ephemeral=True,
-        )
-        return
-    population_loader = getattr(
-        interaction.client.ranking_store, "get_ai_score_populations", None
-    )
-    if population_loader:
-        for entry in entries:
-            if entry.get("world_id") is not None:
-                entry.update(population_loader(entry["world_id"]))
-    await interaction.response.send_message(
-        embed=build_guild_ranking_embed(entries, nickname)
     )
 
 
@@ -4328,9 +4212,6 @@ class MapleNewsBot(commands.Bot):
             appearance_search_command,
             traffic_light_command,
             ranking_command,
-            guild_ranking_register_command,
-            guild_ranking_unregister_command,
-            guild_ranking_command,
             channel_recommend_command,
             familiar_command,
             pssb_command,
