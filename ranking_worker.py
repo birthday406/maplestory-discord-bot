@@ -92,9 +92,18 @@ async def sync_ready_batches(outbox: Path) -> int:
         if ssh_key:
             command.extend(("-i", ssh_key))
         command.extend((str(batch_path), target))
-        process = await asyncio.create_subprocess_exec(*command)
-        if await process.wait() != 0:
-            logging.warning("Ranking batch transfer failed: %s.", batch_path.name)
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0:
+            logging.error(
+                "ranking_worker_error phase=sync batch=%s returncode=%s error=%s",
+                batch_path.name,
+                process.returncode,
+                stderr.decode(errors="replace").strip() or "-",
+            )
             break
         sent.mkdir(exist_ok=True)
         destination = sent / batch_path.name
@@ -102,6 +111,7 @@ async def sync_ready_batches(outbox: Path) -> int:
             suffix = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
             destination = sent / f"{batch_path.stem}-{suffix}.jsonl"
         batch_path.replace(destination)
+        logging.info("ranking_worker_sync phase=sync batch=%s", batch_path.name)
         synced += 1
     return synced
 
@@ -123,10 +133,12 @@ async def run_worker() -> None:
     scan_date = None
     world_offset = 0
     next_request_at = 0.0
+    current_page_index: int | None = None
 
     async with aiohttp.ClientSession() as session:
         async def fetch_page(world_id: int, page_index: int) -> dict:
-            nonlocal next_request_at
+            nonlocal current_page_index, next_request_at
+            current_page_index = page_index
             loop = asyncio.get_running_loop()
             if next_request_at > loop.time():
                 await asyncio.sleep(next_request_at - loop.time())
@@ -170,7 +182,7 @@ async def run_worker() -> None:
                     completed.clear()
                     world_offset = 0
                     logging.warning(
-                        "Secondary ranking scan active: date=%s worlds=%s.",
+                        "ranking_worker_start phase=cycle date=%s worlds=%s",
                         scan_date,
                         world_ids,
                     )
@@ -208,7 +220,7 @@ async def run_worker() -> None:
                     }:
                         completed.add(world_id)
                         logging.warning(
-                            "Secondary ranking world completed: world=%s date=%s.",
+                            "ranking_worker_complete phase=world world=%s date=%s",
                             world_id,
                             scan_date,
                         )
@@ -225,13 +237,28 @@ async def run_worker() -> None:
                     retry_until = int(datetime.now(timezone.utc).timestamp()) + wait_seconds
                     store.set_collector_backoff(failures, retry_until)
                     logging.warning(
-                        "Secondary ranking target %s returned %s; paused for %s seconds.",
+                        "ranking_worker_backoff phase=fetch world=%s page=%s "
+                        "status=%s failures=%s wait_seconds=%s retry_at=%s",
                         error.target,
+                        current_page_index,
                         error.status,
+                        failures,
                         wait_seconds,
+                        datetime.fromtimestamp(retry_until, timezone.utc).isoformat(),
                     )
-                except (aiohttp.ClientError, TimeoutError, ValueError, OSError):
-                    logging.exception("Secondary ranking collection failed.")
+                except (
+                    aiohttp.ClientError,
+                    TimeoutError,
+                    ValueError,
+                    OSError,
+                ) as error:
+                    logging.exception(
+                        "ranking_worker_error phase=collect world=%s page=%s "
+                        "error_type=%s",
+                        world_id,
+                        current_page_index,
+                        type(error).__name__,
+                    )
                     await asyncio.sleep(RANKING_FORBIDDEN_BACKOFF_STEPS[0])
         finally:
             writer.finalize()
@@ -239,7 +266,11 @@ async def run_worker() -> None:
 
 def main() -> None:
     load_dotenv()
-    logging.basicConfig(level=logging.INFO)
+    logging.Formatter.converter = time.gmtime
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)sZ %(levelname)s %(message)s",
+    )
     asyncio.run(run_worker())
 
 

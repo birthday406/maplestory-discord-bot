@@ -180,8 +180,19 @@ def import_ready_ranking_batches(
             imported += store.import_batch(batch_path)
             destination_dir = processed
             files += 1
-        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, sqlite3.Error):
-            logging.exception("Invalid secondary ranking batch: %s.", batch_path)
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            json.JSONDecodeError,
+            sqlite3.Error,
+        ) as error:
+            logging.exception(
+                "ranking_main_error phase=batch_import file=%s error_type=%s",
+                batch_path,
+                type(error).__name__,
+            )
             destination_dir = failed
             failed_files += 1
         destination_dir.mkdir(exist_ok=True)
@@ -4555,10 +4566,15 @@ class MapleNewsBot(commands.Bot):
             self._ranking_retry_until,
         )
         logging.warning(
-            "Ranking target %s returned %s; collection paused for %s seconds.",
+            "ranking_main_backoff phase=api target=%s status=%s failures=%s "
+            "wait_seconds=%s retry_at=%s",
             error.target,
             error.status,
+            self._ranking_limit_failures,
             retry_seconds,
+            datetime.fromtimestamp(
+                self._ranking_retry_until, timezone.utc
+            ).isoformat(),
         )
         return retry_seconds
 
@@ -5499,16 +5515,25 @@ class MapleNewsBot(commands.Bot):
                 )
                 if imported_files:
                     logging.info(
-                        "Secondary ranking batches imported: files=%s characters=%s.",
+                        "ranking_main_import phase=batch_import files=%s characters=%s",
                         imported_files,
                         imported,
                     )
                 if failed_files:
                     logging.warning(
-                        "Secondary ranking batches rejected: files=%s.", failed_files
+                        "ranking_main_rejected phase=batch_import files=%s", failed_files
                     )
-            except (OSError, ValueError, KeyError, TypeError, sqlite3.Error):
-                logging.exception("Secondary ranking batch import failed.")
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                TypeError,
+                sqlite3.Error,
+            ) as error:
+                logging.exception(
+                    "ranking_main_error phase=batch_import_loop error_type=%s",
+                    type(error).__name__,
+                )
 
         now_timestamp = int(datetime.now(timezone.utc).timestamp())
         if now_timestamp < self._ranking_retry_until:
@@ -5519,7 +5544,15 @@ class MapleNewsBot(commands.Bot):
             self._ranking_scan_date = scan_date
             self._ranking_world_offset = 0
             self._completed_ranking_world_ids.clear()
-            logging.warning("Ranking scan cycle active: date=%s.", scan_date)
+            logging.warning(
+                "ranking_main_start phase=cycle date=%s worlds=%s",
+                scan_date,
+                getattr(
+                    self,
+                    "_tracked_ranking_world_ids",
+                    TRACKED_RANKING_WORLD_IDS,
+                ),
+            )
 
         priority_name = self.ranking_store.next_priority_character(scan_date)
         if priority_name is not None:
@@ -5557,8 +5590,12 @@ class MapleNewsBot(commands.Bot):
                 KeyError,
                 OSError,
                 sqlite3.Error,
-            ):
-                logging.exception("Priority ranking collection failed: %s.", priority_name)
+            ) as error:
+                logging.exception(
+                    "ranking_main_error phase=priority character=%s error_type=%s",
+                    priority_name,
+                    type(error).__name__,
+                )
             return
 
         try:
@@ -5575,8 +5612,11 @@ class MapleNewsBot(commands.Bot):
             KeyError,
             OSError,
             sqlite3.Error,
-        ):
-            logging.exception("Ranking population collection failed.")
+        ) as error:
+            logging.exception(
+                "ranking_main_error phase=population error_type=%s",
+                type(error).__name__,
+            )
             return
 
         # 날짜가 바뀐 첫 실행의 DB 정리가 Discord 이벤트 루프를 막지 않게 합니다.
@@ -5629,11 +5669,13 @@ class MapleNewsBot(commands.Bot):
                 KeyError,
                 OSError,
                 sqlite3.Error,
-            ):
+            ) as error:
                 logging.exception(
-                    "Active ranking page collection failed: %s %s.",
+                    "ranking_main_error phase=active_page world=%s page=%s "
+                    "error_type=%s",
                     world_id,
                     page_index,
+                    type(error).__name__,
                 )
             return
 
@@ -5707,9 +5749,19 @@ class MapleNewsBot(commands.Bot):
             self._ranking_world_offset = (
                 self._ranking_world_offset - RANKING_PAGES_PER_BATCH
             ) % len(active_world_ids)
-        except (aiohttp.ClientError, TimeoutError, ValueError, OSError, sqlite3.Error):
+        except (
+            aiohttp.ClientError,
+            TimeoutError,
+            ValueError,
+            OSError,
+            sqlite3.Error,
+        ) as error:
             # 중단 지점은 페이지마다 DB에 저장되므로 다음 실행에서 이어갈 수 있습니다.
-            logging.exception("Main-world ranking collection failed.")
+            logging.exception(
+                "ranking_main_error phase=sequential allocation=%s error_type=%s",
+                allocation,
+                type(error).__name__,
+            )
 
     @check_news.error
     async def check_news_error(self, error: Exception) -> None:
