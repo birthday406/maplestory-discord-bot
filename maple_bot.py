@@ -153,6 +153,46 @@ def allocate_ranking_pages(
     return allocation, (offset + RANKING_PAGES_PER_BATCH) % len(world_ids)
 
 
+def configured_ranking_world_ids(value: str | None) -> tuple[int, ...]:
+    """이 인스턴스가 맡을 월드를 환경변수에서 읽습니다."""
+    if not value:
+        return TRACKED_RANKING_WORLD_IDS
+    world_ids = tuple(dict.fromkeys(int(item.strip()) for item in value.split(",")))
+    if not world_ids or any(world_id not in TRACKED_RANKING_WORLD_IDS for world_id in world_ids):
+        raise ValueError("RANKING_WORLD_IDS must contain only 1, 19, 45, and 70.")
+    return world_ids
+
+
+def import_ready_ranking_batches(
+    store: RankingStore,
+    inbox: Path,
+    max_files: int = 4,
+) -> tuple[int, int, int]:
+    """전송이 끝난 보조 수집 묶음을 합치고 처리 폴더로 옮깁니다."""
+    inbox.mkdir(parents=True, exist_ok=True)
+    processed = inbox / "processed"
+    failed = inbox / "failed"
+    imported = 0
+    files = 0
+    failed_files = 0
+    for batch_path in sorted(inbox.glob("*.jsonl"))[:max_files]:
+        try:
+            imported += store.import_batch(batch_path)
+            destination_dir = processed
+            files += 1
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, sqlite3.Error):
+            logging.exception("Invalid secondary ranking batch: %s.", batch_path)
+            destination_dir = failed
+            failed_files += 1
+        destination_dir.mkdir(exist_ok=True)
+        destination = destination_dir / batch_path.name
+        if destination.exists():
+            suffix = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+            destination = destination_dir / f"{batch_path.stem}-{suffix}.jsonl"
+        batch_path.replace(destination)
+    return imported, files, failed_files
+
+
 class KoreanCommandTranslator(app_commands.Translator):
     """지정된 명령어만 한국어 Discord에서 현지화해 표시합니다."""
 
@@ -3692,15 +3732,17 @@ async def ranking_command(
         getattr(client, "_ranking_interactive_requests", 0) + 1
     )
     try:
-        async with asyncio.timeout(45):
-            (
-                character,
-                world_character,
-                world_total_count,
-                legion,
-                achievement,
-                character_image,
-            ) = await fetch_cached_ranking_profile(client, nickname)
+        (
+            character,
+            world_character,
+            world_total_count,
+            legion,
+            achievement,
+            character_image,
+        ) = await asyncio.wait_for(
+            fetch_cached_ranking_profile(client, nickname),
+            timeout=45,
+        )
         if character is None:
             await interaction.followup.send(
                 f"**{discord.utils.escape_markdown(nickname)}** 캐릭터를 찾지 못했습니다.",
@@ -4172,6 +4214,12 @@ class MapleNewsBot(commands.Bot):
         migrate_sunny_sunday_state(self.sunny_sunday, sunny_channel_id)
         self.session: aiohttp.ClientSession | None = None
         self.ranking_store = RankingStore(RANKING_DB_PATH)
+        self._tracked_ranking_world_ids = configured_ranking_world_ids(
+            os.getenv("RANKING_WORLD_IDS")
+        )
+        self._ranking_inbox_path = Path(
+            os.getenv("RANKING_INBOX_PATH", "ranking-inbox")
+        )
         self._last_ranking_backup_at: datetime | None = None
         self._ranking_scan_date = None
         self._ranking_world_offset = 0
@@ -5442,6 +5490,26 @@ class MapleNewsBot(commands.Bot):
         """북미 주요 월드의 상위 랭킹을 번갈아 초당 10명씩 수집합니다."""
         if getattr(self, "_ranking_interactive_requests", 0):
             return
+        if hasattr(self, "ranking_store"):
+            try:
+                imported, imported_files, failed_files = await asyncio.to_thread(
+                    import_ready_ranking_batches,
+                    self.ranking_store,
+                    getattr(self, "_ranking_inbox_path", Path("ranking-inbox")),
+                )
+                if imported_files:
+                    logging.info(
+                        "Secondary ranking batches imported: files=%s characters=%s.",
+                        imported_files,
+                        imported,
+                    )
+                if failed_files:
+                    logging.warning(
+                        "Secondary ranking batches rejected: files=%s.", failed_files
+                    )
+            except (OSError, ValueError, KeyError, TypeError, sqlite3.Error):
+                logging.exception("Secondary ranking batch import failed.")
+
         now_timestamp = int(datetime.now(timezone.utc).timestamp())
         if now_timestamp < self._ranking_retry_until:
             return
@@ -5451,6 +5519,7 @@ class MapleNewsBot(commands.Bot):
             self._ranking_scan_date = scan_date
             self._ranking_world_offset = 0
             self._completed_ranking_world_ids.clear()
+            logging.warning("Ranking scan cycle active: date=%s.", scan_date)
 
         priority_name = self.ranking_store.next_priority_character(scan_date)
         if priority_name is not None:
@@ -5510,8 +5579,21 @@ class MapleNewsBot(commands.Bot):
             logging.exception("Ranking population collection failed.")
             return
 
-        self.ranking_store.prepare_active_pages(scan_date)
-        active_page = self.ranking_store.next_active_page(scan_date)
+        # 날짜가 바뀐 첫 실행의 DB 정리가 Discord 이벤트 루프를 막지 않게 합니다.
+        tracked_world_ids = getattr(
+            self,
+            "_tracked_ranking_world_ids",
+            TRACKED_RANKING_WORLD_IDS,
+        )
+        await asyncio.to_thread(
+            self.ranking_store.prepare_active_pages,
+            scan_date,
+            tracked_world_ids,
+        )
+        active_page = await asyncio.to_thread(
+            self.ranking_store.next_active_page,
+            scan_date,
+        )
         if active_page is not None:
             world_id, page_index = active_page
             try:
@@ -5557,7 +5639,7 @@ class MapleNewsBot(commands.Bot):
 
         active_world_ids = [
             world_id
-            for world_id in TRACKED_RANKING_WORLD_IDS
+            for world_id in tracked_world_ids
             if world_id not in self._completed_ranking_world_ids
         ]
         if not active_world_ids:
@@ -5586,6 +5668,14 @@ class MapleNewsBot(commands.Bot):
             for world_id, result in zip(allocation, results):
                 if result["reason"] in {"already_completed", "level_boundary", "end"}:
                     self._completed_ranking_world_ids.add(world_id)
+                elapsed = result.get("elapsed_seconds")
+                if elapsed is not None:
+                    logging.warning(
+                        "Ranking scan completed: world=%s date=%s elapsed=%s seconds.",
+                        RANKING_WORLDS[world_id],
+                        scan_date,
+                        elapsed,
+                    )
 
             saved = sum(result["saved"] for result in results)
             reasons = ", ".join(

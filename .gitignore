@@ -6,11 +6,16 @@ state.json
 ranking.db
 ranking.db-shm
 ranking.db-wal
+ranking-worker.db
+ranking-worker.db-shm
+ranking-worker.db-wal
 familiar.db
 familiar.db-shm
 familiar.db-wal
 *.db-journal
 ranking-update-probe.log
 ranking-update-probe.json
+ranking-inbox/
+ranking-outbox/
 __pycache__/
 *.py[cod]
