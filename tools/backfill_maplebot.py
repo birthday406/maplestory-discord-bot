@@ -344,30 +344,45 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
                 time.sleep(wait)
             name = character["name"]
             started = time.monotonic()
-            try:
-                page.goto(
-                    f"https://maplebot.io/character/{quote(name)}?region={character['region']}",
-                    wait_until="domcontentloaded",
-                    timeout=30_000,
-                )
-                page.get_by_text("Daily EXP Gains", exact=True).wait_for(timeout=20_000)
-                gains = page.evaluate(EXTRACT_DAILY_GAINS)
-                validate_series(gains)
-                item = {"name": name, "gains": gains}
-                append_checkpoint(checkpoint, item)
-                saved[name.casefold()] = item
-                print(f"[{index}/{len(targets)}] {name}: ok", flush=True)
-            except Exception as error:
-                errors += 1
-                append_checkpoint(checkpoint, {"name": name, "error": str(error)})
-                print(f"[{index}/{len(targets)}] {name}: {error}", file=sys.stderr, flush=True)
-                if not blocked:
+            for attempt in range(args.retries + 1):
+                try:
+                    page.goto(
+                        f"https://maplebot.io/character/{quote(name)}?region={character['region']}",
+                        wait_until="domcontentloaded",
+                        timeout=30_000,
+                    )
+                    page.get_by_text("Daily EXP Gains", exact=True).wait_for(timeout=20_000)
+                    gains = page.evaluate(EXTRACT_DAILY_GAINS)
+                    validate_series(gains)
+                    item = {"name": name, "gains": gains}
+                    append_checkpoint(checkpoint, item)
+                    saved[name.casefold()] = item
+                    errors = 0
+                    print(f"[{index}/{len(targets)}] {name}: ok", flush=True)
+                    break
+                except Exception as error:
+                    if blocked:
+                        raise RuntimeError(f"blocked by MapleBot: {blocked[-1]}")
                     page.close()
                     page = new_page()
-            if blocked:
-                raise RuntimeError(f"blocked by MapleBot: {blocked[-1]}")
+                    if attempt < args.retries:
+                        print(
+                            f"[{index}/{len(targets)}] {name}: retry "
+                            f"{attempt + 1}/{args.retries}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        time.sleep(args.delay)
+                        continue
+                    errors += 1
+                    append_checkpoint(checkpoint, {"name": name, "error": str(error)})
+                    print(
+                        f"[{index}/{len(targets)}] {name}: {error}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
             if errors >= args.max_errors:
-                raise RuntimeError(f"stopped after {errors} errors")
+                raise RuntimeError(f"stopped after {errors} consecutive errors")
         browser.close()
     return list(saved.values())
 
@@ -383,6 +398,7 @@ def main() -> None:
     parser.add_argument("--remote-script", default=DEFAULT_REMOTE_SCRIPT)
     parser.add_argument("--edge")
     parser.add_argument("--delay", type=float, default=1.0)
+    parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--max-errors", type=int, default=3)
     parser.add_argument("--checkpoint")

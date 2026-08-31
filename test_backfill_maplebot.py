@@ -1,9 +1,82 @@
+import sys
+import tempfile
+import types
 import unittest
+from datetime import date, timedelta
+from types import SimpleNamespace
+from unittest.mock import patch
+from urllib.parse import unquote, urlsplit
 
-from tools.backfill_maplebot import reconstruction_plan
+from tools.backfill_maplebot import collect, reconstruction_plan
 
 
 class MapleBotBackfillTests(unittest.TestCase):
+    def test_transient_failures_retry_and_success_resets_error_streak(self):
+        failures = {"Retry": 2, "FailA": 99, "Good": 0, "FailB": 99}
+        attempts = {name: 0 for name in failures}
+        gains = [
+            {"date": (date(2026, 8, 1) + timedelta(days=day)).isoformat(), "exp": 0}
+            for day in range(30)
+        ]
+
+        class Page:
+            def on(self, *_args):
+                pass
+
+            def goto(self, url, **_kwargs):
+                self.name = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
+
+            def get_by_text(self, *_args, **_kwargs):
+                return self
+
+            def wait_for(self, **_kwargs):
+                attempts[self.name] += 1
+                if attempts[self.name] <= failures[self.name]:
+                    raise TimeoutError("temporary render timeout")
+
+            def evaluate(self, _script):
+                return gains
+
+            def close(self):
+                pass
+
+        class Browser:
+            def new_page(self):
+                return Page()
+
+            def close(self):
+                pass
+
+        class Playwright:
+            chromium = SimpleNamespace(launch=lambda **_kwargs: Browser())
+
+        class Manager:
+            def __enter__(self):
+                return Playwright()
+
+            def __exit__(self, *_args):
+                pass
+
+        fake_sync_api = types.ModuleType("playwright.sync_api")
+        fake_sync_api.sync_playwright = Manager
+        args = SimpleNamespace(
+            checkpoint=None,
+            limit=None,
+            delay=0,
+            edge=None,
+            retries=2,
+            max_errors=2,
+        )
+        characters = [{"name": name, "region": "GMS"} for name in failures]
+
+        with tempfile.TemporaryDirectory() as directory:
+            args.checkpoint = f"{directory}/checkpoint.jsonl"
+            with patch.dict(sys.modules, {"playwright.sync_api": fake_sync_api}):
+                results = collect(args, characters)
+
+        self.assertEqual([item["name"] for item in results], ["Retry", "Good"])
+        self.assertEqual(attempts, {"Retry": 3, "FailA": 3, "Good": 1, "FailB": 3})
+
     def test_conflicting_newer_snapshot_only_fills_before_first_anchor(self):
         gains = [
             {"date": f"2026-08-{day:02d}", "exp": 10}
