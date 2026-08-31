@@ -176,19 +176,19 @@ class NewsFilteringTests(unittest.TestCase):
 
         self.assertEqual(
             maple_bot.current_ranking_scan_date(datetime(2026, 8, 29, 17, 9, tzinfo=pacific)),
-            date(2026, 8, 29),
+            date(2026, 8, 28),
         )
         self.assertEqual(
             maple_bot.current_ranking_scan_date(datetime(2026, 8, 29, 17, 10, tzinfo=pacific)),
-            date(2026, 8, 30),
+            date(2026, 8, 29),
         )
         self.assertEqual(
             maple_bot.current_ranking_scan_date(datetime(2026, 8, 30, 17, 9, tzinfo=pacific)),
-            date(2026, 8, 30),
+            date(2026, 8, 29),
         )
         self.assertEqual(
             maple_bot.current_ranking_scan_date(datetime(2026, 8, 30, 17, 10, tzinfo=pacific)),
-            date(2026, 8, 31),
+            date(2026, 8, 30),
         )
 
     def test_ranking_rate_limit_returns_without_sleeping_inside_fetch(self) -> None:

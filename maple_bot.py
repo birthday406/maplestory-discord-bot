@@ -102,7 +102,7 @@ RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.
 RANKING_SCAN_INTERVAL_SECONDS = 1
 RANKING_PAGES_PER_BATCH = 1
 RANKING_PROFILE_CACHE_SECONDS = 10 * 60
-RANKING_DAILY_START = timedelta(minutes=10)
+RANKING_DAILY_START = timedelta(days=1, minutes=10)
 RANKING_BACKUP_INTERVAL = timedelta(hours=1)
 RANKING_FORBIDDEN_BACKOFF_STEPS = (5 * 60, 15 * 60, 60 * 60, 6 * 60 * 60)
 RANKING_RATE_LIMIT_BACKOFF_SECONDS = 60
@@ -1680,12 +1680,12 @@ def create_ranking_history_image(
         ("전체 랭킹", f"{character['rank']:,}위", f"{world} {world_rank_text}"),
         (
             "유니온",
-            f"Lv. {legion['legionLevel']:,}" if legion else "대표 캐릭터만",
+            f"Lv. {legion['legionLevel']:,}" if legion else "대표 캐릭터에서만",
             f"{legion['rank']:,}위" if legion else "확인 가능",
         ),
         (
             "업적",
-            f"{achievement['score']:,}점" if achievement else "대표 캐릭터만",
+            f"{achievement['score']:,}점" if achievement else "대표 캐릭터에서만",
             f"{achievement['rank']:,}위" if achievement else "확인 가능",
         ),
     )
@@ -1705,7 +1705,7 @@ def create_ranking_history_image(
         draw.text(
             ((left + 16) * scale, 247 * scale),
             main_value,
-            font=score_font,
+            font=korean_body_font if re.search(r"[가-힣]", main_value) else score_font,
             fill="#EEF4F8",
         )
         draw.text(
