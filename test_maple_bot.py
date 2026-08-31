@@ -172,23 +172,21 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertEqual(offset, 0)
 
     def test_ranking_scan_day_uses_utc(self) -> None:
-        pacific = maple_bot.URSUS_TIMEZONE
-
         self.assertEqual(
-            maple_bot.current_ranking_scan_date(datetime(2026, 8, 29, 17, 9, tzinfo=pacific)),
-            date(2026, 8, 28),
-        )
-        self.assertEqual(
-            maple_bot.current_ranking_scan_date(datetime(2026, 8, 29, 17, 10, tzinfo=pacific)),
+            maple_bot.current_ranking_scan_date(datetime(2026, 8, 30, 17, 9, tzinfo=timezone.utc)),
             date(2026, 8, 29),
         )
         self.assertEqual(
-            maple_bot.current_ranking_scan_date(datetime(2026, 8, 30, 17, 9, tzinfo=pacific)),
-            date(2026, 8, 29),
-        )
-        self.assertEqual(
-            maple_bot.current_ranking_scan_date(datetime(2026, 8, 30, 17, 10, tzinfo=pacific)),
+            maple_bot.current_ranking_scan_date(datetime(2026, 8, 30, 17, 10, tzinfo=timezone.utc)),
             date(2026, 8, 30),
+        )
+        self.assertEqual(
+            maple_bot.current_ranking_scan_date(datetime(2026, 8, 31, 17, 9, tzinfo=timezone.utc)),
+            date(2026, 8, 30),
+        )
+        self.assertEqual(
+            maple_bot.current_ranking_scan_date(datetime(2026, 8, 31, 17, 10, tzinfo=timezone.utc)),
+            date(2026, 8, 31),
         )
 
     def test_ranking_rate_limit_returns_without_sleeping_inside_fetch(self) -> None:
