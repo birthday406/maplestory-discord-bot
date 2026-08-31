@@ -96,6 +96,7 @@ CATEGORY_COLORS = {
 STATE_PATH = Path("state.json")
 RANKING_DB_PATH = Path("ranking.db")
 FAMILIAR_DB_PATH = Path("familiar.db")
+BACKFILL_ALERT_PATH = Path(__file__).with_name("maplebot-backfill-alert.txt")
 RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.db"
 # 12.5명/초도 장시간 실행하면 공식 API가 403을 반환하므로
 # 요청을 몰아서 보내지 않고 1초마다 한 페이지(최대 10명)씩 고르게 수집합니다.
@@ -3660,7 +3661,10 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
         cache = client._ranking_profile_cache = {}
     key = nickname.casefold()
     cached = cache.get(key)
-    if cached is not None and now - cached[0] < RANKING_PROFILE_CACHE_SECONDS:
+    cached_is_fresh = (
+        cached is not None and now - cached[0] < RANKING_PROFILE_CACHE_SECONDS
+    )
+    if cached_is_fresh and cached[1][3] is not None and cached[1][4] is not None:
         return cached[1]
 
     ranking_store = getattr(client, "ranking_store", None)
@@ -3670,6 +3674,17 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
         and hasattr(ranking_store, "get_ranking_profile")
         else None
     )
+    if cached_is_fresh:
+        cached_representative_count = sum(
+            cached[1][index] is not None for index in (3, 4)
+        )
+        stored_representative_count = (
+            sum(stored[index] is not None for index in (3, 4))
+            if stored is not None
+            else 0
+        )
+        if stored_representative_count <= cached_representative_count:
+            return cached[1]
     if stored is not None:
         character = stored[0]
         fetch_character_image = getattr(client, "fetch_character_image", None)
@@ -4244,6 +4259,7 @@ class MapleNewsBot(commands.Bot):
         self._ranking_interactive_requests = 0
         self._ranking_profile_cache: dict[str, tuple[float, tuple]] = {}
         self._ranking_profile_refresh_requests: set[str] = set()
+        self._last_backfill_alert: str | None = None
         self.familiar_expectation_store = FamiliarExpectationStore(FAMILIAR_DB_PATH)
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
         self.openai = AsyncOpenAI()
@@ -4354,6 +4370,8 @@ class MapleNewsBot(commands.Bot):
             self.update_exchange_channels.start()
         if not self.collect_rankings.is_running():
             self.collect_rankings.start()
+        if not self.check_backfill_alert.is_running():
+            self.check_backfill_alert.start()
 
     async def close(self) -> None:
         if self.session is not None:
@@ -4366,6 +4384,25 @@ class MapleNewsBot(commands.Bot):
         async with self.session.get(NEWS_URL, timeout=aiohttp.ClientTimeout(total=20)) as response:
             response.raise_for_status()
             return watched_posts(await response.json())
+
+    async def send_owner_dm(self, message: str) -> None:
+        """서버 관리자가 아니라 Discord 애플리케이션 소유자에게만 알립니다."""
+        application = await self.application_info()
+        try:
+            await application.owner.send(message)
+        except discord.HTTPException:
+            logging.exception("Failed to send a problem DM to the bot owner.")
+
+    @tasks.loop(minutes=1)
+    async def check_backfill_alert(self) -> None:
+        try:
+            alert = BACKFILL_ALERT_PATH.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            return
+        if not alert or alert == self._last_backfill_alert:
+            return
+        await self.send_owner_dm(f"⚠️ **랭킹 백필 수집기 문제**\n```text\n{alert[:1800]}\n```")
+        self._last_backfill_alert = alert
 
     async def fetch_server_status(self) -> dict[str, bool]:
         # 넥슨 공식 상태 API 한 번으로 주요 4개 월드를 함께 확인합니다.
@@ -5797,6 +5834,10 @@ class MapleNewsBot(commands.Bot):
     async def update_exchange_channels_error(self, error: Exception) -> None:
         logging.exception("Exchange channel update failed.", exc_info=error)
 
+    @check_backfill_alert.error
+    async def check_backfill_alert_error(self, error: Exception) -> None:
+        logging.exception("Backfill alert check failed.", exc_info=error)
+
     @check_news.before_loop
     async def before_check_news(self) -> None:
         # 디스코드 기본 연결 대기 함수를 가리지 않도록 다른 이름을 사용합니다.
@@ -5828,6 +5869,10 @@ class MapleNewsBot(commands.Bot):
 
     @update_exchange_channels.before_loop
     async def before_update_exchange_channels(self) -> None:
+        await self.wait_until_ready()
+
+    @check_backfill_alert.before_loop
+    async def before_check_backfill_alert(self) -> None:
         await self.wait_until_ready()
 
 

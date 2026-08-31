@@ -1121,6 +1121,42 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         store.queue_priority_refresh.assert_not_called()
         self.assertEqual(client._ranking_profile_refresh_requests, {"home"})
 
+    async def test_saved_representative_data_replaces_incomplete_cache(self) -> None:
+        character = self.character()
+        saved = (
+            character,
+            self.character(rank=1309),
+            1_000_000,
+            self.character(rank=2923, legionLevel=10221),
+            self.character(rank=810, score=33370),
+        )
+        now = asyncio.get_running_loop().time()
+        client = SimpleNamespace(
+            ranking_store=SimpleNamespace(get_ranking_profile=Mock(return_value=saved)),
+            _ranking_profile_cache={
+                "home": (
+                    now,
+                    (
+                        character,
+                        self.character(rank=1309),
+                        1_000_000,
+                        None,
+                        None,
+                        b"old",
+                    ),
+                )
+            },
+            fetch_ranking_character=AsyncMock(),
+            fetch_character_image=AsyncMock(return_value=b"new"),
+        )
+
+        profile = await fetch_cached_ranking_profile(client, "Home")
+
+        self.assertEqual(profile[3]["legionLevel"], 10221)
+        self.assertEqual(profile[4]["score"], 33370)
+        self.assertEqual(profile[5], b"new")
+        client.fetch_ranking_character.assert_not_awaited()
+
     async def test_command_loads_rankings_and_unfiltered_world_total(self) -> None:
         character = self.character()
         world_character = self.character(rank=1309)
@@ -3394,6 +3430,21 @@ class CommandStatsTests(unittest.IsolatedAsyncioTestCase):
             "명령어 사용 통계",
         )
         self.assertTrue(allowed.response.send_message.await_args.kwargs["ephemeral"])
+
+    async def test_new_backfill_alert_is_sent_to_owner_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            alert_path = Path(directory) / "alert.txt"
+            alert_path.write_text("RuntimeError: blocked by MapleBot", encoding="utf-8")
+            bot = SimpleNamespace(
+                _last_backfill_alert=None,
+                send_owner_dm=AsyncMock(),
+            )
+            with patch.object(maple_bot, "BACKFILL_ALERT_PATH", alert_path):
+                await MapleNewsBot.check_backfill_alert.coro(bot)
+                await MapleNewsBot.check_backfill_alert.coro(bot)
+
+        bot.send_owner_dm.assert_awaited_once()
+        self.assertIn("blocked by MapleBot", bot.send_owner_dm.await_args.args[0])
 
 
 class ItemSearchTests(unittest.IsolatedAsyncioTestCase):
