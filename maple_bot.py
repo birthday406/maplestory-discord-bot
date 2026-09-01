@@ -4245,6 +4245,7 @@ class MapleNewsBot(commands.Bot):
         self._ranking_populations_ready_date = None
         self._ranking_active_pages_ready_date = None
         self._ranking_world_offset = 0
+        self._ranking_representative_offset = 0
         self._completed_ranking_world_ids: set[int] = set()
         (
             self._ranking_limit_failures,
@@ -5794,7 +5795,81 @@ class MapleNewsBot(commands.Bot):
                     self.backup_ranking_database()
                 )
                 self._last_ranking_backup_scan_date = scan_date
-            await asyncio.sleep(60)
+            representative_jobs = [
+                (world_id, ranking_type)
+                for world_id in tracked_world_ids
+                for ranking_type in ("legion", "achievement")
+            ]
+            world_id, ranking_type = representative_jobs[
+                self._ranking_representative_offset % len(representative_jobs)
+            ]
+            self._ranking_representative_offset += 1
+            page_index = self.ranking_store.representative_cursor(
+                world_id, ranking_type
+            )
+            try:
+                payload = await self.fetch_ranking_payload(
+                    "na",
+                    {
+                        "type": ranking_type,
+                        "id": str(world_id),
+                        "reboot_index": "0",
+                        "page_index": str(page_index),
+                    },
+                    f"{ranking_type}:{world_id}",
+                )
+                ranks = payload.get("ranks", [])
+                normalized = []
+                for character in ranks:
+                    saved = {"characterName": character["characterName"]}
+                    if ranking_type == "legion":
+                        saved.update(
+                            legionLevel=int(character.get("legionLevel", 0)),
+                            legionRank=int(character["rank"]),
+                        )
+                    else:
+                        saved.update(
+                            achievementScore=int(character.get("starSum", 0)),
+                            achievementRank=int(character["rank"]),
+                        )
+                    normalized.append(saved)
+                self.ranking_store.save_representative_page(
+                    normalized, scan_date, ranking_type
+                )
+                next_index = page_index + len(ranks)
+                total_count = int(payload.get("totalCount", 0))
+                if not ranks or (total_count and next_index > total_count):
+                    self.ranking_store.finish_representative_scan(
+                        world_id, ranking_type
+                    )
+                    logging.warning(
+                        "ranking_main_complete phase=representative type=%s world=%s",
+                        ranking_type,
+                        world_id,
+                    )
+                else:
+                    self.ranking_store.advance_representative_scan(
+                        world_id, ranking_type, next_index
+                    )
+                self.clear_ranking_backoff_after_success()
+            except RankingRateLimited as error:
+                self.pause_ranking_collection(error)
+            except (
+                aiohttp.ClientError,
+                TimeoutError,
+                ValueError,
+                KeyError,
+                OSError,
+                sqlite3.Error,
+            ) as error:
+                logging.exception(
+                    "ranking_main_error phase=representative type=%s world=%s "
+                    "page=%s error_type=%s",
+                    ranking_type,
+                    world_id,
+                    page_index,
+                    type(error).__name__,
+                )
             return
 
         allocation, self._ranking_world_offset = allocate_ranking_pages(

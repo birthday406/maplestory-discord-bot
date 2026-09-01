@@ -145,6 +145,15 @@ class RankingStore:
                     character_name TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS representative_scan_state (
+                    world_id INTEGER NOT NULL,
+                    ranking_type TEXT NOT NULL,
+                    next_index INTEGER NOT NULL DEFAULT 1,
+                    started_at INTEGER NOT NULL,
+                    completed_at INTEGER,
+                    PRIMARY KEY (world_id, ranking_type)
+                );
+
                 CREATE TABLE IF NOT EXISTS ranking_profiles (
                     name_key TEXT PRIMARY KEY,
                     profile_json TEXT NOT NULL,
@@ -938,30 +947,121 @@ class RankingStore:
 
     def import_batch(self, batch_path: Path) -> int:
         """보조 수집기의 JSONL 묶음을 운영 DB에 중복 없이 합칩니다."""
-        grouped: dict[date, list[dict]] = {}
+        grouped: dict[tuple[date, str], list[dict]] = {}
         with batch_path.open(encoding="utf-8") as batch:
             for line in batch:
                 if not line.strip():
                     continue
                 record = json.loads(line)
                 snapshot_date = date.fromisoformat(record["scan_date"])
+                ranking_type = record.get("ranking_type", "world")
                 page_index = int(record["page_index"])
                 for character in record["characters"]:
                     saved = dict(character)
                     saved["_scanPageIndex"] = page_index
-                    grouped.setdefault(snapshot_date, []).append(saved)
+                    grouped.setdefault((snapshot_date, ranking_type), []).append(saved)
 
         imported = 0
-        for snapshot_date, characters in grouped.items():
-            self.save_page(
-                characters,
-                snapshot_date,
-                next_index=1,
-                update_checkpoint=False,
-                preserve_newer=True,
-            )
-            imported += len(characters)
+        for (snapshot_date, ranking_type), characters in grouped.items():
+            if ranking_type == "world":
+                self.save_page(
+                    characters,
+                    snapshot_date,
+                    next_index=1,
+                    update_checkpoint=False,
+                    preserve_newer=True,
+                )
+                imported += len(characters)
+            elif ranking_type in {"legion", "achievement"}:
+                imported += self.save_representative_page(
+                    characters, snapshot_date, ranking_type
+                )
+            else:
+                raise ValueError(f"Unsupported ranking type: {ranking_type}")
         return imported
+
+    def known_character_keys(self, world_id: int) -> set[str]:
+        """보조 수집기가 대표 랭킹에서 저장 대상만 골라 전송하게 합니다."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT name_key FROM characters WHERE world_id = ? AND level >= ?",
+                (world_id, MIN_TRACKED_LEVEL),
+            ).fetchall()
+        return {row["name_key"] for row in rows}
+
+    def representative_cursor(self, world_id: int, ranking_type: str) -> int:
+        now = int(datetime.now(timezone.utc).timestamp())
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO representative_scan_state
+                    (world_id, ranking_type, next_index, started_at)
+                VALUES (?, ?, 1, ?)
+                """,
+                (world_id, ranking_type, now),
+            )
+            row = connection.execute(
+                """SELECT next_index FROM representative_scan_state
+                   WHERE world_id = ? AND ranking_type = ?""",
+                (world_id, ranking_type),
+            ).fetchone()
+        return int(row["next_index"])
+
+    def advance_representative_scan(
+        self, world_id: int, ranking_type: str, next_index: int
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """UPDATE representative_scan_state SET next_index = ?
+                   WHERE world_id = ? AND ranking_type = ?""",
+                (next_index, world_id, ranking_type),
+            )
+
+    def finish_representative_scan(self, world_id: int, ranking_type: str) -> None:
+        now = int(datetime.now(timezone.utc).timestamp())
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE representative_scan_state
+                SET next_index = 1, started_at = ?, completed_at = ?
+                WHERE world_id = ? AND ranking_type = ?
+                """,
+                (now, now, world_id, ranking_type),
+            )
+
+    def save_representative_page(
+        self, characters: list[dict], scan_date: date, ranking_type: str
+    ) -> int:
+        """레벨 랭킹은 건드리지 않고 대표 캐릭터의 유니온/업적만 병합합니다."""
+        if ranking_type == "legion":
+            columns = ("legion_level", "legion_rank")
+            keys = ("legionLevel", "legionRank")
+        elif ranking_type == "achievement":
+            columns = ("achievement_score", "achievement_rank")
+            keys = ("achievementScore", "achievementRank")
+        else:
+            raise ValueError(f"Unsupported ranking type: {ranking_type}")
+
+        updated = 0
+        day = scan_date.isoformat()
+        with self._connect() as connection:
+            for character in characters:
+                values = (character[keys[0]], character[keys[1]])
+                name_key = character["characterName"].casefold()
+                cursor = connection.execute(
+                    f"UPDATE characters SET {columns[0]} = ?, {columns[1]} = ? "
+                    "WHERE name_key = ?",
+                    (*values, name_key),
+                )
+                if not cursor.rowcount:
+                    continue
+                connection.execute(
+                    f"UPDATE ranking_snapshots SET {columns[0]} = ?, {columns[1]} = ? "
+                    "WHERE name_key = ? AND snapshot_date = ?",
+                    (*values, name_key, day),
+                )
+                updated += 1
+        return updated
 
     def save_snapshot(self, character: dict, scan_date: date) -> list[dict]:
         """명령어로 조회한 한 캐릭터도 자동 수집과 같은 표에 기록합니다."""

@@ -22,6 +22,26 @@ from maple_bot import (
 from ranking_store import MIN_TRACKED_LEVEL, RankingStore, scan_rankings
 
 
+REPRESENTATIVE_RANKING_TYPES = ("legion", "achievement")
+
+
+def normalize_representative(character: dict, ranking_type: str) -> dict:
+    saved = {"characterName": character["characterName"]}
+    if ranking_type == "legion":
+        saved.update(
+            legionLevel=int(character.get("legionLevel", 0)),
+            legionRank=int(character["rank"]),
+        )
+    elif ranking_type == "achievement":
+        saved.update(
+            achievementScore=int(character.get("starSum", 0)),
+            achievementRank=int(character["rank"]),
+        )
+    else:
+        raise ValueError(f"Unsupported ranking type: {ranking_type}")
+    return saved
+
+
 class RankingBatchWriter:
     """가져온 페이지를 전송 가능한 JSONL 묶음으로 안전하게 저장합니다."""
 
@@ -44,6 +64,7 @@ class RankingBatchWriter:
         world_id: int,
         page_index: int,
         characters: list[dict],
+        ranking_type: str = "world",
     ) -> None:
         if not characters:
             return
@@ -56,6 +77,7 @@ class RankingBatchWriter:
                 "scan_date": scan_date.isoformat(),
                 "world_id": world_id,
                 "page_index": page_index,
+                "ranking_type": ranking_type,
                 "characters": characters,
             },
             self._file,
@@ -136,11 +158,17 @@ async def run_worker() -> None:
     request_lock = asyncio.Lock()
     concurrency = max(1, int(os.getenv("RANKING_WORKER_CONCURRENCY", "3")))
     current_page_index: int | None = None
+    current_ranking_type = "world"
+    representative_offset = 0
+    known_by_world: dict[int, set[str]] = {}
 
     async with aiohttp.ClientSession() as session:
-        async def fetch_page(world_id: int, page_index: int) -> dict:
-            nonlocal current_page_index, next_request_at
+        async def request_page(
+            ranking_type: str, world_id: int, page_index: int
+        ) -> dict:
+            nonlocal current_page_index, current_ranking_type, next_request_at
             current_page_index = page_index
+            current_ranking_type = ranking_type
             async with request_lock:
                 loop = asyncio.get_running_loop()
                 if next_request_at > loop.time():
@@ -149,7 +177,7 @@ async def run_worker() -> None:
             async with session.get(
                 RANKING_API_URL.format(region="na"),
                 params={
-                    "type": "world",
+                    "type": ranking_type,
                     "id": str(world_id),
                     "reboot_index": "0",
                     "page_index": str(page_index),
@@ -161,9 +189,14 @@ async def run_worker() -> None:
                         retry_after = int(response.headers.get("Retry-After", ""))
                     except ValueError:
                         retry_after = None
-                    raise RankingRateLimited(world_id, response.status, retry_after)
+                    raise RankingRateLimited(
+                        f"{ranking_type}:{world_id}", response.status, retry_after
+                    )
                 response.raise_for_status()
-                payload = await response.json()
+                return await response.json()
+
+        async def fetch_page(world_id: int, page_index: int) -> dict:
+            payload = await request_page("world", world_id, page_index)
             writer.write(
                 scan_date,
                 world_id,
@@ -176,6 +209,48 @@ async def run_worker() -> None:
             )
             return payload
 
+        async def scan_representative_chunk(
+            world_id: int, ranking_type: str
+        ) -> None:
+            cursor = store.representative_cursor(world_id, ranking_type)
+            page_indices = [cursor + 10 * offset for offset in range(concurrency)]
+            payloads = await asyncio.gather(
+                *(request_page(ranking_type, world_id, index) for index in page_indices)
+            )
+            if world_id not in known_by_world:
+                known_by_world[world_id] = store.known_character_keys(world_id)
+            known = known_by_world[world_id]
+            for page_index, payload in zip(page_indices, payloads):
+                ranks = payload.get("ranks", [])
+                if not ranks:
+                    store.finish_representative_scan(world_id, ranking_type)
+                    break
+                matches = [
+                    normalize_representative(character, ranking_type)
+                    for character in ranks
+                    if character["characterName"].casefold() in known
+                ]
+                writer.write(
+                    current_ranking_scan_date(),
+                    world_id,
+                    page_index,
+                    matches,
+                    ranking_type,
+                )
+                next_index = page_index + len(ranks)
+                total_count = int(payload.get("totalCount", 0))
+                if total_count and next_index > total_count:
+                    store.finish_representative_scan(world_id, ranking_type)
+                    logging.warning(
+                        "ranking_worker_complete phase=representative type=%s world=%s",
+                        ranking_type,
+                        world_id,
+                    )
+                    break
+                store.advance_representative_scan(
+                    world_id, ranking_type, next_index
+                )
+
         try:
             while True:
                 today = current_ranking_scan_date()
@@ -183,6 +258,7 @@ async def run_worker() -> None:
                     writer.finalize()
                     scan_date = today
                     completed.clear()
+                    known_by_world.clear()
                     world_offset = 0
                     logging.warning(
                         "ranking_worker_start phase=cycle date=%s worlds=%s",
@@ -197,9 +273,53 @@ async def run_worker() -> None:
 
                 remaining = [world for world in world_ids if world not in completed]
                 if not remaining:
-                    writer.finalize()
-                    await sync_ready_batches(writer.outbox)
-                    await asyncio.sleep(60)
+                    jobs = [
+                        (world_id, ranking_type)
+                        for world_id in world_ids
+                        for ranking_type in REPRESENTATIVE_RANKING_TYPES
+                    ]
+                    world_id, ranking_type = jobs[representative_offset % len(jobs)]
+                    representative_offset += 1
+                    try:
+                        await scan_representative_chunk(world_id, ranking_type)
+                        if failures:
+                            failures = 0
+                            retry_until = 0
+                            store.clear_collector_backoff()
+                        await sync_ready_batches(writer.outbox)
+                    except RankingRateLimited as error:
+                        writer.finalize()
+                        await sync_ready_batches(writer.outbox)
+                        failures += 1
+                        wait_seconds = ranking_backoff_seconds(
+                            error.status, error.retry_after, failures
+                        )
+                        retry_until = (
+                            int(datetime.now(timezone.utc).timestamp()) + wait_seconds
+                        )
+                        store.set_collector_backoff(failures, retry_until)
+                        logging.warning(
+                            "ranking_worker_backoff phase=fetch target=%s page=%s "
+                            "type=%s status=%s failures=%s wait_seconds=%s retry_at=%s",
+                            error.target,
+                            current_page_index,
+                            current_ranking_type,
+                            error.status,
+                            failures,
+                            wait_seconds,
+                            datetime.fromtimestamp(
+                                retry_until, timezone.utc
+                            ).isoformat(),
+                        )
+                    except (aiohttp.ClientError, TimeoutError, ValueError, OSError):
+                        logging.exception(
+                            "ranking_worker_error phase=collect world=%s page=%s "
+                            "type=%s",
+                            world_id,
+                            current_page_index,
+                            current_ranking_type,
+                        )
+                        await asyncio.sleep(RANKING_FORBIDDEN_BACKOFF_STEPS[0])
                     continue
                 world_id = remaining[world_offset % len(remaining)]
                 world_offset += 1
@@ -252,9 +372,10 @@ async def run_worker() -> None:
                     store.set_collector_backoff(failures, retry_until)
                     logging.warning(
                         "ranking_worker_backoff phase=fetch world=%s page=%s "
-                        "status=%s failures=%s wait_seconds=%s retry_at=%s",
+                        "type=%s status=%s failures=%s wait_seconds=%s retry_at=%s",
                         error.target,
                         current_page_index,
+                        current_ranking_type,
                         error.status,
                         failures,
                         wait_seconds,
@@ -268,9 +389,10 @@ async def run_worker() -> None:
                 ) as error:
                     logging.exception(
                         "ranking_worker_error phase=collect world=%s page=%s "
-                        "error_type=%s",
+                        "type=%s error_type=%s",
                         world_id,
                         current_page_index,
+                        current_ranking_type,
                         type(error).__name__,
                     )
                     await asyncio.sleep(RANKING_FORBIDDEN_BACKOFF_STEPS[0])

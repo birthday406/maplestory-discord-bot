@@ -5,7 +5,7 @@ from pathlib import Path
 
 from maple_bot import configured_ranking_world_ids, import_ready_ranking_batches
 from ranking_store import RankingStore
-from ranking_worker import RankingBatchWriter
+from ranking_worker import RankingBatchWriter, normalize_representative
 
 
 class RankingWorkerTests(unittest.TestCase):
@@ -74,6 +74,56 @@ class RankingWorkerTests(unittest.TestCase):
         self.assertEqual(configured_ranking_world_ids("45,70,45"), (45, 70))
         with self.assertRaises(ValueError):
             configured_ranking_world_ids("30")
+
+    def test_representative_batches_only_enrich_existing_character(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = RankingStore(root / "ranking.db")
+            day = date(2026, 8, 31)
+            original = self.character("AkaneLize", 25, 123)
+            store.save_page(
+                [original], day, next_index=1, update_checkpoint=False
+            )
+
+            writer = RankingBatchWriter(root / "outbox", "worker", pages_per_batch=2)
+            legion = normalize_representative(
+                {"characterName": "AkaneLize", "legionLevel": 10_535, "rank": 877},
+                "legion",
+            )
+            achievement = normalize_representative(
+                {"characterName": "AkaneLize", "starSum": 33_370, "rank": 113},
+                "achievement",
+            )
+            writer.write(day, 45, 1, [legion], "legion")
+            writer.write(day, 45, 1, [achievement], "achievement")
+            batch = next((root / "outbox").glob("*.jsonl"))
+
+            self.assertEqual(store.import_batch(batch), 2)
+            with store._connect() as connection:
+                current = connection.execute(
+                    """SELECT ranking, exp, legion_level, legion_rank,
+                              achievement_score, achievement_rank
+                       FROM characters WHERE name_key = 'akanelize'"""
+                ).fetchone()
+                snapshot = connection.execute(
+                    """SELECT legion_level, legion_rank,
+                              achievement_score, achievement_rank
+                       FROM ranking_snapshots
+                       WHERE name_key = 'akanelize' AND snapshot_date = ?""",
+                    (day.isoformat(),),
+                ).fetchone()
+            self.assertEqual((current["ranking"], current["exp"]), (25, 123))
+            self.assertEqual(tuple(current)[2:], (10_535, 877, 33_370, 113))
+            self.assertEqual(tuple(snapshot), (10_535, 877, 33_370, 113))
+
+    def test_representative_checkpoint_survives_day_change_and_restarts_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            self.assertEqual(store.representative_cursor(45, "legion"), 1)
+            store.advance_representative_scan(45, "legion", 31)
+            self.assertEqual(store.representative_cursor(45, "legion"), 31)
+            store.finish_representative_scan(45, "legion")
+            self.assertEqual(store.representative_cursor(45, "legion"), 1)
 
     def test_active_pages_follow_changed_world_assignment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
