@@ -29,6 +29,13 @@ class MapleBotBackfillTests(unittest.TestCase):
             def get_by_text(self, *_args, **_kwargs):
                 return self
 
+            def locator(self, *_args, **_kwargs):
+                return self
+
+            @property
+            def first(self):
+                return self
+
             def wait_for(self, **_kwargs):
                 attempts[self.name] += 1
                 if attempts[self.name] <= failures[self.name]:

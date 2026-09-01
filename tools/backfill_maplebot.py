@@ -361,7 +361,9 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
                         wait_until="domcontentloaded",
                         timeout=15_000,
                     )
-                    page.get_by_text("Daily EXP Gains", exact=True).wait_for(timeout=8_000)
+                    page.locator(".recharts-wrapper").first.wait_for(
+                        state="attached", timeout=5_000
+                    )
                     gains = page.evaluate(EXTRACT_DAILY_GAINS)
                     validate_series(gains)
                     item = {"name": name, "gains": gains}
@@ -431,7 +433,7 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
                     f"stopped after {recovery_count - 1} recovery waits"
                 )
             recovery_wait = min(
-                args.recovery_delay * (4 ** (recovery_count - 1)), 300
+                args.recovery_delay * (3 ** (recovery_count - 1)), 90
             )
             print(
                 f"MapleBot temporarily unavailable; rebuilding browser and "
@@ -462,7 +464,7 @@ def main() -> None:
     parser.add_argument("--retries", type=int, default=0)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--max-errors", type=int, default=3)
-    parser.add_argument("--recovery-delay", type=int, default=30)
+    parser.add_argument("--recovery-delay", type=int, default=10)
     parser.add_argument("--max-recoveries", type=int, default=3)
     parser.add_argument("--checkpoint")
     parser.add_argument("--check-integrity", action="store_true")
