@@ -18,5 +18,6 @@ ranking-update-probe.json
 ranking-inbox/
 ranking-outbox/
 maplebot-backfill-level-*.jsonl
+maplebot-backfill-current-level
 __pycache__/
 *.py[cod]

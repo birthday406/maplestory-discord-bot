@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "tools" / "run_maplebot_backfill_aux.sh"
 LOG_PATH = ROOT / "maplebot-backfill-280-plus.log"
 ALERT_PATH = ROOT / "maplebot-backfill-alert.txt"
+CURRENT_LEVEL_PATH = ROOT / "maplebot-backfill-current-level"
 
 
 def backfill_processes() -> list[tuple[int, str]]:
@@ -55,7 +56,15 @@ def latest_progress(log_path: Path = LOG_PATH, level: int | None = None) -> str 
     if level is not None:
         marker = f"level {level} start"
         start = max((index for index, line in enumerate(lines) if marker in line), default=0)
-    for line in reversed(lines[start:]):
+    end = next(
+        (
+            index
+            for index in range(start + 1, len(lines))
+            if re.search(r"level \d+ start", lines[index])
+        ),
+        len(lines),
+    )
+    for line in reversed(lines[start:end]):
         match = re.match(r"\[(\d+)/(\d+)\]", line)
         if match:
             return f"{match.group(1)}/{match.group(2)}"
@@ -67,7 +76,11 @@ def status_text(root: Path = ROOT, processes: list[tuple[int, str]] | None = Non
     worker = next((command for _, command in processes if "backfill_maplebot.py" in command), "")
     level_match = re.search(r"--level\s+(\d+)", worker)
     counts = checkpoint_counts(root)
-    level = int(level_match.group(1)) if level_match else max(counts, default=0)
+    try:
+        saved_level = int((root / CURRENT_LEVEL_PATH.name).read_text().strip())
+    except (FileNotFoundError, ValueError):
+        saved_level = 0
+    level = saved_level or (int(level_match.group(1)) if level_match else max(counts, default=0))
     progress = latest_progress(root / LOG_PATH.name, level or None)
     lines = [f"백필 상태: {'실행 중' if processes else '중지됨'}"]
     if level:

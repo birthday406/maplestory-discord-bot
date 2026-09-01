@@ -29,6 +29,9 @@ class BackfillControlTests(unittest.TestCase):
                 "[7/100] Done: ok\n",
                 encoding="utf-8",
             )
+            (root / "maplebot-backfill-current-level").write_text(
+                "295\n", encoding="utf-8"
+            )
 
             result = status_text(
                 root,
@@ -38,6 +41,22 @@ class BackfillControlTests(unittest.TestCase):
         self.assertIn("백필 상태: 실행 중", result)
         self.assertIn("현재 레벨 저장: 2명", result)
         self.assertIn("최근 실행 진행: 7/100", result)
+
+    def test_progress_does_not_cross_into_another_level(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "maplebot-backfill-current-level").write_text("299\n")
+            (root / "maplebot-backfill-280-plus.log").write_text(
+                "[2026-09-01T00:00:00Z] level 299 start\n"
+                "[2026-09-01T00:01:00Z] level 298 start\n"
+                "[1/2560] Other: ok\n",
+                encoding="utf-8",
+            )
+
+            result = status_text(root, [(10, "bash run_maplebot_backfill_aux.sh")])
+
+        self.assertIn("현재 레벨: Lv.299", result)
+        self.assertNotIn("1/2560", result)
 
 
 if __name__ == "__main__":
