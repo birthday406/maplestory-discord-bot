@@ -41,7 +41,15 @@ async ({name, region}) => {
     }
   );
   const body = await response.json();
-  if (!response.ok) throw new Error(`API status ${response.status}`);
+  if (!response.ok) {
+    if (
+      response.status === 500
+      && /failed to fetch character/i.test(String(body.error || ''))
+    ) {
+      return {gains: [], not_found: true, profile_loaded: false};
+    }
+    throw new Error(`API status ${response.status}`);
+  }
 
   let payload = body;
   if (body.encrypted) {

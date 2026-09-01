@@ -11,6 +11,67 @@ from tools.backfill_maplebot import collect, load_checkpoint, reconstruction_pla
 
 
 class MapleBotBackfillTests(unittest.TestCase):
+    def test_character_not_found_is_checkpointed_after_two_checks(self):
+        attempts = 0
+
+        class Page:
+            def route(self, *_args):
+                pass
+
+            def on(self, *_args):
+                pass
+
+            def goto(self, *_args, **_kwargs):
+                pass
+
+            def evaluate(self, _script, _arguments):
+                nonlocal attempts
+                attempts += 1
+                return {"gains": [], "not_found": True, "profile_loaded": False}
+
+            def close(self):
+                pass
+
+        class Browser:
+            def new_page(self):
+                return Page()
+
+            def close(self):
+                pass
+
+        class Manager:
+            def __enter__(self):
+                return SimpleNamespace(
+                    chromium=SimpleNamespace(launch=lambda **_kwargs: Browser())
+                )
+
+            def __exit__(self, *_args):
+                pass
+
+        fake_sync_api = types.ModuleType("playwright.sync_api")
+        fake_sync_api.sync_playwright = Manager
+        args = SimpleNamespace(
+            checkpoint=None,
+            limit=None,
+            delay=0,
+            edge=None,
+            retries=0,
+            max_errors=2,
+            recovery_delay=0,
+            max_recoveries=3,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            args.checkpoint = f"{directory}/checkpoint.jsonl"
+            with patch.dict(sys.modules, {"playwright.sync_api": fake_sync_api}), patch(
+                "tools.backfill_maplebot.time.sleep"
+            ):
+                self.assertEqual(collect(args, [{"name": "Gone", "region": "NA"}]), [])
+            checkpoint = load_checkpoint(Path(args.checkpoint))
+
+        self.assertEqual(attempts, 2)
+        self.assertEqual(checkpoint["gone"]["skipped"], "not_found")
+
     def test_profile_without_history_is_skipped_and_not_retried_after_restart(self):
         attempts = 0
 
