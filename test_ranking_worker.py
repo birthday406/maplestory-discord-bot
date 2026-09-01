@@ -5,7 +5,11 @@ from pathlib import Path
 
 from maple_bot import configured_ranking_world_ids, import_ready_ranking_batches
 from ranking_store import RankingStore
-from ranking_worker import RankingBatchWriter, normalize_representative
+from ranking_worker import (
+    RankingBatchWriter,
+    eligible_representatives,
+    normalize_representative,
+)
 
 
 class RankingWorkerTests(unittest.TestCase):
@@ -124,6 +128,16 @@ class RankingWorkerTests(unittest.TestCase):
             self.assertEqual(store.representative_cursor(45, "legion"), 31)
             store.finish_representative_scan(45, "legion")
             self.assertEqual(store.representative_cursor(45, "legion"), 1)
+
+    def test_representative_collection_keeps_only_level_260_plus(self) -> None:
+        ranks = [
+            {"characterName": "Kept", "level": 260, "legionLevel": 9000, "rank": 1},
+            {"characterName": "Skipped", "level": 259, "legionLevel": 9000, "rank": 2},
+        ]
+        self.assertEqual(
+            eligible_representatives(ranks, "legion"),
+            [{"characterName": "Kept", "legionLevel": 9000, "legionRank": 1}],
+        )
 
     def test_active_pages_follow_changed_world_assignment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

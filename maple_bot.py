@@ -4239,6 +4239,9 @@ class MapleNewsBot(commands.Bot):
         self._ranking_inbox_path = Path(
             os.getenv("RANKING_INBOX_PATH", "ranking-inbox")
         )
+        self._ranking_import_only = os.getenv(
+            "RANKING_COLLECTION_IMPORT_ONLY", "0"
+        ).lower() in {"1", "true", "yes"}
         self._last_ranking_backup_scan_date: date | None = None
         self._ranking_backup_task: asyncio.Task | None = None
         self._ranking_scan_date = None
@@ -5624,6 +5627,9 @@ class MapleNewsBot(commands.Bot):
                     "ranking_main_error phase=batch_import_loop error_type=%s",
                     type(error).__name__,
                 )
+
+        if getattr(self, "_ranking_import_only", False):
+            return
 
         now_timestamp = int(datetime.now(timezone.utc).timestamp())
         if now_timestamp < self._ranking_retry_until:

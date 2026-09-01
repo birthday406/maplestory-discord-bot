@@ -19,7 +19,7 @@ from maple_bot import (
     current_ranking_scan_date,
     ranking_backoff_seconds,
 )
-from ranking_store import MIN_TRACKED_LEVEL, RankingStore, scan_rankings
+from ranking_store import MIN_TRACKED_LEVEL, RANKING_PAGE_SIZE, RankingStore
 
 
 REPRESENTATIVE_RANKING_TYPES = ("legion", "achievement")
@@ -40,6 +40,14 @@ def normalize_representative(character: dict, ranking_type: str) -> dict:
     else:
         raise ValueError(f"Unsupported ranking type: {ranking_type}")
     return saved
+
+
+def eligible_representatives(characters: list[dict], ranking_type: str) -> list[dict]:
+    return [
+        normalize_representative(character, ranking_type)
+        for character in characters
+        if character.get("level", 0) >= MIN_TRACKED_LEVEL
+    ]
 
 
 class RankingBatchWriter:
@@ -157,10 +165,14 @@ async def run_worker() -> None:
     next_request_at = 0.0
     request_lock = asyncio.Lock()
     concurrency = max(1, int(os.getenv("RANKING_WORKER_CONCURRENCY", "3")))
+    shard_count = max(1, int(os.getenv("RANKING_WORKER_SHARD_COUNT", "1")))
+    shard_index = int(os.getenv("RANKING_WORKER_SHARD_INDEX", "0"))
+    if not 0 <= shard_index < shard_count:
+        raise ValueError("RANKING_WORKER_SHARD_INDEX must be smaller than shard count.")
+    shard_step = RANKING_PAGE_SIZE * shard_count
     current_page_index: int | None = None
     current_ranking_type = "world"
     representative_offset = 0
-    known_by_world: dict[int, set[str]] = {}
 
     async with aiohttp.ClientSession() as session:
         async def request_page(
@@ -212,24 +224,21 @@ async def run_worker() -> None:
         async def scan_representative_chunk(
             world_id: int, ranking_type: str
         ) -> None:
-            cursor = store.representative_cursor(world_id, ranking_type)
-            page_indices = [cursor + 10 * offset for offset in range(concurrency)]
+            state_type = f"{ranking_type}-shard-{shard_index}-of-{shard_count}"
+            cursor = store.representative_cursor(world_id, state_type)
+            if cursor == 1 and shard_index:
+                cursor += RANKING_PAGE_SIZE * shard_index
+                store.advance_representative_scan(world_id, state_type, cursor)
+            page_indices = [cursor + shard_step * offset for offset in range(concurrency)]
             payloads = await asyncio.gather(
                 *(request_page(ranking_type, world_id, index) for index in page_indices)
             )
-            if world_id not in known_by_world:
-                known_by_world[world_id] = store.known_character_keys(world_id)
-            known = known_by_world[world_id]
             for page_index, payload in zip(page_indices, payloads):
                 ranks = payload.get("ranks", [])
                 if not ranks:
-                    store.finish_representative_scan(world_id, ranking_type)
+                    store.finish_representative_scan(world_id, state_type)
                     break
-                matches = [
-                    normalize_representative(character, ranking_type)
-                    for character in ranks
-                    if character["characterName"].casefold() in known
-                ]
+                matches = eligible_representatives(ranks, ranking_type)
                 writer.write(
                     current_ranking_scan_date(),
                     world_id,
@@ -240,7 +249,7 @@ async def run_worker() -> None:
                 next_index = page_index + len(ranks)
                 total_count = int(payload.get("totalCount", 0))
                 if total_count and next_index > total_count:
-                    store.finish_representative_scan(world_id, ranking_type)
+                    store.finish_representative_scan(world_id, state_type)
                     logging.warning(
                         "ranking_worker_complete phase=representative type=%s world=%s",
                         ranking_type,
@@ -248,8 +257,41 @@ async def run_worker() -> None:
                     )
                     break
                 store.advance_representative_scan(
-                    world_id, ranking_type, next_index
+                    world_id, state_type, page_index + shard_step
                 )
+
+        async def scan_world_shard_chunk(world_id: int) -> bool:
+            scan_id = 100_000 + world_id * 100 + shard_index
+            cursor = store.start_scan(scan_date, world_id=scan_id)
+            if cursor is None:
+                return True
+            if cursor == 1 and shard_index:
+                cursor += RANKING_PAGE_SIZE * shard_index
+            page_indices = [cursor + shard_step * offset for offset in range(concurrency)]
+            payloads = await asyncio.gather(
+                *(fetch_page(world_id, index) for index in page_indices)
+            )
+            for page_index, payload in zip(page_indices, payloads):
+                ranks = payload.get("ranks", [])
+                if not ranks:
+                    store.finish_scan(scan_date, world_id=scan_id)
+                    return True
+                eligible = [
+                    character
+                    for character in ranks
+                    if character.get("level", 0) >= MIN_TRACKED_LEVEL
+                ]
+                store.save_page(
+                    eligible,
+                    scan_date,
+                    page_index + shard_step,
+                    world_id=scan_id,
+                    source_page_index=page_index,
+                )
+                if len(eligible) != len(ranks):
+                    store.finish_scan(scan_date, world_id=scan_id)
+                    return True
+            return False
 
         try:
             while True:
@@ -258,7 +300,6 @@ async def run_worker() -> None:
                     writer.finalize()
                     scan_date = today
                     completed.clear()
-                    known_by_world.clear()
                     world_offset = 0
                     logging.warning(
                         "ranking_worker_start phase=cycle date=%s worlds=%s",
@@ -321,33 +362,24 @@ async def run_worker() -> None:
                         )
                         await asyncio.sleep(RANKING_FORBIDDEN_BACKOFF_STEPS[0])
                     continue
-                world_id = remaining[world_offset % len(remaining)]
-                world_offset += 1
+                world_id = remaining[0]
                 try:
-                    result = await scan_rankings(
-                        lambda page_index: fetch_page(world_id, page_index),
-                        store,
-                        scan_date,
-                        max_characters=None,
-                        max_pages=concurrency,
-                        scan_id=world_id,
-                    )
+                    world_completed = await scan_world_shard_chunk(world_id)
                     if failures:
                         failures = 0
                         retry_until = 0
                         store.clear_collector_backoff()
-                    if result["reason"] in {
-                        "already_completed",
-                        "level_boundary",
-                        "end",
-                    }:
+                    if world_completed:
                         completed.add(world_id)
-                        timing = store.get_scan_timing(scan_date, world_id)
+                        scan_id = 100_000 + world_id * 100 + shard_index
+                        timing = store.get_scan_timing(scan_date, scan_id)
                         logging.warning(
-                            "ranking_worker_complete phase=world world=%s date=%s "
+                            "ranking_worker_complete phase=world world=%s shard=%s/%s date=%s "
                             "started_at=%sZ completed_at=%sZ elapsed_seconds=%s "
                             "elapsed_hours=%.2f",
                             world_id,
+                            shard_index + 1,
+                            shard_count,
                             scan_date,
                             datetime.fromtimestamp(
                                 timing["started_at"], timezone.utc
