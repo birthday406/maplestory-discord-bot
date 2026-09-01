@@ -430,7 +430,9 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
                 raise RuntimeError(
                     f"stopped after {recovery_count - 1} recovery waits"
                 )
-            recovery_wait = args.recovery_delay * (5 ** (recovery_count - 1))
+            recovery_wait = min(
+                args.recovery_delay * (4 ** (recovery_count - 1)), 300
+            )
             print(
                 f"MapleBot temporarily unavailable; rebuilding browser and "
                 f"waiting {recovery_wait} seconds",
@@ -460,7 +462,7 @@ def main() -> None:
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--max-errors", type=int, default=3)
-    parser.add_argument("--recovery-delay", type=int, default=120)
+    parser.add_argument("--recovery-delay", type=int, default=30)
     parser.add_argument("--max-recoveries", type=int, default=3)
     parser.add_argument("--checkpoint")
     parser.add_argument("--check-integrity", action="store_true")
