@@ -3,6 +3,7 @@ import json
 import sqlite3
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
+from itertools import accumulate
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -12,6 +13,7 @@ from maple_data import LEVEL_EXP
 KRONOS_WORLD_ID = 45
 MIN_TRACKED_LEVEL = 260
 RANKING_PAGE_SIZE = 10
+LEVEL_EXP_PREFIX = tuple(accumulate(LEVEL_EXP, initial=0))
 
 
 def ranking_scan_started_at(scan_date: date) -> int:
@@ -42,7 +44,7 @@ def ranking_total_exp(level: int, current_exp: int) -> int | None:
     """Lv.200 이상 캐릭터의 현재 위치를 누적 경험치로 바꿉니다."""
     if not 200 <= level <= 300:
         return None
-    return sum(LEVEL_EXP[: level - 200]) + current_exp
+    return LEVEL_EXP_PREFIX[level - 200] + current_exp
 
 
 class RankingStore:
@@ -61,6 +63,8 @@ class RankingStore:
         )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 30000")
+        # synchronous는 연결별 설정이라 실제 읽기·쓰기 연결마다 적용해야 합니다.
+        connection.execute("PRAGMA synchronous = NORMAL")
         return connection
 
     def _initialize(self) -> None:
@@ -508,11 +512,33 @@ class RankingStore:
         return row["population"] if row is not None else None
 
     def get_ai_score_populations(self, world_id: int) -> dict[str, int | None]:
-        return {
-            "level_population": self.get_population("level_260_plus"),
-            "legion_population": self.get_population("legion", world_id),
-            "achievement_population": self.get_population("achievement", world_id),
+        """카드에 필요한 최신 모집단 3개를 DB 연결 한 번으로 읽습니다."""
+        result = {
+            "level_population": None,
+            "legion_population": None,
+            "achievement_population": None,
         }
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT metric, world_id, population
+                FROM ranking_populations
+                WHERE (metric = 'level_260_plus' AND world_id = 0)
+                   OR (metric IN ('legion', 'achievement') AND world_id = ?)
+                ORDER BY snapshot_date DESC
+                """,
+                (world_id,),
+            ).fetchall()
+        keys = {
+            ("level_260_plus", 0): "level_population",
+            ("legion", world_id): "legion_population",
+            ("achievement", world_id): "achievement_population",
+        }
+        for row in rows:
+            key = keys[(row["metric"], row["world_id"])]
+            if result[key] is None:
+                result[key] = row["population"]
+        return result
 
     def register_guild_character(
         self,
@@ -844,13 +870,14 @@ class RankingStore:
         update_checkpoint: bool = True,
         source_page_index: int | None = None,
         preserve_newer: bool = False,
+        discard_newer: bool = False,
     ) -> None:
         """한 페이지와 다음 시작 순번을 같은 작업으로 저장합니다."""
         day = scan_date.isoformat()
         with self._connect() as connection:
             for character in characters:
                 name_key = character["characterName"].casefold()
-                if not preserve_newer:
+                if discard_newer:
                     connection.execute(
                         "DELETE FROM ranking_snapshots WHERE name_key = ? AND snapshot_date > ?",
                         (name_key, day),
@@ -1016,6 +1043,7 @@ class RankingStore:
             next_index=1,
             world_id=character["worldID"],
             update_checkpoint=False,
+            discard_newer=True,
         )
         if character["level"] >= MIN_TRACKED_LEVEL:
             self.prioritize_character(character["characterName"], scan_date)

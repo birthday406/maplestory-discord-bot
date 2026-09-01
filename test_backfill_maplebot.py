@@ -3,14 +3,92 @@ import tempfile
 import types
 import unittest
 from datetime import date, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import unquote, urlsplit
 
-from tools.backfill_maplebot import collect, reconstruction_plan
+from tools.backfill_maplebot import collect, load_checkpoint, reconstruction_plan
 
 
 class MapleBotBackfillTests(unittest.TestCase):
+    def test_profile_without_history_is_skipped_and_not_retried_after_restart(self):
+        attempts = 0
+
+        class Page:
+            def route(self, *_args):
+                pass
+
+            def on(self, *_args):
+                pass
+
+            def goto(self, *_args, **_kwargs):
+                nonlocal attempts
+                attempts += 1
+
+            def get_by_text(self, *_args, **_kwargs):
+                return self
+
+            def locator(self, *_args, **_kwargs):
+                return self
+
+            @property
+            def first(self):
+                return self
+
+            def wait_for(self, **_kwargs):
+                raise TimeoutError("history chart unavailable")
+
+            def count(self):
+                return 0
+
+            def title(self):
+                return "NoChart - MapleStory Character Stats & Rankings | MapleBot"
+
+            def close(self):
+                pass
+
+        class Browser:
+            def new_page(self):
+                return Page()
+
+            def close(self):
+                pass
+
+        class Manager:
+            def __enter__(self):
+                return SimpleNamespace(
+                    chromium=SimpleNamespace(launch=lambda **_kwargs: Browser())
+                )
+
+            def __exit__(self, *_args):
+                pass
+
+        fake_sync_api = types.ModuleType("playwright.sync_api")
+        fake_sync_api.sync_playwright = Manager
+        args = SimpleNamespace(
+            checkpoint=None,
+            limit=None,
+            delay=0,
+            edge=None,
+            retries=0,
+            max_errors=2,
+            recovery_delay=0,
+            max_recoveries=3,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            args.checkpoint = f"{directory}/checkpoint.jsonl"
+            with patch.dict(sys.modules, {"playwright.sync_api": fake_sync_api}), patch(
+                "tools.backfill_maplebot.time.sleep"
+            ):
+                self.assertEqual(collect(args, [{"name": "NoChart", "region": "NA"}]), [])
+                self.assertEqual(collect(args, [{"name": "NoChart", "region": "NA"}]), [])
+            checkpoint = load_checkpoint(Path(args.checkpoint))
+
+        self.assertEqual(attempts, 2)
+        self.assertEqual(checkpoint["nochart"]["skipped"], "no_history")
+
     def test_transient_failures_retry_and_success_resets_error_streak(self):
         failures = {"Retry": 2, "FailA": 3, "FailB": 3, "Good": 0}
         attempts = {name: 0 for name in failures}
@@ -20,6 +98,9 @@ class MapleBotBackfillTests(unittest.TestCase):
         ]
 
         class Page:
+            def route(self, *_args):
+                pass
+
             def on(self, *_args):
                 pass
 

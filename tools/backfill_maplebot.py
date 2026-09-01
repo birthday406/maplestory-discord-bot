@@ -178,6 +178,7 @@ def apply_payload(
     skipped = []
     connection = sqlite3.connect(db_path, timeout=60)
     connection.execute("PRAGMA busy_timeout = 60000")
+    connection.execute("PRAGMA synchronous = NORMAL")
     try:
         connection.execute("BEGIN IMMEDIATE")
         processed = 0
@@ -226,7 +227,7 @@ def apply_payload(
             else:
                 partial.append([name, added])
             processed += 1
-            if processed % 5 == 0:
+            if processed % 50 == 0:
                 connection.commit()
                 connection.execute("BEGIN IMMEDIATE")
         connection.commit()
@@ -287,6 +288,8 @@ def load_checkpoint(path: Path) -> dict[str, dict]:
             if "gains" in item:
                 validate_series(item["gains"])
                 saved[item["name"].casefold()] = item
+            elif item.get("skipped") in {"not_found", "no_history"}:
+                saved[item["name"].casefold()] = item
     return saved
 
 
@@ -332,6 +335,12 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
 
         def new_page():
             result = browser.new_page()
+            result.route(
+                "**/*",
+                lambda route: route.abort()
+                if route.request.resource_type in {"image", "font", "media"}
+                else route.continue_(),
+            )
             result.on(
                 "response",
                 lambda response: blocked.append((response.status, response.url))
@@ -353,6 +362,7 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
             started = time.monotonic()
             succeeded = False
             not_found = False
+            profile_loaded = False
             for attempt in range(args.retries + 1):
                 try:
                     blocked.clear()
@@ -385,8 +395,13 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
                             page.get_by_text("Character not found", exact=True).count()
                         )
                         page_title = page.title()
+                        profile_loaded = (
+                            "MapleStory Character Stats & Rankings | MapleBot"
+                            in page_title
+                        )
                     except Exception:
                         page_title = "unavailable"
+                        profile_loaded = False
                     page.close()
                     page = new_page()
                     if attempt < args.retries:
@@ -411,20 +426,25 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
             if succeeded:
                 continue
 
-            # 실제 미검색 결과는 한 번 더 확인한 뒤 건너뛰고 사이트 장애로 세지 않습니다.
-            if not_found and character_failures[name_key] >= 2:
+            # 정상 캐릭터 페이지인데 그래프가 없거나 실제 미검색이면 두 번 확인 후
+            # 체크포인트에 남깁니다. 재시작 때 같은 실패를 처음부터 반복하지 않습니다.
+            if (not_found or profile_loaded) and character_failures[name_key] >= 2:
+                skipped = "not_found" if not_found else "no_history"
+                item = {"name": name, "skipped": skipped}
+                append_checkpoint(checkpoint, item)
+                saved[name_key] = item
                 completed += 1
                 errors = 0
                 print(
-                    f"[{completed}/{len(targets)}] {name}: skipped after repeated not found",
+                    f"[{completed}/{len(targets)}] {name}: skipped after repeated {skipped}",
                     file=sys.stderr,
                     flush=True,
                 )
                 continue
 
             pending.append(character)
-            if not_found:
-                # 검색되지 않는 캐릭터는 한 바퀴 뒤 재확인하되 사이트 장애로 세지 않습니다.
+            if not_found or profile_loaded:
+                # 정상 페이지의 데이터 부재는 한 바퀴 뒤 재확인하되 장애로 세지 않습니다.
                 errors = 0
                 continue
             errors += 1
@@ -451,7 +471,7 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
             page = new_page()
             errors = 0
         browser.close()
-    return list(saved.values())
+    return [item for item in saved.values() if "gains" in item]
 
 
 def main() -> None:

@@ -4286,6 +4286,8 @@ class MapleNewsBot(commands.Bot):
         self._last_ranking_backup_scan_date: date | None = None
         self._ranking_backup_task: asyncio.Task | None = None
         self._ranking_scan_date = None
+        self._ranking_populations_ready_date = None
+        self._ranking_active_pages_ready_date = None
         self._ranking_world_offset = 0
         self._completed_ranking_world_ids: set[int] = set()
         (
@@ -5675,6 +5677,11 @@ class MapleNewsBot(commands.Bot):
             self._ranking_scan_date = scan_date
             self._ranking_world_offset = 0
             self._completed_ranking_world_ids.clear()
+            # 같은 DELETE를 매 수집 배치마다 반복하지 않고 날짜가 바뀔 때 한 번만 합니다.
+            await asyncio.to_thread(
+                self.ranking_store.remove_old_snapshots,
+                scan_date - timedelta(days=30),
+            )
             logging.warning(
                 "ranking_main_start phase=cycle date=%s worlds=%s",
                 scan_date,
@@ -5729,26 +5736,28 @@ class MapleNewsBot(commands.Bot):
                 )
             return
 
-        try:
-            if await self.refresh_next_ranking_population(scan_date):
-                self.clear_ranking_backoff_after_success()
+        if getattr(self, "_ranking_populations_ready_date", None) != scan_date:
+            try:
+                if await self.refresh_next_ranking_population(scan_date):
+                    self.clear_ranking_backoff_after_success()
+                    return
+                self._ranking_populations_ready_date = scan_date
+            except RankingRateLimited as error:
+                self.pause_ranking_collection(error)
                 return
-        except RankingRateLimited as error:
-            self.pause_ranking_collection(error)
-            return
-        except (
-            aiohttp.ClientError,
-            TimeoutError,
-            ValueError,
-            KeyError,
-            OSError,
-            sqlite3.Error,
-        ) as error:
-            logging.exception(
-                "ranking_main_error phase=population error_type=%s",
-                type(error).__name__,
-            )
-            return
+            except (
+                aiohttp.ClientError,
+                TimeoutError,
+                ValueError,
+                KeyError,
+                OSError,
+                sqlite3.Error,
+            ) as error:
+                logging.exception(
+                    "ranking_main_error phase=population error_type=%s",
+                    type(error).__name__,
+                )
+                return
 
         # 날짜가 바뀐 첫 실행의 DB 정리가 Discord 이벤트 루프를 막지 않게 합니다.
         tracked_world_ids = getattr(
@@ -5756,11 +5765,13 @@ class MapleNewsBot(commands.Bot):
             "_tracked_ranking_world_ids",
             TRACKED_RANKING_WORLD_IDS,
         )
-        await asyncio.to_thread(
-            self.ranking_store.prepare_active_pages,
-            scan_date,
-            tracked_world_ids,
-        )
+        if getattr(self, "_ranking_active_pages_ready_date", None) != scan_date:
+            await asyncio.to_thread(
+                self.ranking_store.prepare_active_pages,
+                scan_date,
+                tracked_world_ids,
+            )
+            self._ranking_active_pages_ready_date = scan_date
         active_page = await asyncio.to_thread(
             self.ranking_store.next_active_page,
             scan_date,
@@ -5875,8 +5886,6 @@ class MapleNewsBot(commands.Bot):
                 f"{RANKING_WORLDS[world_id]}={result['reason']}"
                 for world_id, result in zip(allocation, results)
             )
-            # 기본 그래프는 14일치지만, 나중에 30일 보기에도 쓸 수 있게 한 달간 보관합니다.
-            self.ranking_store.remove_old_snapshots(scan_date - timedelta(days=30))
             logging.info(
                 "Main-world rankings saved %s characters (%s).",
                 saved,
