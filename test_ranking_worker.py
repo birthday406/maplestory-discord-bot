@@ -1,7 +1,10 @@
+import asyncio
+import os
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 from maple_bot import configured_ranking_world_ids, import_ready_ranking_batches
 from ranking_store import RankingStore
@@ -9,6 +12,7 @@ from ranking_worker import (
     RankingBatchWriter,
     eligible_representatives,
     normalize_representative,
+    sync_ready_batches,
 )
 
 
@@ -73,6 +77,49 @@ class RankingWorkerTests(unittest.TestCase):
                 [("2026-08-30", 100), ("2026-08-31", 200)],
             )
             self.assertTrue((inbox / "processed" / batch.name).exists())
+
+    def test_sync_publishes_batch_only_after_scp_finishes(self) -> None:
+        class Process:
+            returncode = 0
+
+            async def communicate(self):
+                return b"", b""
+
+        calls = []
+
+        async def create_process(*args, **_kwargs):
+            calls.append(args)
+            return Process()
+
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = Path(directory)
+            batch = outbox / "batch.jsonl"
+            batch.write_text("{}\n", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {
+                    "RANKING_SYNC_TARGET": "ubuntu@example:/srv/ranking-inbox/",
+                    "RANKING_SYNC_SSH_KEY": "/key",
+                },
+            ), patch(
+                "ranking_worker.asyncio.create_subprocess_exec",
+                side_effect=create_process,
+            ):
+                self.assertEqual(asyncio.run(sync_ready_batches(outbox)), 1)
+
+            self.assertEqual(calls[0][-1], "ubuntu@example:/srv/ranking-inbox/batch.jsonl.part")
+            self.assertEqual(
+                calls[1][-6:],
+                (
+                    "/key",
+                    "ubuntu@example",
+                    "mv",
+                    "--",
+                    "/srv/ranking-inbox/batch.jsonl.part",
+                    "/srv/ranking-inbox/batch.jsonl",
+                ),
+            )
+            self.assertTrue((outbox / "sent" / batch.name).exists())
 
     def test_world_configuration_rejects_untracked_worlds(self) -> None:
         self.assertEqual(configured_ranking_world_ids("45,70,45"), (45, 70))

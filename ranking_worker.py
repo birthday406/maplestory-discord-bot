@@ -114,14 +114,20 @@ async def sync_ready_batches(outbox: Path) -> int:
     target = os.getenv("RANKING_SYNC_TARGET")
     if not target:
         return 0
+    try:
+        remote_host, remote_directory = target.rsplit(":", 1)
+    except ValueError as error:
+        raise ValueError("RANKING_SYNC_TARGET must be HOST:DIRECTORY") from error
     sent = outbox / "sent"
     synced = 0
     for batch_path in sorted(outbox.glob("*.jsonl")):
+        remote_final = f"{remote_directory.rstrip('/')}/{batch_path.name}"
+        remote_partial = f"{remote_final}.part"
         command = ["scp", "-q", "-o", "BatchMode=yes"]
         ssh_key = os.getenv("RANKING_SYNC_SSH_KEY")
         if ssh_key:
             command.extend(("-i", ssh_key))
-        command.extend((str(batch_path), target))
+        command.extend((str(batch_path), f"{remote_host}:{remote_partial}"))
         process = await asyncio.create_subprocess_exec(
             *command,
             stderr=asyncio.subprocess.PIPE,
@@ -130,6 +136,25 @@ async def sync_ready_batches(outbox: Path) -> int:
         if process.returncode != 0:
             logging.error(
                 "ranking_worker_error phase=sync batch=%s returncode=%s error=%s",
+                batch_path.name,
+                process.returncode,
+                stderr.decode(errors="replace").strip() or "-",
+            )
+            break
+        command = ["ssh", "-o", "BatchMode=yes"]
+        if ssh_key:
+            command.extend(("-i", ssh_key))
+        command.extend(
+            (remote_host, "mv", "--", remote_partial, remote_final)
+        )
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0:
+            logging.error(
+                "ranking_worker_error phase=publish batch=%s returncode=%s error=%s",
                 batch_path.name,
                 process.returncode,
                 stderr.decode(errors="replace").strip() or "-",
