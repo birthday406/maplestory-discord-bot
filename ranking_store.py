@@ -177,15 +177,6 @@ class RankingStore:
                 CREATE INDEX IF NOT EXISTS idx_active_pages_queue
                 ON ranking_active_pages (scan_date, refreshed, page_index, world_id);
 
-                CREATE TABLE IF NOT EXISTS guild_ranking_members (
-                    guild_id INTEGER NOT NULL,
-                    discord_user_id INTEGER NOT NULL,
-                    discord_display_name TEXT NOT NULL,
-                    character_name TEXT NOT NULL,
-                    character_name_key TEXT NOT NULL,
-                    PRIMARY KEY (guild_id, discord_user_id)
-                );
-
                 INSERT OR IGNORE INTO ranking_collector_state
                     (id, consecutive_limit_failures, retry_until)
                 VALUES (1, 0, 0);
@@ -539,69 +530,6 @@ class RankingStore:
             if result[key] is None:
                 result[key] = row["population"]
         return result
-
-    def register_guild_character(
-        self,
-        guild_id: int,
-        discord_user_id: int,
-        discord_display_name: str,
-        character_name: str,
-    ) -> None:
-        """한 Discord 서버 안에서만 사용자의 현재 기본 캐릭터를 등록합니다."""
-        with self._connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO guild_ranking_members
-                    (guild_id, discord_user_id, discord_display_name, character_name, character_name_key)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(guild_id, discord_user_id) DO UPDATE SET
-                    discord_display_name = excluded.discord_display_name,
-                    character_name = excluded.character_name,
-                    character_name_key = excluded.character_name_key
-                """,
-                (
-                    guild_id,
-                    discord_user_id,
-                    discord_display_name,
-                    character_name,
-                    character_name.casefold(),
-                ),
-            )
-
-    def unregister_guild_character(self, guild_id: int, discord_user_id: int) -> bool:
-        """현재 서버에서만 사용자의 랭킹 등록을 제거합니다."""
-        with self._connect() as connection:
-            result = connection.execute(
-                "DELETE FROM guild_ranking_members WHERE guild_id = ? AND discord_user_id = ?",
-                (guild_id, discord_user_id),
-            )
-        return result.rowcount > 0
-
-    def get_guild_rankings(self, guild_id: int) -> list[dict]:
-        """현재 서버에 등록된 캐릭터의 마지막 저장 정보를 반환합니다."""
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT
-                    member.discord_display_name,
-                    member.character_name,
-                    character.world_id,
-                    character.level,
-                    character.exp,
-                    character.ranking,
-                    character.legion_level,
-                    character.legion_rank,
-                    character.achievement_score,
-                    character.achievement_rank,
-                    character.updated_date
-                FROM guild_ranking_members AS member
-                LEFT JOIN characters AS character
-                    ON character.name_key = member.character_name_key
-                WHERE member.guild_id = ?
-                """,
-                (guild_id,),
-            ).fetchall()
-        return [dict(row) for row in rows]
 
     def start_scan(
         self,

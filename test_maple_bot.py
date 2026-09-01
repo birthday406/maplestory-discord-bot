@@ -1494,25 +1494,6 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
-    def test_guild_registration_is_separated_by_discord_server(self) -> None:
-        character = self.character(
-            legionLevel=10221,
-            legionRank=2923,
-            achievementScore=12340,
-            achievementRank=810,
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            store = RankingStore(Path(directory) / "ranking.db")
-            store.save_snapshot(character, date(2026, 8, 16))
-            store.register_guild_character(100, 1, "슈비", "Home")
-            store.register_guild_character(200, 1, "다른 서버 슈비", "Home")
-
-            self.assertEqual(store.get_guild_rankings(100)[0]["discord_display_name"], "슈비")
-            self.assertEqual(store.get_guild_rankings(200)[0]["discord_display_name"], "다른 서버 슈비")
-            self.assertTrue(store.unregister_guild_character(100, 1))
-            self.assertEqual(store.get_guild_rankings(100), [])
-            self.assertEqual(len(store.get_guild_rankings(200)), 1)
-
     def test_history_graph_is_rendered_as_png(self) -> None:
         result = create_ranking_history_image(
             self.character(),
