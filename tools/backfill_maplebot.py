@@ -22,7 +22,6 @@ from collections import deque
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import quote
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,56 +31,61 @@ EU_WORLD_IDS = {30, 46}
 TOLERANCE = 1_000_000
 
 
-EXTRACT_DAILY_GAINS = r"""
-() => {
-  const parseValue = (text) => {
-    const match = String(text).trim().match(/^([\d.]+)([KMBT]?)$/i);
-    if (!match) return null;
-    const scale = {K:1e3,M:1e6,B:1e9,T:1e12}[match[2].toUpperCase()] || 1;
-    return Number(match[1]) * scale;
-  };
-  const chart = document.querySelectorAll('.recharts-wrapper')[0];
-  if (!chart) throw new Error('daily chart not found');
-  const yTicks = Array.from(chart.querySelectorAll('.recharts-yAxis .recharts-cartesian-axis-tick')).map(g => ({
-    value: parseValue(g.textContent),
-    y: Number(g.querySelector('line')?.getAttribute('y1'))
-  })).filter(x => Number.isFinite(x.value) && Number.isFinite(x.y));
-  const zero = yTicks.find(x => x.value === 0);
-  const top = yTicks.reduce((a, b) => a.value > b.value ? a : b);
-  const xTicks = Array.from(chart.querySelectorAll('.recharts-xAxis .recharts-cartesian-axis-tick')).map(g => ({
-    label: g.textContent.trim(),
-    x: Number(g.querySelector('line')?.getAttribute('x1'))
-  })).filter(x => /^\d{2}\/\d{2}$/.test(x.label) && Number.isFinite(x.x));
-  if (!zero || !top || xTicks.length < 2) throw new Error('chart axes not found');
+FETCH_DAILY_GAINS = r"""
+async ({name, region}) => {
+  const response = await fetch(
+    `/api/character/${encodeURIComponent(name)}?region=${encodeURIComponent(region)}`,
+    {
+      headers: {'Content-Type': 'application/json'},
+      signal: AbortSignal.timeout(15_000)
+    }
+  );
+  const body = await response.json();
+  if (!response.ok) throw new Error(`API status ${response.status}`);
 
-  const slot = (xTicks[1].x - xTicks[0].x) / 2;
-  const firstCenter = xTicks[0].x - slot;
-  const [month, day] = xTicks[0].label.split('/').map(Number);
-  const now = new Date();
-  let year = now.getUTCFullYear();
-  if (month > now.getUTCMonth() + 7) year--;
-  if (month < now.getUTCMonth() - 5) year++;
-  const firstDate = new Date(Date.UTC(year, month - 1, day - 1));
-  const values = Array(30).fill(0);
-
-  for (const path of chart.querySelectorAll('path.recharts-rectangle:not(.recharts-tooltip-cursor)')) {
-    const coords = Array.from((path.getAttribute('d') || '').matchAll(/[ML]\s*([-\d.]+),\s*([-\d.]+)/g),
-      m => [Number(m[1]), Number(m[2])]);
-    if (!coords.length) continue;
-    const xs = coords.map(p => p[0]);
-    const ys = coords.map(p => p[1]);
-    const center = (Math.min(...xs) + Math.max(...xs)) / 2;
-    const index = Math.round((center - firstCenter) / slot);
-    if (index < 0 || index >= values.length) continue;
-    const topY = Math.min(...ys);
-    values[index] = Math.max(0, Math.round((zero.y - topY) * top.value / (zero.y - top.y)));
+  let payload = body;
+  if (body.encrypted) {
+    const packed = JSON.parse(atob(body.encrypted));
+    const fromHex = text => new Uint8Array(
+      (text.match(/../g) || []).map(value => parseInt(value, 16))
+    );
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode('0081a87cab06abc65de027850c191f16'),
+      {name: 'AES-CBC'},
+      false,
+      ['decrypt']
+    );
+    const plain = await crypto.subtle.decrypt(
+      {name: 'AES-CBC', iv: fromHex(packed.iv)},
+      key,
+      fromHex(packed.encrypted)
+    );
+    payload = JSON.parse(new TextDecoder().decode(plain));
   }
 
-  return values.map((exp, index) => {
-    const current = new Date(firstDate);
-    current.setUTCDate(current.getUTCDate() + index);
-    return {date: current.toISOString().slice(0, 10), exp};
-  });
+  if (!payload.success || !payload.data) {
+    return {
+      gains: [],
+      not_found: /not found/i.test(String(payload.error || '')),
+      profile_loaded: false
+    };
+  }
+  const history = payload.data.expHistory || [];
+  if (!history.length) {
+    return {gains: [], not_found: false, profile_loaded: true};
+  }
+
+  const byDate = new Map(history.map(item => [item.date, Number(item.exp) || 0]));
+  const last = new Date(`${history.at(-1).date}T00:00:00Z`);
+  const gains = [];
+  for (let offset = 29; offset >= 0; offset--) {
+    const current = new Date(last);
+    current.setUTCDate(current.getUTCDate() - offset);
+    const day = current.toISOString().slice(0, 10);
+    gains.push({date: day, exp: Math.max(0, Math.round(byDate.get(day) || 0))});
+  }
+  return {gains, not_found: false, profile_loaded: true};
 }
 """
 
@@ -348,6 +352,11 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
                 and "/api/character/" in response.url
                 else None,
             )
+            result.goto(
+                "https://maplebot.io",
+                wait_until="domcontentloaded",
+                timeout=15_000,
+            )
             return result
 
         page = new_page()
@@ -366,20 +375,17 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
             for attempt in range(args.retries + 1):
                 try:
                     blocked.clear()
-                    page.goto(
-                        f"https://maplebot.io/character/{quote(name)}?region={character['region']}",
-                        wait_until="domcontentloaded",
-                        timeout=15_000,
+                    result = page.evaluate(
+                        FETCH_DAILY_GAINS,
+                        {"name": name, "region": character["region"]},
                     )
-                    chart = page.locator(".recharts-wrapper").first
-                    try:
-                        chart.wait_for(state="attached", timeout=5_000)
-                    except Exception:
-                        # 5초 경계에서 그래프가 나타난 경우 Playwright가 타임아웃을
-                        # 먼저 반환할 수 있으므로 실제 DOM 존재 여부를 한 번 더 봅니다.
-                        if chart.count() == 0:
-                            raise
-                    gains = page.evaluate(EXTRACT_DAILY_GAINS)
+                    not_found = bool(result.get("not_found"))
+                    profile_loaded = bool(result.get("profile_loaded"))
+                    gains = result.get("gains", [])
+                    if not gains:
+                        raise ValueError(
+                            "character not found" if not_found else "history unavailable"
+                        )
                     validate_series(gains)
                     item = {"name": name, "gains": gains}
                     append_checkpoint(checkpoint, item)
@@ -394,21 +400,10 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
                 except Exception as error:
                     if blocked:
                         raise RuntimeError(f"blocked by MapleBot: {blocked[-1]}")
-                    not_found = False
-                    try:
-                        not_found = bool(
-                            page.get_by_text("Character not found", exact=True).count()
-                        )
-                        page_title = page.title()
-                        profile_loaded = (
-                            "MapleStory Character Stats & Rankings | MapleBot"
-                            in page_title
-                        )
-                    except Exception:
-                        page_title = "unavailable"
-                        profile_loaded = False
-                    page.close()
-                    page = new_page()
+                    page_title = "MapleBot API"
+                    if not (not_found or profile_loaded):
+                        page.close()
+                        page = new_page()
                     if attempt < args.retries:
                         print(
                             f"[{completed + 1}/{len(targets)}] {name}: retry "

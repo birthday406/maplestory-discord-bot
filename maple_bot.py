@@ -1881,50 +1881,6 @@ def create_ranking_history_image(
     return output
 
 
-def build_ranking_embed(
-    character: dict,
-    world_rank: int | None,
-    legion: dict | None,
-    achievement: dict | None = None,
-    world_total_count: int | None = None,
-) -> discord.Embed:
-    """공식 랭킹에서 확인한 캐릭터 정보를 Discord 한 화면으로 정리합니다."""
-    level = character["level"]
-    current_exp = character.get("exp", 0)
-    world = RANKING_WORLDS.get(character["worldID"], f"월드 ID {character['worldID']}")
-    level_text = f"Lv. {level}"
-    if 200 <= level < 300:
-        required_exp = LEVEL_EXP[level - 200]
-        progress = Decimal(current_exp) * 100 / Decimal(required_exp)
-        level_text += f" ({progress:.3f}%)"
-
-    embed = discord.Embed(
-        title=character["characterName"],
-        description=f"**{level_text}** · {character['jobName']} · {world}",
-        color=0x5865F2,
-    )
-    embed.set_author(name="MapleStory | CHARACTER RANKING")
-    embed.add_field(name="전체 순위", value=f"{character['rank']:,}위")
-    world_rank_text = f"{world_rank:,}위" if world_rank is not None else "확인 불가"
-    if (
-        world_rank is not None
-        and world_total_count
-        and world_total_count >= world_rank
-    ):
-        world_rank_text += f" (상위 {format_top_percent(world_rank, world_total_count)})"
-    embed.add_field(name="월드 랭킹", value=world_rank_text)
-    if legion is not None:
-        embed.add_field(name="유니온 레벨", value=f"{legion['legionLevel']:,}")
-        embed.add_field(name="유니온 순위", value=f"{legion['rank']:,}위")
-    if achievement is not None:
-        embed.add_field(name="업적 점수", value=f"{achievement['score']:,}")
-        embed.add_field(name="업적 순위", value=f"{achievement['rank']:,}위")
-    if character.get("characterImgURL"):
-        embed.set_thumbnail(url=character["characterImgURL"])
-    embed.set_footer(text="Nexon 공식 GMS 랭킹 기준")
-    return embed
-
-
 def ranking_progress_percent(level: int, exp: int) -> float:
     """레벨과 현재 경험치를 200~300 구간의 0~100 성장률로 바꿉니다."""
     if level >= 300:

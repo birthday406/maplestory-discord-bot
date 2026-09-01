@@ -54,7 +54,6 @@ from maple_bot import (
     build_miracle_time_embed,
     build_command_stats_embed,
     build_exchange_rate_log_embed,
-    build_ranking_embed,
     build_server_status_embed,
     build_ursus_embed,
     appearance_search_autocomplete,
@@ -1030,66 +1029,6 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(find_ranking_character(payload, "home")["rank"], 8926)
         self.assertEqual(find_ranking_character(payload, "home")["totalCount"], 1_000_000)
         self.assertIsNone(find_ranking_character(payload, "Missing"))
-
-    def test_embed_shows_level_progress_and_available_ranks(self) -> None:
-        embed = build_ranking_embed(
-            self.character(),
-            world_rank=1309,
-            legion={"legionLevel": 10221, "rank": 2923},
-        )
-
-        self.assertEqual(embed.title, "Home")
-        self.assertIn("Lv. 295 (50.000%)", embed.description)
-        self.assertIn("Kronos", embed.description)
-        fields = {field.name: field.value for field in embed.fields}
-        self.assertEqual(fields["전체 순위"], "8,926위")
-        self.assertEqual(fields["월드 랭킹"], "1,309위")
-        self.assertEqual(fields["유니온 레벨"], "10,221")
-        self.assertEqual(embed.thumbnail.url, "https://example.com/home.png")
-
-    def test_embed_shows_world_rank_top_percent(self) -> None:
-        embed = build_ranking_embed(
-            self.character(),
-            world_rank=17,
-            legion=None,
-            world_total_count=1_000_000,
-        )
-
-        fields = {field.name: field.value for field in embed.fields}
-        self.assertEqual(fields["월드 랭킹"], "17위 (상위 0.0017%)")
-
-    def test_embed_shows_first_place_as_top_zero_percent(self) -> None:
-        embed = build_ranking_embed(
-            self.character(),
-            world_rank=1,
-            legion=None,
-            world_total_count=2_000_000,
-        )
-
-        fields = {field.name: field.value for field in embed.fields}
-        self.assertEqual(fields["월드 랭킹"], "1위 (상위 0%)")
-
-    def test_embed_uses_minimum_visible_percent_after_first_place(self) -> None:
-        embed = build_ranking_embed(
-            self.character(),
-            world_rank=2,
-            legion=None,
-            world_total_count=10_000_000,
-        )
-
-        fields = {field.name: field.value for field in embed.fields}
-        self.assertEqual(fields["월드 랭킹"], "2위 (상위 0.0001%)")
-
-    def test_embed_hides_percent_when_search_result_count_is_not_world_total(self) -> None:
-        embed = build_ranking_embed(
-            self.character(),
-            world_rank=1128,
-            legion=None,
-            world_total_count=1,
-        )
-
-        fields = {field.name: field.value for field in embed.fields}
-        self.assertEqual(fields["월드 랭킹"], "1,128위")
 
     async def test_world_total_count_uses_unfiltered_ranking_page(self) -> None:
         bot = object.__new__(MapleNewsBot)

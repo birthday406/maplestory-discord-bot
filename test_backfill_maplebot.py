@@ -6,7 +6,6 @@ from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from urllib.parse import unquote, urlsplit
 
 from tools.backfill_maplebot import collect, load_checkpoint, reconstruction_plan
 
@@ -23,27 +22,16 @@ class MapleBotBackfillTests(unittest.TestCase):
                 pass
 
             def goto(self, *_args, **_kwargs):
+                pass
+
+            def evaluate(self, _script, _arguments):
                 nonlocal attempts
                 attempts += 1
-
-            def get_by_text(self, *_args, **_kwargs):
-                return self
-
-            def locator(self, *_args, **_kwargs):
-                return self
-
-            @property
-            def first(self):
-                return self
-
-            def wait_for(self, **_kwargs):
-                raise TimeoutError("history chart unavailable")
-
-            def count(self):
-                return 0
-
-            def title(self):
-                return "NoChart - MapleStory Character Stats & Rankings | MapleBot"
+                return {
+                    "gains": [],
+                    "not_found": False,
+                    "profile_loaded": True,
+                }
 
             def close(self):
                 pass
@@ -95,7 +83,7 @@ class MapleBotBackfillTests(unittest.TestCase):
             "FailA": 3,
             "FailB": 3,
             "Good": 0,
-            "Boundary": 99,
+            "Boundary": 0,
         }
         attempts = {name: 0 for name in failures}
         gains = [
@@ -110,32 +98,19 @@ class MapleBotBackfillTests(unittest.TestCase):
             def on(self, *_args):
                 pass
 
-            def goto(self, url, **_kwargs):
-                self.name = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
+            def goto(self, *_args, **_kwargs):
+                pass
 
-            def get_by_text(self, *_args, **_kwargs):
-                return self
-
-            def locator(self, *_args, **_kwargs):
-                return self
-
-            @property
-            def first(self):
-                return self
-
-            def wait_for(self, **_kwargs):
-                attempts[self.name] += 1
-                if attempts[self.name] <= failures[self.name]:
+            def evaluate(self, _script, arguments):
+                name = arguments["name"]
+                attempts[name] += 1
+                if attempts[name] <= failures[name]:
                     raise TimeoutError("temporary render timeout")
-
-            def count(self):
-                return 1 if self.name == "Boundary" else 0
-
-            def title(self):
-                return self.name
-
-            def evaluate(self, _script):
-                return gains
+                return {
+                    "gains": gains,
+                    "not_found": False,
+                    "profile_loaded": True,
+                }
 
             def close(self):
                 pass
