@@ -3453,7 +3453,7 @@ class CommandStatsTests(unittest.IsolatedAsyncioTestCase):
             process_commands=AsyncMock(),
         )
         message = SimpleNamespace(
-            content="백필 재시작",
+            content="백필재시작",
             guild=None,
             author=SimpleNamespace(bot=False),
             channel=SimpleNamespace(send=AsyncMock()),

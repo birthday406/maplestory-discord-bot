@@ -4386,8 +4386,8 @@ class MapleNewsBot(commands.Bot):
         return stdout.decode(errors="replace").strip()
 
     async def on_message(self, message: discord.Message) -> None:
-        command = message.content.strip()
-        actions = {"백필 상태": "status", "백필 확인": "status", "백필 재시작": "restart"}
+        command = "".join(message.content.split())
+        actions = {"백필상태": "status", "백필확인": "status", "백필재시작": "restart"}
         if message.guild is None and not message.author.bot and command in actions:
             if await self.is_owner(message.author):
                 await message.channel.send(await self.run_backfill_control(actions[command]))
