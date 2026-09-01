@@ -219,8 +219,7 @@ def apply_payload(
                        VALUES (?, ?, ?, ?, ?)
                        ON CONFLICT(name_key, snapshot_date) DO UPDATE SET
                            level = excluded.level,
-                           exp = excluded.exp,
-                           ranking = excluded.ranking""",
+                           exp = excluded.exp""",
                     (character[0], day, level, exp, character[1]),
                 )
                 inserted += cursor.rowcount

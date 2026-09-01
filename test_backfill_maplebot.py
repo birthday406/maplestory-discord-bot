@@ -292,7 +292,7 @@ class MapleBotBackfillTests(unittest.TestCase):
             ).fetchone()
             connection.close()
 
-        self.assertEqual(row, (900, 1))
+        self.assertEqual(row, (900, 99))
         self.assertEqual(result["full"], 1)
         self.assertEqual(result["partial"], [])
 
