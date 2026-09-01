@@ -359,9 +359,9 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
                     page.goto(
                         f"https://maplebot.io/character/{quote(name)}?region={character['region']}",
                         wait_until="domcontentloaded",
-                        timeout=30_000,
+                        timeout=15_000,
                     )
-                    page.get_by_text("Daily EXP Gains", exact=True).wait_for(timeout=20_000)
+                    page.get_by_text("Daily EXP Gains", exact=True).wait_for(timeout=8_000)
                     gains = page.evaluate(EXTRACT_DAILY_GAINS)
                     validate_series(gains)
                     item = {"name": name, "gains": gains}
@@ -459,7 +459,7 @@ def main() -> None:
     parser.add_argument("--remote-script", default=DEFAULT_REMOTE_SCRIPT)
     parser.add_argument("--edge")
     parser.add_argument("--delay", type=float, default=1.0)
-    parser.add_argument("--retries", type=int, default=2)
+    parser.add_argument("--retries", type=int, default=0)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--max-errors", type=int, default=3)
     parser.add_argument("--recovery-delay", type=int, default=30)
