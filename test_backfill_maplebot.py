@@ -90,7 +90,13 @@ class MapleBotBackfillTests(unittest.TestCase):
         self.assertEqual(checkpoint["nochart"]["skipped"], "no_history")
 
     def test_transient_failures_retry_and_success_resets_error_streak(self):
-        failures = {"Retry": 2, "FailA": 3, "FailB": 3, "Good": 0}
+        failures = {
+            "Retry": 2,
+            "FailA": 3,
+            "FailB": 3,
+            "Good": 0,
+            "Boundary": 99,
+        }
         attempts = {name: 0 for name in failures}
         gains = [
             {"date": (date(2026, 8, 1) + timedelta(days=day)).isoformat(), "exp": 0}
@@ -123,7 +129,7 @@ class MapleBotBackfillTests(unittest.TestCase):
                     raise TimeoutError("temporary render timeout")
 
             def count(self):
-                return 0
+                return 1 if self.name == "Boundary" else 0
 
             def title(self):
                 return self.name
@@ -174,9 +180,12 @@ class MapleBotBackfillTests(unittest.TestCase):
 
         self.assertEqual(
             [item["name"] for item in results],
-            ["Retry", "Good", "FailA", "FailB"],
+            ["Retry", "Good", "Boundary", "FailA", "FailB"],
         )
-        self.assertEqual(attempts, {"Retry": 3, "FailA": 4, "Good": 1, "FailB": 4})
+        self.assertEqual(
+            attempts,
+            {"Retry": 3, "FailA": 4, "Good": 1, "Boundary": 1, "FailB": 4},
+        )
 
     def test_conflicting_newer_snapshot_only_fills_before_first_anchor(self):
         gains = [

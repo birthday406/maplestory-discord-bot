@@ -371,9 +371,14 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
                         wait_until="domcontentloaded",
                         timeout=15_000,
                     )
-                    page.locator(".recharts-wrapper").first.wait_for(
-                        state="attached", timeout=5_000
-                    )
+                    chart = page.locator(".recharts-wrapper").first
+                    try:
+                        chart.wait_for(state="attached", timeout=5_000)
+                    except Exception:
+                        # 5초 경계에서 그래프가 나타난 경우 Playwright가 타임아웃을
+                        # 먼저 반환할 수 있으므로 실제 DOM 존재 여부를 한 번 더 봅니다.
+                        if chart.count() == 0:
+                            raise
                     gains = page.evaluate(EXTRACT_DAILY_GAINS)
                     validate_series(gains)
                     item = {"name": name, "gains": gains}
