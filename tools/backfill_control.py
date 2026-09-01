@@ -46,12 +46,16 @@ def checkpoint_counts(root: Path = ROOT) -> dict[int, int]:
     return counts
 
 
-def latest_progress(log_path: Path = LOG_PATH) -> str | None:
+def latest_progress(log_path: Path = LOG_PATH, level: int | None = None) -> str | None:
     try:
         lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
     except FileNotFoundError:
         return None
-    for line in reversed(lines):
+    start = 0
+    if level is not None:
+        marker = f"level {level} start"
+        start = max((index for index, line in enumerate(lines) if marker in line), default=0)
+    for line in reversed(lines[start:]):
         match = re.match(r"\[(\d+)/(\d+)\]", line)
         if match:
             return f"{match.group(1)}/{match.group(2)}"
@@ -64,7 +68,7 @@ def status_text(root: Path = ROOT, processes: list[tuple[int, str]] | None = Non
     level_match = re.search(r"--level\s+(\d+)", worker)
     counts = checkpoint_counts(root)
     level = int(level_match.group(1)) if level_match else max(counts, default=0)
-    progress = latest_progress(root / LOG_PATH.name)
+    progress = latest_progress(root / LOG_PATH.name, level or None)
     lines = [f"백필 상태: {'실행 중' if processes else '중지됨'}"]
     if level:
         lines.append(f"현재 레벨: Lv.{level}")

@@ -24,7 +24,10 @@ class BackfillControlTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "maplebot-backfill-280-plus.log").write_text(
-                "[7/100] Done: ok\n", encoding="utf-8"
+                "[99/999] Old: ok\n"
+                "[2026-09-01T00:00:00Z] level 295 start\n"
+                "[7/100] Done: ok\n",
+                encoding="utf-8",
             )
 
             result = status_text(
