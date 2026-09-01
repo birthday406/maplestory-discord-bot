@@ -1605,7 +1605,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["reason"], "limit")
         self.assertEqual([call.args[0] for call in fetch_page.await_args_list], [1, 11])
 
-    async def test_command_searched_character_is_collected_before_world_pages(self) -> None:
+    async def test_import_only_bot_refreshes_searched_character(self) -> None:
         today = maple_bot.current_ranking_scan_date()
         yesterday = date.fromordinal(today.toordinal() - 1)
         character = self.ranks(1, count=1)[0]
@@ -1614,6 +1614,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
             store.save_snapshot(character, yesterday)
             bot = object.__new__(MapleNewsBot)
             bot.ranking_store = store
+            bot._ranking_import_only = True
             bot._ranking_retry_until = 0
             bot._ranking_limit_failures = 0
             bot._ranking_scan_date = today

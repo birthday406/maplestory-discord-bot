@@ -5628,9 +5628,6 @@ class MapleNewsBot(commands.Bot):
                     type(error).__name__,
                 )
 
-        if getattr(self, "_ranking_import_only", False):
-            return
-
         now_timestamp = int(datetime.now(timezone.utc).timestamp())
         if now_timestamp < self._ranking_retry_until:
             return
@@ -5697,6 +5694,9 @@ class MapleNewsBot(commands.Bot):
                     priority_name,
                     type(error).__name__,
                 )
+            return
+
+        if getattr(self, "_ranking_import_only", False):
             return
 
         if getattr(self, "_ranking_populations_ready_date", None) != scan_date:
