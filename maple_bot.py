@@ -4349,6 +4349,51 @@ class MapleNewsBot(commands.Bot):
         )
         self.persist_state()
 
+    async def run_backfill_control(self, action: str) -> str:
+        """봇 소유자의 DM 요청만 보조 수집기 제어 스크립트로 전달합니다."""
+        host = os.getenv("BACKFILL_CONTROL_HOST")
+        ssh_key = os.getenv("BACKFILL_CONTROL_SSH_KEY")
+        script = os.getenv(
+            "BACKFILL_CONTROL_SCRIPT",
+            "/home/ubuntu/maplestory-discord-bot/tools/backfill_control.py",
+        )
+        if not host or not ssh_key:
+            return "백필 원격 제어 설정이 아직 없습니다."
+        process = await asyncio.create_subprocess_exec(
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-i",
+            ssh_key,
+            host,
+            "python3",
+            script,
+            action,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+            return "백필 서버가 20초 안에 응답하지 않았습니다."
+        if process.returncode:
+            detail = stderr.decode(errors="replace").strip()
+            return f"백필 원격 제어에 실패했습니다.\n{detail[-1000:]}"
+        return stdout.decode(errors="replace").strip()
+
+    async def on_message(self, message: discord.Message) -> None:
+        command = message.content.strip()
+        actions = {"백필 상태": "status", "백필 확인": "status", "백필 재시작": "restart"}
+        if message.guild is None and not message.author.bot and command in actions:
+            if await self.is_owner(message.author):
+                await message.channel.send(await self.run_backfill_control(actions[command]))
+            return
+        await self.process_commands(message)
+
     async def on_ready(self) -> None:
         # 디스코드 연결이 끝난 뒤에만 첫 공지 확인을 시작합니다.
         # 재연결되더라도 같은 확인 작업을 중복으로 시작하지 않습니다.

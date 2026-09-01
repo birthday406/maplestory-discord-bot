@@ -3446,6 +3446,25 @@ class CommandStatsTests(unittest.IsolatedAsyncioTestCase):
         bot.send_owner_dm.assert_awaited_once()
         self.assertIn("blocked by MapleBot", bot.send_owner_dm.await_args.args[0])
 
+    async def test_owner_can_restart_backfill_by_dm(self) -> None:
+        bot = SimpleNamespace(
+            is_owner=AsyncMock(return_value=True),
+            run_backfill_control=AsyncMock(return_value="백필을 재시작했습니다."),
+            process_commands=AsyncMock(),
+        )
+        message = SimpleNamespace(
+            content="백필 재시작",
+            guild=None,
+            author=SimpleNamespace(bot=False),
+            channel=SimpleNamespace(send=AsyncMock()),
+        )
+
+        await MapleNewsBot.on_message(bot, message)
+
+        bot.run_backfill_control.assert_awaited_once_with("restart")
+        message.channel.send.assert_awaited_once_with("백필을 재시작했습니다.")
+        bot.process_commands.assert_not_awaited()
+
 
 class ItemSearchTests(unittest.IsolatedAsyncioTestCase):
     def test_search_finds_same_item_by_english_and_korean_name(self) -> None:
