@@ -4376,11 +4376,11 @@ class MapleNewsBot(commands.Bot):
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20)
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=45)
         except TimeoutError:
             process.kill()
             await process.wait()
-            return "백필 서버가 20초 안에 응답하지 않았습니다."
+            return "백필 서버가 45초 안에 응답하지 않았습니다."
         if process.returncode:
             detail = stderr.decode(errors="replace").strip()
             return f"백필 원격 제어에 실패했습니다.\n{detail[-1000:]}"
