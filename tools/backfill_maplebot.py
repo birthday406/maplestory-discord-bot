@@ -1,10 +1,10 @@
-"""MapleBot의 공개 그래프를 레벨 순서대로 읽어 랭킹 DB의 빈 날짜만 채운다.
+"""MapleBot의 공개 그래프를 레벨 순서대로 읽어 랭킹 DB에 반영한다.
 
 로컬 실행에는 Playwright와 설치된 Edge가 필요하다.
     python -m pip install playwright
     python tools/backfill_maplebot.py --level 299 --ssh-key PATH
 
-운영 DB의 기존 스냅샷은 절대 덮어쓰지 않는다.
+백필 기간은 가장 최근 스냅샷을 기준으로 누적 경험치를 재구성해 덮어쓴다.
 """
 
 from __future__ import annotations
@@ -28,9 +28,6 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = "/home/ubuntu/maplestory-discord-bot/ranking.db"
 DEFAULT_REMOTE_SCRIPT = "/home/ubuntu/maplestory-discord-bot/tools/backfill_maplebot.py"
 EU_WORLD_IDS = {30, 46}
-TOLERANCE = 1_000_000
-
-
 FETCH_DAILY_GAINS = r"""
 async ({name, region}) => {
   const response = await fetch(
@@ -114,7 +111,7 @@ def validate_series(gains: list[dict]) -> None:
 def reconstruction_plan(
     gains: list[dict], existing: dict[str, int]
 ) -> tuple[dict[str, int], str]:
-    """기존 기준점과 일간 증가량으로 안전하게 추가할 누적 경험치를 만든다."""
+    """가장 최근 기준점과 일간 증가량으로 백필 기간 전체를 재구성한다."""
     validate_series(gains)
     first = date.fromisoformat(gains[0]["date"])
     cumulative = {(first - timedelta(days=1)).isoformat(): 0}
@@ -126,22 +123,13 @@ def reconstruction_plan(
     anchors = [day for day in existing if day in cumulative]
     if not anchors:
         raise ValueError("no existing snapshot anchor")
-    offsets = {day: existing[day] - cumulative[day] for day in anchors}
-    consistent = max(offsets.values()) - min(offsets.values()) <= TOLERANCE
-    if consistent:
-        offset = offsets[max(anchors)]
-        allowed = cumulative
-        mode = "full"
-    else:
-        first_anchor = min(anchors)
-        offset = offsets[first_anchor]
-        allowed = {day: value for day, value in cumulative.items() if day <= first_anchor}
-        mode = "before_first_anchor"
+    latest_anchor = max(anchors)
+    offset = existing[latest_anchor] - cumulative[latest_anchor]
     return {
         day: offset + value
-        for day, value in allowed.items()
-        if day not in existing and offset + value >= 0
-    }, mode
+        for day, value in cumulative.items()
+        if offset + value >= 0
+    }, "overwrite"
 
 
 def exp_prefix() -> list[int]:
@@ -229,12 +217,15 @@ def apply_payload(
                     """INSERT INTO ranking_snapshots
                            (name_key, snapshot_date, level, exp, ranking)
                        VALUES (?, ?, ?, ?, ?)
-                       ON CONFLICT(name_key, snapshot_date) DO NOTHING""",
+                       ON CONFLICT(name_key, snapshot_date) DO UPDATE SET
+                           level = excluded.level,
+                           exp = excluded.exp,
+                           ranking = excluded.ranking""",
                     (character[0], day, level, exp, character[1]),
                 )
                 inserted += cursor.rowcount
                 added += cursor.rowcount
-            if mode == "full":
+            if mode in {"full", "overwrite"}:
                 full += 1
             else:
                 partial.append([name, added])
@@ -499,6 +490,11 @@ def main() -> None:
     parser.add_argument("--recovery-delay", type=int, default=10)
     parser.add_argument("--max-recoveries", type=int, default=3)
     parser.add_argument("--checkpoint")
+    parser.add_argument(
+        "--reapply-checkpoint",
+        action="store_true",
+        help="이미 저장된 체크포인트를 재수집 없이 DB에 다시 적용",
+    )
     parser.add_argument("--check-integrity", action="store_true")
     parser.add_argument("--local", action="store_true")
     args = parser.parse_args()
@@ -519,8 +515,19 @@ def main() -> None:
         return
     if args.level is None:
         parser.error("--level is required")
+    results = None
+    if args.reapply_checkpoint:
+        checkpoint = Path(
+            args.checkpoint or f"maplebot-backfill-level-{args.level}.jsonl"
+        )
+        results = [
+            item for item in load_checkpoint(checkpoint).values() if "gains" in item
+        ]
+        if not results:
+            parser.error(f"no completed gains in checkpoint: {checkpoint}")
     if args.local:
-        results = collect(args, list_characters(args.db, args.level))
+        if results is None:
+            results = collect(args, list_characters(args.db, args.level))
         print(
             json.dumps(
                 apply_payload(args.db, results, args.check_integrity),
@@ -532,11 +539,12 @@ def main() -> None:
     if not args.ssh_key:
         parser.error("--ssh-key is required unless --local is used")
 
-    characters = remote_json(
-        args,
-        ["--list-json", "--level", str(args.level), "--db", args.db],
-    )
-    results = collect(args, characters)
+    if results is None:
+        characters = remote_json(
+            args,
+            ["--list-json", "--level", str(args.level), "--db", args.db],
+        )
+        results = collect(args, characters)
     apply_args = ["--apply-stdin", "--db", args.db]
     if args.check_integrity:
         apply_args.append("--check-integrity")

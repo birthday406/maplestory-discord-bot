@@ -7,7 +7,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from tools.backfill_maplebot import collect, load_checkpoint, reconstruction_plan
+from tools.backfill_maplebot import (
+    apply_payload,
+    collect,
+    load_checkpoint,
+    reconstruction_plan,
+)
 
 
 class MapleBotBackfillTests(unittest.TestCase):
@@ -223,7 +228,7 @@ class MapleBotBackfillTests(unittest.TestCase):
             {"Retry": 3, "FailA": 4, "Good": 1, "Boundary": 1, "FailB": 4},
         )
 
-    def test_conflicting_newer_snapshot_only_fills_before_first_anchor(self):
+    def test_conflicting_snapshots_are_overwritten_from_latest_anchor(self):
         gains = [
             {"date": f"2026-08-{day:02d}", "exp": 10}
             for day in range(1, 31)
@@ -233,9 +238,63 @@ class MapleBotBackfillTests(unittest.TestCase):
             {"2026-08-27": 270, "2026-08-30": 2_000_500},
         )
 
-        self.assertEqual(mode, "before_first_anchor")
-        self.assertEqual(plan["2026-07-31"], 0)
-        self.assertNotIn("2026-08-28", plan)
+        self.assertEqual(mode, "overwrite")
+        self.assertEqual(plan["2026-08-30"], 2_000_500)
+        self.assertEqual(plan["2026-08-28"], 2_000_480)
+        self.assertEqual(plan["2026-08-20"], 2_000_400)
+
+    def test_apply_payload_updates_existing_snapshot(self):
+        gains = [
+            {"date": f"2026-08-{day:02d}", "exp": 10}
+            for day in range(1, 31)
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = f"{directory}/ranking.db"
+            import sqlite3
+
+            connection = sqlite3.connect(db_path)
+            connection.executescript(
+                """
+                CREATE TABLE characters (
+                    name_key TEXT PRIMARY KEY,
+                    ranking INTEGER
+                );
+                CREATE TABLE ranking_snapshots (
+                    name_key TEXT,
+                    snapshot_date TEXT,
+                    level INTEGER,
+                    exp INTEGER,
+                    ranking INTEGER,
+                    PRIMARY KEY (name_key, snapshot_date)
+                );
+                INSERT INTO characters VALUES ('hero', 1);
+                INSERT INTO ranking_snapshots VALUES
+                    ('hero', '2026-08-20', 200, 9999, 99),
+                    ('hero', '2026-08-30', 200, 1000, 99);
+                """
+            )
+            connection.commit()
+            connection.close()
+
+            with patch(
+                "tools.backfill_maplebot.exp_prefix",
+                return_value=[index * 1_000_000 for index in range(101)],
+            ):
+                result = apply_payload(
+                    db_path,
+                    [{"name": "Hero", "gains": gains}],
+                )
+
+            connection = sqlite3.connect(db_path)
+            row = connection.execute(
+                """SELECT exp, ranking FROM ranking_snapshots
+                    WHERE name_key = 'hero' AND snapshot_date = '2026-08-20'"""
+            ).fetchone()
+            connection.close()
+
+        self.assertEqual(row, (900, 1))
+        self.assertEqual(result["full"], 1)
+        self.assertEqual(result["partial"], [])
 
 
 if __name__ == "__main__":
