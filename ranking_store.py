@@ -2,7 +2,7 @@ import asyncio
 import json
 import sqlite3
 from contextlib import closing
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -12,6 +12,20 @@ from maple_data import LEVEL_EXP
 KRONOS_WORLD_ID = 45
 MIN_TRACKED_LEVEL = 260
 RANKING_PAGE_SIZE = 10
+
+
+def ranking_scan_started_at(scan_date: date) -> int:
+    """랭킹 기준일의 공식 수집 시작 시각인 17:10 UTC를 반환합니다."""
+    return int(
+        datetime(
+            scan_date.year,
+            scan_date.month,
+            scan_date.day,
+            17,
+            10,
+            tzinfo=timezone.utc,
+        ).timestamp()
+    )
 
 
 class _ClosingConnection(sqlite3.Connection):
@@ -570,6 +584,7 @@ class RankingStore:
     ) -> int | None:
         """중단 지점부터 이어가고, 완료한 수집은 다음 날짜에만 다시 시작합니다."""
         day = scan_date.isoformat()
+        scheduled_started_at = ranking_scan_started_at(scan_date)
         with self._connect() as connection:
             row = connection.execute(
                 """
@@ -586,22 +601,21 @@ class RankingStore:
                         """
                         UPDATE ranking_scan_state
                         SET scan_date = ?, next_index = 1, completed = 0,
-                            started_at = CAST(strftime('%s', 'now') AS INTEGER),
+                            started_at = ?,
                             completed_at = NULL
                         WHERE world_id = ?
                         """,
-                        (day, world_id),
+                        (day, scheduled_started_at, world_id),
                     )
                     return 1
                 if not row["completed"]:
-                    if row["started_at"] is None:
+                    if row["started_at"] != scheduled_started_at:
                         connection.execute(
                             """
-                            UPDATE ranking_scan_state
-                            SET started_at = CAST(strftime('%s', 'now') AS INTEGER)
-                            WHERE world_id = ?
+                            UPDATE ranking_scan_state SET started_at = ?
+                            WHERE world_id = ? AND scan_date = ?
                             """,
-                            (world_id,),
+                            (scheduled_started_at, world_id, day),
                         )
                     return row["next_index"]
                 return None
@@ -609,7 +623,7 @@ class RankingStore:
                 """
                 INSERT INTO ranking_scan_state
                     (world_id, scan_date, next_index, completed, started_at, completed_at)
-                VALUES (?, ?, 1, 0, CAST(strftime('%s', 'now') AS INTEGER), NULL)
+                VALUES (?, ?, 1, 0, ?, NULL)
                 ON CONFLICT(world_id) DO UPDATE SET
                     scan_date = excluded.scan_date,
                     next_index = 1,
@@ -617,9 +631,25 @@ class RankingStore:
                     started_at = excluded.started_at,
                     completed_at = NULL
                 """,
-                (world_id, day),
+                (world_id, day, scheduled_started_at),
             )
         return 1
+
+    def get_scan_timing(self, scan_date: date, world_id: int) -> dict | None:
+        """완료 로그에 사용할 UTC 시작·종료 시각과 소요 초를 반환합니다."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT started_at, completed_at FROM ranking_scan_state
+                    WHERE world_id = ? AND scan_date = ?""",
+                (world_id, scan_date.isoformat()),
+            ).fetchone()
+        if row is None or row["started_at"] is None or row["completed_at"] is None:
+            return None
+        return {
+            "started_at": row["started_at"],
+            "completed_at": row["completed_at"],
+            "elapsed_seconds": max(row["completed_at"] - row["started_at"], 0),
+        }
 
     def get_collector_backoff(self) -> tuple[int, int]:
         """재시작 뒤에도 차단 직후 요청을 반복하지 않도록 대기 상태를 읽습니다."""
@@ -1005,17 +1035,8 @@ class RankingStore:
                 """,
                 (world_id, scan_date.isoformat()),
             )
-            row = connection.execute(
-                """
-                SELECT started_at, completed_at
-                FROM ranking_scan_state
-                WHERE world_id = ? AND scan_date = ?
-                """,
-                (world_id, scan_date.isoformat()),
-            ).fetchone()
-        if row is None or row["started_at"] is None or row["completed_at"] is None:
-            return None
-        return max(row["completed_at"] - row["started_at"], 0)
+        timing = self.get_scan_timing(scan_date, world_id)
+        return timing["elapsed_seconds"] if timing is not None else None
 
     def get_gains(self, character_name: str, limit: int = 14) -> list[dict]:
         """최근 15개 일별 기록을 비교해 최대 14일치 경험치 증가량을 반환합니다."""

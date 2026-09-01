@@ -222,10 +222,21 @@ async def run_worker() -> None:
                         "end",
                     }:
                         completed.add(world_id)
+                        timing = store.get_scan_timing(scan_date, world_id)
                         logging.warning(
-                            "ranking_worker_complete phase=world world=%s date=%s",
+                            "ranking_worker_complete phase=world world=%s date=%s "
+                            "started_at=%sZ completed_at=%sZ elapsed_seconds=%s "
+                            "elapsed_hours=%.2f",
                             world_id,
                             scan_date,
+                            datetime.fromtimestamp(
+                                timing["started_at"], timezone.utc
+                            ).strftime("%Y-%m-%dT%H:%M:%S"),
+                            datetime.fromtimestamp(
+                                timing["completed_at"], timezone.utc
+                            ).strftime("%Y-%m-%dT%H:%M:%S"),
+                            timing["elapsed_seconds"],
+                            timing["elapsed_seconds"] / 3600,
                         )
                     await sync_ready_batches(writer.outbox)
                 except RankingRateLimited as error:

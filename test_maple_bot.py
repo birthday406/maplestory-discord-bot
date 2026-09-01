@@ -150,7 +150,7 @@ from maple_bot import (
     visible_sunny_sunday_entries,
     watched_posts,
 )
-from ranking_store import RankingStore, scan_rankings
+from ranking_store import RankingStore, ranking_scan_started_at, scan_rankings
 
 
 class NewsFilteringTests(unittest.TestCase):
@@ -2003,6 +2003,28 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(same_day["reason"], "already_completed")
         next_day_fetch.assert_awaited_once_with(1)
         self.assertEqual(next_day["reason"], "batch")
+
+    def test_scan_start_time_stays_at_1710_utc_after_restart(self) -> None:
+        scan_date = date(2026, 8, 31)
+        expected = int(
+            datetime(2026, 8, 31, 17, 10, tzinfo=timezone.utc).timestamp()
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.start_scan(scan_date, world_id=45)
+            with store._connect() as connection:
+                connection.execute(
+                    "UPDATE ranking_scan_state SET started_at = ? WHERE world_id = 45",
+                    (expected + 12_345,),
+                )
+            store.start_scan(scan_date, world_id=45)
+            with store._connect() as connection:
+                actual = connection.execute(
+                    "SELECT started_at FROM ranking_scan_state WHERE world_id = 45"
+                ).fetchone()[0]
+
+        self.assertEqual(ranking_scan_started_at(scan_date), expected)
+        self.assertEqual(actual, expected)
 
     async def test_scan_stops_when_level_falls_below_260(self) -> None:
         ranks = self.ranks(1, count=5, level=260) + self.ranks(6, count=5, level=259)

@@ -5854,11 +5854,20 @@ class MapleNewsBot(commands.Bot):
                     self._completed_ranking_world_ids.add(world_id)
                 elapsed = result.get("elapsed_seconds")
                 if elapsed is not None:
+                    timing = self.ranking_store.get_scan_timing(scan_date, world_id)
                     logging.warning(
-                        "Ranking scan completed: world=%s date=%s elapsed=%s seconds.",
+                        "ranking_main_complete world=%s date=%s started_at=%sZ "
+                        "completed_at=%sZ elapsed_seconds=%s elapsed_hours=%.2f",
                         RANKING_WORLDS[world_id],
                         scan_date,
+                        datetime.fromtimestamp(
+                            timing["started_at"], timezone.utc
+                        ).strftime("%Y-%m-%dT%H:%M:%S"),
+                        datetime.fromtimestamp(
+                            timing["completed_at"], timezone.utc
+                        ).strftime("%Y-%m-%dT%H:%M:%S"),
                         elapsed,
+                        elapsed / 3600,
                     )
 
             saved = sum(result["saved"] for result in results)
