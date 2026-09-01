@@ -790,20 +790,13 @@ class RankingStore:
     ) -> int:
         """우선 수집을 마친 연속 페이지를 순차 수집에서 다시 요청하지 않습니다."""
         with self._connect() as connection:
-            refreshed = {
-                row["page_index"]
-                for row in connection.execute(
-                    """
-                    SELECT page_index
-                    FROM ranking_active_pages
-                    WHERE scan_date = ? AND world_id = ? AND refreshed = 1
-                      AND page_index >= ?
-                    """,
-                    (scan_date.isoformat(), world_id, page_index),
-                ).fetchall()
-            }
             next_index = page_index
-            while next_index in refreshed:
+            while connection.execute(
+                """SELECT 1 FROM ranking_active_pages
+                    WHERE scan_date = ? AND world_id = ?
+                      AND page_index = ? AND refreshed = 1""",
+                (scan_date.isoformat(), world_id, next_index),
+            ).fetchone() is not None:
                 next_index += RANKING_PAGE_SIZE
             if next_index != page_index:
                 connection.execute(
