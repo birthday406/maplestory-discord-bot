@@ -4285,6 +4285,7 @@ class MapleNewsBot(commands.Bot):
             os.getenv("RANKING_INBOX_PATH", "ranking-inbox")
         )
         self._last_ranking_backup_at: datetime | None = None
+        self._ranking_backup_task: asyncio.Task | None = None
         self._ranking_scan_date = None
         self._ranking_world_offset = 0
         self._completed_ranking_world_ids: set[int] = set()
@@ -4670,6 +4671,16 @@ class MapleNewsBot(commands.Bot):
                 )
             response.raise_for_status()
             return await response.json()
+
+    async def backup_ranking_database(self) -> None:
+        """대용량 DB 백업이 일일 랭킹 수집을 멈추지 않게 별도 스레드에서 실행합니다."""
+        try:
+            rows = await asyncio.to_thread(
+                self.ranking_store.backup_to, RANKING_BACKUP_PATH
+            )
+            logging.info("Ranking backup completed: %s characters.", rows)
+        except (OSError, sqlite3.Error):
+            logging.exception("ranking_main_error phase=backup")
 
     def pause_ranking_collection(self, error: RankingRateLimited) -> int:
         """API 제한 대기를 DB에 남겨 서비스 재시작 뒤에도 같은 요청을 막습니다."""
@@ -5849,21 +5860,24 @@ class MapleNewsBot(commands.Bot):
             self.ranking_store.remove_old_snapshots(scan_date - timedelta(days=30))
             # 페이지마다 DB에는 즉시 저장합니다. 별도 백업 파일은 1시간에 한 번만 만듭니다.
             now = datetime.now(timezone.utc)
-            backup_rows = None
             if (
-                self._last_ranking_backup_at is None
-                or now - self._last_ranking_backup_at >= RANKING_BACKUP_INTERVAL
+                (
+                    self._last_ranking_backup_at is None
+                    or now - self._last_ranking_backup_at >= RANKING_BACKUP_INTERVAL
+                )
+                and (
+                    self._ranking_backup_task is None
+                    or self._ranking_backup_task.done()
+                )
             ):
-                backup_rows = await asyncio.to_thread(
-                    self.ranking_store.backup_to,
-                    RANKING_BACKUP_PATH,
+                self._ranking_backup_task = asyncio.create_task(
+                    self.backup_ranking_database()
                 )
                 self._last_ranking_backup_at = now
             logging.info(
-                "Main-world rankings saved %s characters (%s); backup rows: %s.",
+                "Main-world rankings saved %s characters (%s).",
                 saved,
                 reasons,
-                backup_rows,
             )
         except RankingRateLimited as error:
             self.pause_ranking_collection(error)
