@@ -154,21 +154,21 @@ from ranking_store import RankingStore, scan_rankings
 
 
 class NewsFilteringTests(unittest.TestCase):
-    def test_ranking_collection_fetches_ten_characters_per_second(self) -> None:
+    def test_ranking_collection_keeps_one_rps_with_three_in_flight(self) -> None:
         self.assertEqual(RANKING_SCAN_INTERVAL_SECONDS, 1)
-        self.assertEqual(RANKING_PAGES_PER_BATCH, 1)
+        self.assertEqual(RANKING_PAGES_PER_BATCH, 3)
 
     def test_ranking_pages_are_shared_between_active_worlds(self) -> None:
         allocation, offset = allocate_ranking_pages([19, 1, 45, 70], 0)
-        self.assertEqual(allocation, {19: 1})
-        self.assertEqual(offset, 1)
+        self.assertEqual(allocation, {19: 1, 1: 1, 45: 1})
+        self.assertEqual(offset, 3)
 
         allocation, offset = allocate_ranking_pages([45, 70], offset)
-        self.assertEqual(allocation, {70: 1})
+        self.assertEqual(allocation, {70: 2, 45: 1})
         self.assertEqual(offset, 0)
 
         allocation, offset = allocate_ranking_pages([45], offset)
-        self.assertEqual(allocation, {45: 1})
+        self.assertEqual(allocation, {45: 3})
         self.assertEqual(offset, 0)
 
     def test_ranking_scan_day_uses_utc(self) -> None:
@@ -204,6 +204,46 @@ class NewsFilteringTests(unittest.TestCase):
             return caught.exception
 
         self.assertIsNone(asyncio.run(run()).retry_after)
+
+    def test_slow_ranking_responses_can_overlap(self) -> None:
+        async def run() -> None:
+            first_started = asyncio.Event()
+            second_started = asyncio.Event()
+            release_first = asyncio.Event()
+
+            class ResponseContext:
+                def __init__(self, first: bool) -> None:
+                    self.first = first
+
+                async def __aenter__(self):
+                    (first_started if self.first else second_started).set()
+                    if self.first:
+                        await release_first.wait()
+                    return SimpleNamespace(
+                        status=200,
+                        headers={},
+                        raise_for_status=Mock(),
+                        json=AsyncMock(return_value={"ranks": []}),
+                    )
+
+                async def __aexit__(self, *_args) -> None:
+                    return None
+
+            bot = object.__new__(MapleNewsBot)
+            bot.session = SimpleNamespace(
+                get=Mock(side_effect=[ResponseContext(True), ResponseContext(False)])
+            )
+            bot._ranking_request_lock = asyncio.Lock()
+            bot._next_ranking_request_at = 0.0
+            with patch.object(maple_bot, "RANKING_SCAN_INTERVAL_SECONDS", 0):
+                first = asyncio.create_task(bot.fetch_ranking_page(19, 1))
+                await first_started.wait()
+                second = asyncio.create_task(bot.fetch_ranking_page(19, 11))
+                await asyncio.wait_for(second_started.wait(), timeout=0.1)
+                release_first.set()
+                await asyncio.gather(first, second)
+
+        asyncio.run(run())
 
     def test_ranking_backoff_separates_403_and_429(self) -> None:
         self.assertEqual(ranking_backoff_seconds(403, None, 1), 5 * 60)
@@ -1290,6 +1330,60 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(gains, [{"date": "2026-08-30", "exp": 100}])
 
+    def test_snapshot_keeps_representative_legion_and_achievement(self) -> None:
+        representative = self.character(
+            legionLevel=10_221,
+            legionRank=2_923,
+            achievementScore=33_370,
+            achievementRank=810,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            scan_date = date(2026, 8, 30)
+            store.save_snapshot(representative, scan_date)
+            # 같은 날 일반 랭킹만 다시 수집해도 이미 확인한 대표 정보는 유지합니다.
+            store.save_snapshot(self.character(), scan_date)
+            with store._connect() as connection:
+                row = connection.execute(
+                    """SELECT legion_level, legion_rank,
+                              achievement_score, achievement_rank
+                         FROM ranking_snapshots
+                        WHERE name_key = ? AND snapshot_date = ?""",
+                    ("home", scan_date.isoformat()),
+                ).fetchone()
+
+        self.assertEqual(tuple(row), (10_221, 2_923, 33_370, 810))
+
+    def test_nickname_change_detector_links_a_strong_match(self) -> None:
+        old = self.character(characterName="OldName", rank=1_000, exp=123_456)
+        new = self.character(characterName="NewName", rank=1_020, exp=123_456)
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(old, date(2026, 8, 30))
+            store.save_snapshot(new, date(2026, 8, 31))
+            result = store.detect_nickname_changes(
+                date(2026, 8, 30),
+                date(2026, 8, 31),
+                min_snapshot_count=1,
+            )
+            trace = store.get_nickname_trace("newname")
+
+        self.assertEqual(result["saved"], 1)
+        self.assertEqual(
+            [(item["old_name"], item["new_name"]) for item in trace],
+            [("OldName", "NewName")],
+        )
+
+    def test_nickname_change_detector_rejects_incomplete_days(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(self.character(), date(2026, 8, 30))
+            result = store.detect_nickname_changes(
+                date(2026, 8, 30), date(2026, 8, 31)
+            )
+
+        self.assertEqual(result["reason"], "incomplete_snapshot")
+
     def test_default_character_is_saved_per_discord_user(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = RankingStore(Path(directory) / "ranking.db")
@@ -1592,7 +1686,7 @@ class RankingCollectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call.args[0] for call in fetch_page.await_args_list], [1, 11])
 
     async def test_command_searched_character_is_collected_before_world_pages(self) -> None:
-        today = datetime.now(maple_bot.URSUS_TIMEZONE).date()
+        today = maple_bot.current_ranking_scan_date()
         yesterday = date.fromordinal(today.toordinal() - 1)
         character = self.ranks(1, count=1)[0]
         with tempfile.TemporaryDirectory() as directory:

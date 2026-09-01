@@ -80,7 +80,29 @@ class RankingStore:
                     level INTEGER NOT NULL,
                     exp INTEGER NOT NULL,
                     ranking INTEGER NOT NULL,
+                    world_id INTEGER,
+                    job_name TEXT,
+                    legion_level INTEGER,
+                    legion_rank INTEGER,
+                    achievement_score INTEGER,
+                    achievement_rank INTEGER,
                     PRIMARY KEY (name_key, snapshot_date)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_ranking_snapshots_date
+                ON ranking_snapshots (snapshot_date);
+
+                CREATE TABLE IF NOT EXISTS nickname_changes (
+                    old_name_key TEXT NOT NULL,
+                    old_name TEXT NOT NULL,
+                    new_name_key TEXT NOT NULL,
+                    new_name TEXT NOT NULL,
+                    old_snapshot_date TEXT NOT NULL,
+                    new_snapshot_date TEXT NOT NULL,
+                    score INTEGER NOT NULL,
+                    confidence TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    PRIMARY KEY (old_name_key, new_name_key, new_snapshot_date)
                 );
 
                 CREATE TABLE IF NOT EXISTS ranking_scan_state (
@@ -166,6 +188,24 @@ class RankingStore:
             ):
                 if name not in columns:
                     connection.execute(f"ALTER TABLE characters ADD COLUMN {name} {definition}")
+            snapshot_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(ranking_snapshots)"
+                ).fetchall()
+            }
+            for name, definition in (
+                ("world_id", "INTEGER"),
+                ("job_name", "TEXT"),
+                ("legion_level", "INTEGER"),
+                ("legion_rank", "INTEGER"),
+                ("achievement_score", "INTEGER"),
+                ("achievement_rank", "INTEGER"),
+            ):
+                if name not in snapshot_columns:
+                    connection.execute(
+                        f"ALTER TABLE ranking_snapshots ADD COLUMN {name} {definition}"
+                    )
             # 기존 캐릭터는 일단 마지막 정상 수집일을 기준으로 잡습니다. 이후부터는
             # 레벨/경험치가 실제로 바뀐 날만 갱신되므로 과거 전체 조인이 필요 없습니다.
             connection.execute(
@@ -224,6 +264,150 @@ class RankingStore:
                 """,
                 (discord_user_id, character_name),
             )
+
+    def detect_nickname_changes(
+        self,
+        old_date: date,
+        new_date: date,
+        min_snapshot_count: int = 700_000,
+        min_size_ratio: float = 0.95,
+    ) -> dict:
+        """연속된 완전 수집일만 비교해 닉네임 변경 후보를 저장합니다."""
+        if new_date - old_date != timedelta(days=1):
+            return {"saved": 0, "reason": "dates_not_consecutive"}
+        old_day, new_day = old_date.isoformat(), new_date.isoformat()
+        with self._connect() as connection:
+            old_count = connection.execute(
+                "SELECT COUNT(*) FROM ranking_snapshots WHERE snapshot_date = ?",
+                (old_day,),
+            ).fetchone()[0]
+            new_count = connection.execute(
+                "SELECT COUNT(*) FROM ranking_snapshots WHERE snapshot_date = ?",
+                (new_day,),
+            ).fetchone()[0]
+            if (
+                min(old_count, new_count) < min_snapshot_count
+                or min(old_count, new_count) / max(old_count, new_count, 1)
+                < min_size_ratio
+            ):
+                return {
+                    "saved": 0,
+                    "reason": "incomplete_snapshot",
+                    "counts": [old_count, new_count],
+                }
+            disappeared = connection.execute(
+                """SELECT old.name_key, character.name,
+                          COALESCE(old.world_id, character.world_id) AS world_id,
+                          COALESCE(old.job_name, character.job_name) AS job_name,
+                          old.level, old.exp, old.ranking
+                     FROM ranking_snapshots AS old
+                     JOIN characters AS character ON character.name_key = old.name_key
+                    WHERE old.snapshot_date = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM ranking_snapshots AS current
+                           WHERE current.snapshot_date = ?
+                             AND current.name_key = old.name_key
+                      )""",
+                (old_day, new_day),
+            ).fetchall()
+            appeared = connection.execute(
+                """SELECT current.name_key, character.name,
+                          COALESCE(current.world_id, character.world_id) AS world_id,
+                          COALESCE(current.job_name, character.job_name) AS job_name,
+                          current.level, current.exp, current.ranking
+                     FROM ranking_snapshots AS current
+                     JOIN characters AS character ON character.name_key = current.name_key
+                    WHERE current.snapshot_date = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM ranking_snapshots AS old
+                           WHERE old.snapshot_date = ?
+                             AND old.name_key = current.name_key
+                      )""",
+                (new_day, old_day),
+            ).fetchall()
+            appeared_by_identity: dict[tuple[int, str, int], list] = {}
+            for item in appeared:
+                appeared_by_identity.setdefault(
+                    (item["world_id"], item["job_name"], item["level"]), []
+                ).append(item)
+
+            proposals = []
+            for old in disappeared:
+                matches = []
+                for level in (old["level"], old["level"] + 1):
+                    for new in appeared_by_identity.get(
+                        (old["world_id"], old["job_name"], level), []
+                    ):
+                        old_total = ranking_total_exp(old["level"], old["exp"])
+                        new_total = ranking_total_exp(new["level"], new["exp"])
+                        if old_total is None or new_total is None or new_total < old_total:
+                            continue
+                        score = 20 if new["level"] == old["level"] else 15
+                        gain = new_total - old_total
+                        level_exp = LEVEL_EXP[min(old["level"] - 200, len(LEVEL_EXP) - 1)]
+                        if gain == 0:
+                            score += 40
+                        elif gain <= level_exp // 10:
+                            score += 30
+                        elif gain <= level_exp:
+                            score += 20
+                        else:
+                            continue
+                        rank_gap = abs(new["ranking"] - old["ranking"])
+                        score += 10 if rank_gap <= 100 else 5 if rank_gap <= 500 else 0
+                        if score >= 50:
+                            matches.append((score, new))
+                matches.sort(key=lambda item: item[0], reverse=True)
+                if matches:
+                    ambiguous = len(matches) > 1 and matches[0][0] - matches[1][0] < 10
+                    proposals.append((matches[0][0], old, matches[0][1], ambiguous))
+
+            used_old, used_new, saved = set(), set(), 0
+            for score, old, new, ambiguous in sorted(proposals, reverse=True, key=lambda x: x[0]):
+                if old["name_key"] in used_old or new["name_key"] in used_new:
+                    continue
+                confidence = "HIGH" if score >= 65 and not ambiguous else "POSSIBLE"
+                status = "AMBIGUOUS" if ambiguous else "PENDING"
+                connection.execute(
+                    """INSERT INTO nickname_changes
+                        (old_name_key, old_name, new_name_key, new_name,
+                         old_snapshot_date, new_snapshot_date, score, confidence, status)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(old_name_key, new_name_key, new_snapshot_date)
+                       DO UPDATE SET score=excluded.score,
+                                     confidence=excluded.confidence,
+                                     status=excluded.status""",
+                    (
+                        old["name_key"], old["name"], new["name_key"], new["name"],
+                        old_day, new_day, score, confidence, status,
+                    ),
+                )
+                used_old.add(old["name_key"])
+                used_new.add(new["name_key"])
+                saved += 1
+        return {"saved": saved, "reason": "ok", "counts": [old_count, new_count]}
+
+    def get_nickname_trace(self, nickname: str) -> list[dict]:
+        """과거 이름이나 현재 이름 어느 쪽으로 조회해도 저장된 변경 연결을 반환합니다."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM nickname_changes WHERE status != 'REJECTED'"
+            ).fetchall()
+        previous = {row["new_name_key"]: row for row in rows}
+        following = {row["old_name_key"]: row for row in rows}
+        key = nickname.casefold()
+        seen = set()
+        while key in previous and key not in seen:
+            seen.add(key)
+            key = previous[key]["old_name_key"]
+        result = []
+        seen.clear()
+        while key in following and key not in seen:
+            seen.add(key)
+            row = following[key]
+            result.append(dict(row))
+            key = row["new_name_key"]
+        return result
 
     def get_default_character(self, discord_user_id: int) -> str | None:
         """사용자가 이름 없이 /랭킹을 실행했을 때 사용할 캐릭터를 반환합니다."""
@@ -718,8 +902,9 @@ class RankingStore:
                 connection.execute(
                     """
                     INSERT INTO ranking_snapshots
-                        (name_key, snapshot_date, level, exp, ranking)
-                    VALUES (?, ?, ?, ?, ?)
+                        (name_key, snapshot_date, level, exp, ranking, world_id, job_name,
+                         legion_level, legion_rank, achievement_score, achievement_rank)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     {snapshot_conflict}
                     """.format(
                         snapshot_conflict=(
@@ -729,7 +914,23 @@ class RankingStore:
                             ON CONFLICT(name_key, snapshot_date) DO UPDATE SET
                                 level = excluded.level,
                                 exp = excluded.exp,
-                                ranking = excluded.ranking
+                                ranking = excluded.ranking,
+                                world_id = excluded.world_id,
+                                job_name = excluded.job_name,
+                                legion_level = COALESCE(
+                                    excluded.legion_level, ranking_snapshots.legion_level
+                                ),
+                                legion_rank = COALESCE(
+                                    excluded.legion_rank, ranking_snapshots.legion_rank
+                                ),
+                                achievement_score = COALESCE(
+                                    excluded.achievement_score,
+                                    ranking_snapshots.achievement_score
+                                ),
+                                achievement_rank = COALESCE(
+                                    excluded.achievement_rank,
+                                    ranking_snapshots.achievement_rank
+                                )
                             """
                         )
                     ),
@@ -739,6 +940,12 @@ class RankingStore:
                         character["level"],
                         character.get("exp", 0),
                         character["rank"],
+                        character["worldID"],
+                        character["jobName"],
+                        character.get("legionLevel"),
+                        character.get("legionRank"),
+                        character.get("achievementScore"),
+                        character.get("achievementRank"),
                     ),
                 )
             if update_checkpoint:

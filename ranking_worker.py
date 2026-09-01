@@ -133,16 +133,19 @@ async def run_worker() -> None:
     scan_date = None
     world_offset = 0
     next_request_at = 0.0
+    request_lock = asyncio.Lock()
+    concurrency = max(1, int(os.getenv("RANKING_WORKER_CONCURRENCY", "3")))
     current_page_index: int | None = None
 
     async with aiohttp.ClientSession() as session:
         async def fetch_page(world_id: int, page_index: int) -> dict:
             nonlocal current_page_index, next_request_at
             current_page_index = page_index
-            loop = asyncio.get_running_loop()
-            if next_request_at > loop.time():
-                await asyncio.sleep(next_request_at - loop.time())
-            next_request_at = loop.time() + RANKING_SCAN_INTERVAL_SECONDS
+            async with request_lock:
+                loop = asyncio.get_running_loop()
+                if next_request_at > loop.time():
+                    await asyncio.sleep(next_request_at - loop.time())
+                next_request_at = loop.time() + RANKING_SCAN_INTERVAL_SECONDS
             async with session.get(
                 RANKING_API_URL.format(region="na"),
                 params={
@@ -206,7 +209,7 @@ async def run_worker() -> None:
                         store,
                         scan_date,
                         max_characters=None,
-                        max_pages=1,
+                        max_pages=concurrency,
                         scan_id=world_id,
                     )
                     if failures:

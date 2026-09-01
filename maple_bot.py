@@ -99,9 +99,9 @@ FAMILIAR_DB_PATH = Path("familiar.db")
 BACKFILL_ALERT_PATH = Path(__file__).with_name("maplebot-backfill-alert.txt")
 RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.db"
 # 12.5명/초도 장시간 실행하면 공식 API가 403을 반환하므로
-# 요청을 몰아서 보내지 않고 1초마다 한 페이지(최대 10명)씩 고르게 수집합니다.
+# 요청 시작은 1초마다 한 페이지로 제한하되 느린 응답은 최대 3개까지 겹칩니다.
 RANKING_SCAN_INTERVAL_SECONDS = 1
-RANKING_PAGES_PER_BATCH = 1
+RANKING_PAGES_PER_BATCH = 3
 RANKING_PROFILE_CACHE_SECONDS = 10 * 60
 RANKING_DAILY_START = timedelta(hours=17, minutes=10)
 RANKING_BACKUP_INTERVAL = timedelta(hours=1)
@@ -3725,6 +3725,44 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
     return profile
 
 
+@app_commands.command(
+    name="닉네임추적",
+    description="GMS 랭킹 기록에서 캐릭터의 닉네임 변경 후보를 확인합니다.",
+)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.rename(nickname="닉네임")
+async def nickname_trace_command(
+    interaction: discord.Interaction, nickname: str
+) -> None:
+    nickname = nickname.strip()
+    if not nickname or len(nickname) > 20:
+        await interaction.response.send_message(
+            "닉네임을 1~20자로 입력해주세요.", ephemeral=True
+        )
+        return
+    trace = interaction.client.ranking_store.get_nickname_trace(nickname)
+    if not trace:
+        await interaction.response.send_message(
+            f"**{discord.utils.escape_markdown(nickname)}** 캐릭터의 검증 가능한 "
+            "닉네임 변경 기록이 아직 없습니다.",
+            ephemeral=True,
+        )
+        return
+    names = [trace[0]["old_name"], *(item["new_name"] for item in trace)]
+    confidence = min(
+        (item["confidence"] for item in trace),
+        key=("POSSIBLE", "HIGH", "VERY HIGH").index,
+    )
+    await interaction.response.send_message(
+        "**닉네임 변경 기록**\n"
+        + " → ".join(discord.utils.escape_markdown(name) for name in names)
+        + f"\n현재 닉네임: **{discord.utils.escape_markdown(names[-1])}**"
+        + f"\n신뢰도: **{confidence}**",
+        ephemeral=True,
+    )
+
+
 @app_commands.command(name="랭킹", description="GMS 캐릭터의 공식 레벨 랭킹을 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -4287,6 +4325,7 @@ class MapleNewsBot(commands.Bot):
             appearance_search_command,
             traffic_light_command,
             ranking_command,
+            nickname_trace_command,
             channel_recommend_command,
             familiar_command,
             pssb_command,
@@ -4616,21 +4655,21 @@ class MapleNewsBot(commands.Bot):
             if wait_seconds > 0:
                 await asyncio.sleep(wait_seconds)
             self._next_ranking_request_at = loop.time() + RANKING_SCAN_INTERVAL_SECONDS
-            async with self.session.get(
-                RANKING_API_URL.format(region=region),
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=20),
-            ) as response:
-                if rate_limit_target is not None and response.status in {403, 429}:
-                    try:
-                        retry_after = int(response.headers.get("Retry-After", ""))
-                    except ValueError:
-                        retry_after = None
-                    raise RankingRateLimited(
-                        rate_limit_target, response.status, retry_after
-                    )
-                response.raise_for_status()
-                return await response.json()
+        async with self.session.get(
+            RANKING_API_URL.format(region=region),
+            params=params,
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as response:
+            if rate_limit_target is not None and response.status in {403, 429}:
+                try:
+                    retry_after = int(response.headers.get("Retry-After", ""))
+                except ValueError:
+                    retry_after = None
+                raise RankingRateLimited(
+                    rate_limit_target, response.status, retry_after
+                )
+            response.raise_for_status()
+            return await response.json()
 
     def pause_ranking_collection(self, error: RankingRateLimited) -> int:
         """API 제한 대기를 DB에 남겨 서비스 재시작 뒤에도 같은 요청을 막습니다."""
