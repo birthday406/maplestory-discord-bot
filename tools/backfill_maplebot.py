@@ -423,6 +423,10 @@ def collect(args: argparse.Namespace, characters: list[dict]) -> list[dict]:
                 continue
 
             pending.append(character)
+            if not_found:
+                # 검색되지 않는 캐릭터는 한 바퀴 뒤 재확인하되 사이트 장애로 세지 않습니다.
+                errors = 0
+                continue
             errors += 1
             if errors < args.max_errors:
                 continue
