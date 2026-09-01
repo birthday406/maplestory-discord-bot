@@ -1,0 +1,22 @@
+[Unit]
+Description=MapleStory Ranking Shard Collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/maplestory-discord-bot
+Environment=RANKING_WORKER_WORLD_IDS=45,19,1,70
+Environment=RANKING_WORKER_NAME=oracle-worker-main
+Environment=RANKING_WORKER_DB_PATH=/home/ubuntu/maplestory-discord-bot/ranking-shard-worker.db
+Environment=RANKING_OUTBOX_PATH=/home/ubuntu/maplestory-discord-bot/ranking-inbox
+Environment=RANKING_BATCH_PAGES=60
+Environment=RANKING_WORKER_SHARD_COUNT=4
+Environment=RANKING_WORKER_SHARD_INDEX=0
+ExecStart=/home/ubuntu/maplestory-discord-bot/.venv/bin/python /home/ubuntu/maplestory-discord-bot/ranking_worker.py
+Restart=always
+RestartSec=10
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
