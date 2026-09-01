@@ -104,7 +104,6 @@ RANKING_SCAN_INTERVAL_SECONDS = 1
 RANKING_PAGES_PER_BATCH = 3
 RANKING_PROFILE_CACHE_SECONDS = 10 * 60
 RANKING_DAILY_START = timedelta(hours=17, minutes=10)
-RANKING_BACKUP_INTERVAL = timedelta(hours=1)
 RANKING_FORBIDDEN_BACKOFF_STEPS = (5 * 60, 15 * 60, 60 * 60, 6 * 60 * 60)
 RANKING_RATE_LIMIT_BACKOFF_SECONDS = 60
 RANKING_MAX_RATE_LIMIT_BACKOFF_SECONDS = 60 * 60
@@ -4284,7 +4283,7 @@ class MapleNewsBot(commands.Bot):
         self._ranking_inbox_path = Path(
             os.getenv("RANKING_INBOX_PATH", "ranking-inbox")
         )
-        self._last_ranking_backup_at: datetime | None = None
+        self._last_ranking_backup_scan_date: date | None = None
         self._ranking_backup_task: asyncio.Task | None = None
         self._ranking_scan_date = None
         self._ranking_world_offset = 0
@@ -5817,6 +5816,17 @@ class MapleNewsBot(commands.Bot):
             if world_id not in self._completed_ranking_world_ids
         ]
         if not active_world_ids:
+            if (
+                self._last_ranking_backup_scan_date != scan_date
+                and (
+                    self._ranking_backup_task is None
+                    or self._ranking_backup_task.done()
+                )
+            ):
+                self._ranking_backup_task = asyncio.create_task(
+                    self.backup_ranking_database()
+                )
+                self._last_ranking_backup_scan_date = scan_date
             await asyncio.sleep(60)
             return
 
@@ -5858,22 +5868,6 @@ class MapleNewsBot(commands.Bot):
             )
             # 기본 그래프는 14일치지만, 나중에 30일 보기에도 쓸 수 있게 한 달간 보관합니다.
             self.ranking_store.remove_old_snapshots(scan_date - timedelta(days=30))
-            # 페이지마다 DB에는 즉시 저장합니다. 별도 백업 파일은 1시간에 한 번만 만듭니다.
-            now = datetime.now(timezone.utc)
-            if (
-                (
-                    self._last_ranking_backup_at is None
-                    or now - self._last_ranking_backup_at >= RANKING_BACKUP_INTERVAL
-                )
-                and (
-                    self._ranking_backup_task is None
-                    or self._ranking_backup_task.done()
-                )
-            ):
-                self._ranking_backup_task = asyncio.create_task(
-                    self.backup_ranking_database()
-                )
-                self._last_ranking_backup_at = now
             logging.info(
                 "Main-world rankings saved %s characters (%s).",
                 saved,
