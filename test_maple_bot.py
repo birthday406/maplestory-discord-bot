@@ -1337,14 +1337,28 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             store = RankingStore(Path(directory) / "ranking.db")
             store.save_snapshot(old, date(2026, 8, 30))
             store.save_snapshot(new, date(2026, 8, 31))
+            preview = store.detect_nickname_changes(
+                date(2026, 8, 30),
+                date(2026, 8, 31),
+                min_snapshot_count=1,
+                save=False,
+            )
+            self.assertEqual(store.get_nickname_trace("newname"), [])
             result = store.detect_nickname_changes(
+                date(2026, 8, 30),
+                date(2026, 8, 31),
+                min_snapshot_count=1,
+            )
+            repeated = store.detect_nickname_changes(
                 date(2026, 8, 30),
                 date(2026, 8, 31),
                 min_snapshot_count=1,
             )
             trace = store.get_nickname_trace("newname")
 
+        self.assertEqual(preview["saved"], 1)
         self.assertEqual(result["saved"], 1)
+        self.assertEqual(repeated["reason"], "already_processed")
         self.assertEqual(
             [(item["old_name"], item["new_name"]) for item in trace],
             [("OldName", "NewName")],

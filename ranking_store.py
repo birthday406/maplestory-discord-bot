@@ -123,6 +123,14 @@ class RankingStore:
                     PRIMARY KEY (old_name_key, new_name_key, new_snapshot_date)
                 );
 
+                CREATE TABLE IF NOT EXISTS nickname_detection_runs (
+                    old_snapshot_date TEXT NOT NULL,
+                    new_snapshot_date TEXT NOT NULL,
+                    detected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    saved INTEGER NOT NULL,
+                    PRIMARY KEY (old_snapshot_date, new_snapshot_date)
+                );
+
                 CREATE TABLE IF NOT EXISTS ranking_scan_state (
                     world_id INTEGER PRIMARY KEY,
                     scan_date TEXT NOT NULL,
@@ -289,12 +297,24 @@ class RankingStore:
         new_date: date,
         min_snapshot_count: int = 700_000,
         min_size_ratio: float = 0.95,
+        save: bool = True,
     ) -> dict:
         """연속된 완전 수집일만 비교해 닉네임 변경 후보를 저장합니다."""
         if new_date - old_date != timedelta(days=1):
             return {"saved": 0, "reason": "dates_not_consecutive"}
         old_day, new_day = old_date.isoformat(), new_date.isoformat()
         with self._connect() as connection:
+            if save:
+                previous_run = connection.execute(
+                    """SELECT saved FROM nickname_detection_runs
+                        WHERE old_snapshot_date = ? AND new_snapshot_date = ?""",
+                    (old_day, new_day),
+                ).fetchone()
+                if previous_run is not None:
+                    return {
+                        "saved": previous_run["saved"],
+                        "reason": "already_processed",
+                    }
             old_count = connection.execute(
                 "SELECT COUNT(*) FROM ranking_snapshots WHERE snapshot_date = ?",
                 (old_day,),
@@ -386,8 +406,9 @@ class RankingStore:
                     continue
                 confidence = "HIGH" if score >= 65 and not ambiguous else "POSSIBLE"
                 status = "AMBIGUOUS" if ambiguous else "PENDING"
-                connection.execute(
-                    """INSERT INTO nickname_changes
+                if save:
+                    connection.execute(
+                        """INSERT INTO nickname_changes
                         (old_name_key, old_name, new_name_key, new_name,
                          old_snapshot_date, new_snapshot_date, score, confidence, status)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -395,14 +416,21 @@ class RankingStore:
                        DO UPDATE SET score=excluded.score,
                                      confidence=excluded.confidence,
                                      status=excluded.status""",
-                    (
-                        old["name_key"], old["name"], new["name_key"], new["name"],
-                        old_day, new_day, score, confidence, status,
-                    ),
-                )
+                        (
+                            old["name_key"], old["name"], new["name_key"], new["name"],
+                            old_day, new_day, score, confidence, status,
+                        ),
+                    )
                 used_old.add(old["name_key"])
                 used_new.add(new["name_key"])
                 saved += 1
+            if save:
+                connection.execute(
+                    """INSERT INTO nickname_detection_runs
+                        (old_snapshot_date, new_snapshot_date, saved)
+                       VALUES (?, ?, ?)""",
+                    (old_day, new_day, saved),
+                )
         return {"saved": saved, "reason": "ok", "counts": [old_count, new_count]}
 
     def get_nickname_trace(self, nickname: str) -> list[dict]:

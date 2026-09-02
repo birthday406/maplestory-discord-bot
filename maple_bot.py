@@ -4493,6 +4493,8 @@ class MapleNewsBot(commands.Bot):
             self.collect_rankings.start()
         if not self.check_backfill_alert.is_running():
             self.check_backfill_alert.start()
+        if not self.detect_nickname_changes_daily.is_running():
+            self.detect_nickname_changes_daily.start()
 
     async def close(self) -> None:
         if self.session is not None:
@@ -6022,6 +6024,25 @@ class MapleNewsBot(commands.Bot):
                 type(error).__name__,
             )
 
+    @tasks.loop(time=datetime_time(hour=6, tzinfo=timezone.utc))
+    async def detect_nickname_changes_daily(self) -> None:
+        """완전 수집된 최근 날짜쌍의 닉네임 변경 후보를 하루 한 번 연결합니다."""
+        latest = current_ranking_scan_date()
+        for days_ago in range(3):
+            new_date = latest - timedelta(days=days_ago)
+            result = await asyncio.to_thread(
+                self.ranking_store.detect_nickname_changes,
+                new_date - timedelta(days=1),
+                new_date,
+            )
+            if result["reason"] == "ok":
+                logging.warning(
+                    "nickname_detection_complete old_date=%s new_date=%s saved=%s",
+                    new_date - timedelta(days=1),
+                    new_date,
+                    result["saved"],
+                )
+
     @check_news.error
     async def check_news_error(self, error: Exception) -> None:
         # API나 전송 단계의 오류를 서버 로그에 남겨 원인을 확인할 수 있게 합니다.
@@ -6060,6 +6081,10 @@ class MapleNewsBot(commands.Bot):
     async def check_backfill_alert_error(self, error: Exception) -> None:
         logging.exception("Backfill alert check failed.", exc_info=error)
 
+    @detect_nickname_changes_daily.error
+    async def detect_nickname_changes_daily_error(self, error: Exception) -> None:
+        logging.exception("Nickname change detection failed.", exc_info=error)
+
     @check_news.before_loop
     async def before_check_news(self) -> None:
         # 디스코드 기본 연결 대기 함수를 가리지 않도록 다른 이름을 사용합니다.
@@ -6095,6 +6120,10 @@ class MapleNewsBot(commands.Bot):
 
     @check_backfill_alert.before_loop
     async def before_check_backfill_alert(self) -> None:
+        await self.wait_until_ready()
+
+    @detect_nickname_changes_daily.before_loop
+    async def before_detect_nickname_changes_daily(self) -> None:
         await self.wait_until_ready()
 
 
