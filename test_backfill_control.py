@@ -37,10 +37,22 @@ class BackfillControlTests(unittest.TestCase):
                 root,
                 [(10, "python tools/backfill_maplebot.py --level 295")],
             )
+            with checkpoint.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    "\n"
+                    + json.dumps({"name": "akane", "gains": [1]})
+                    + "\n"
+                    + json.dumps({"name": "New", "gains": [1]})
+                )
+            updated = status_text(
+                root,
+                [(10, "python tools/backfill_maplebot.py --level 295")],
+            )
 
         self.assertIn("백필 상태: 실행 중", result)
         self.assertIn("현재 레벨 저장: 2명", result)
         self.assertIn("최근 실행 진행: 7/100", result)
+        self.assertIn("현재 레벨 저장: 3명", updated)
 
     def test_progress_does_not_cross_into_another_level(self):
         with tempfile.TemporaryDirectory() as directory:

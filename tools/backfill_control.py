@@ -44,11 +44,23 @@ def checkpoint_counts(root: Path = ROOT) -> dict[int, int]:
             continue
         stat = path.stat()
         cached = cache.get(path.name, {})
-        if cached.get("size") == stat.st_size and cached.get("mtime_ns") == stat.st_mtime_ns:
-            count = int(cached["count"])
+        cached_names = cached.get("names")
+        if (
+            isinstance(cached_names, list)
+            and cached.get("size") == stat.st_size
+            and cached.get("mtime_ns") == stat.st_mtime_ns
+        ):
+            names = set(cached_names)
         else:
-            names = set()
-            with path.open(encoding="utf-8") as handle:
+            can_continue = (
+                isinstance(cached_names, list)
+                and isinstance(cached.get("size"), int)
+                and 0 <= cached["size"] <= stat.st_size
+            )
+            names = set(cached_names) if can_continue else set()
+            with path.open("rb") as handle:
+                if can_continue:
+                    handle.seek(cached["size"])
                 for line in handle:
                     try:
                         item = json.loads(line)
@@ -56,14 +68,13 @@ def checkpoint_counts(root: Path = ROOT) -> dict[int, int]:
                         continue
                     if item.get("gains"):
                         names.add(str(item.get("name", "")).casefold())
-            count = len(names)
             cache[path.name] = {
                 "size": stat.st_size,
                 "mtime_ns": stat.st_mtime_ns,
-                "count": count,
+                "names": sorted(names),
             }
             changed = True
-        counts[int(match.group(1))] = count
+        counts[int(match.group(1))] = len(names)
     if changed:
         temporary = cache_path.with_suffix(f".{os.getpid()}.tmp")
         temporary.write_text(json.dumps(cache, separators=(",", ":")), encoding="utf-8")
