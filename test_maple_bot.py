@@ -223,7 +223,7 @@ class NewsFilteringTests(unittest.TestCase):
 
         self.assertIn("메인: Kronos 1,201위까지", status)
         self.assertIn("보조 E2: 경험치 완료 · Kronos 업적 931위", status)
-        self.assertIn("실패 배치: 1개", status)
+        self.assertIn("실패 배치: 최근 10분 1개 · 누적 1개", status)
 
     def test_ranking_rate_limit_returns_without_sleeping_inside_fetch(self) -> None:
         async def run() -> RankingRateLimited:

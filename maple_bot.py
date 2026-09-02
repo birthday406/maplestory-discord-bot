@@ -1539,10 +1539,16 @@ def ranking_collection_status_text(
         ).strftime("%H:%M:%S")
         lines.append(f"{labels.get(worker, worker)}: {progress} · {updated}")
 
-    failed = sum(1 for _ in (inbox_path / "failed").glob(f"{prefix}*.jsonl"))
+    failed_paths = list((inbox_path / "failed").glob(f"{prefix}*.jsonl"))
+    recent_cutoff = datetime.now(timezone.utc).timestamp() - 10 * 60
+    recent_failed = sum(
+        1 for path in failed_paths if path.stat().st_mtime >= recent_cutoff
+    )
     if not latest:
         lines.append("오늘 도착한 수집 배치가 없습니다.")
-    lines.append(f"실패 배치: {failed}개")
+    lines.append(
+        f"실패 배치: 최근 10분 {recent_failed}개 · 누적 {len(failed_paths)}개"
+    )
     return "\n".join(lines)
 
 
