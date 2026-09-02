@@ -1400,6 +1400,55 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["saved"], 0)
 
+    def test_nickname_change_detector_links_level_300_with_representative_signals(self) -> None:
+        old = self.character(
+            characterName="OldName",
+            level=300,
+            rank=15,
+            exp=0,
+            legionLevel=10_500,
+            achievementScore=33_000,
+        )
+        new = self.character(
+            characterName="NewName",
+            level=300,
+            rank=15,
+            exp=0,
+            legionLevel=10_501,
+            achievementScore=33_010,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(old, date(2026, 8, 30))
+            store.save_snapshot(new, date(2026, 8, 31))
+            result = store.detect_nickname_changes(
+                date(2026, 8, 30),
+                date(2026, 8, 31),
+                min_snapshot_count=1,
+            )
+
+        self.assertEqual(result["saved"], 1)
+        self.assertEqual(result["preview"][0]["score"], 80)
+
+    def test_nickname_change_detector_rejects_decreased_level_300_account_values(self) -> None:
+        old = self.character(
+            characterName="OldName", level=300, rank=15, exp=0, legionLevel=10_500
+        )
+        new = self.character(
+            characterName="NewName", level=300, rank=15, exp=0, legionLevel=10_499
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(old, date(2026, 8, 30))
+            store.save_snapshot(new, date(2026, 8, 31))
+            result = store.detect_nickname_changes(
+                date(2026, 8, 30),
+                date(2026, 8, 31),
+                min_snapshot_count=1,
+            )
+
+        self.assertEqual(result["saved"], 0)
+
     def test_nickname_change_detector_rejects_weak_rank_match(self) -> None:
         old = self.character(characterName="OldName", rank=10_000, exp=123_456)
         new = self.character(characterName="NewName", rank=11_000, exp=123_456)

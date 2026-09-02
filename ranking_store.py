@@ -337,7 +337,8 @@ class RankingStore:
                 """SELECT old.name_key, character.name,
                           COALESCE(old.world_id, character.world_id) AS world_id,
                           COALESCE(old.job_name, character.job_name) AS job_name,
-                          old.level, old.exp, old.ranking
+                          old.level, old.exp, old.ranking,
+                          old.legion_level, old.achievement_score
                      FROM ranking_snapshots AS old
                      JOIN characters AS character ON character.name_key = old.name_key
                     WHERE old.snapshot_date = ?
@@ -352,7 +353,8 @@ class RankingStore:
                 """SELECT current.name_key, character.name,
                           COALESCE(current.world_id, character.world_id) AS world_id,
                           COALESCE(current.job_name, character.job_name) AS job_name,
-                          current.level, current.exp, current.ranking
+                          current.level, current.exp, current.ranking,
+                          current.legion_level, current.achievement_score
                      FROM ranking_snapshots AS current
                      JOIN characters AS character ON character.name_key = current.name_key
                     WHERE current.snapshot_date = ?
@@ -376,6 +378,19 @@ class RankingStore:
                     for new in appeared_by_identity.get(
                         (old["world_id"], old["job_name"], level), []
                     ):
+                        if old["level"] == new["level"] == 300:
+                            if old["ranking"] != new["ranking"]:
+                                continue
+                            score = 70
+                            for metric in ("legion_level", "achievement_score"):
+                                old_value, new_value = old[metric] or 0, new[metric] or 0
+                                if old_value and new_value:
+                                    if new_value < old_value:
+                                        break
+                                    score += 5
+                            else:
+                                matches.append((score, new))
+                            continue
                         old_total = ranking_total_exp(old["level"], old["exp"])
                         new_total = ranking_total_exp(new["level"], new["exp"])
                         if old_total is None or new_total is None or new_total < old_total:
@@ -407,7 +422,7 @@ class RankingStore:
                     continue
                 # Lv.260 경계의 EXP 0 캐릭터는 같은 순위에 대량으로 겹칩니다.
                 # 자동 연결은 오탐을 피하기 위해 강하고 유일한 후보만 허용합니다.
-                if score < 65 or ambiguous or not old["exp"]:
+                if score < 65 or ambiguous or (not old["exp"] and old["level"] < 300):
                     continue
                 confidence = "HIGH"
                 status = "PENDING"
