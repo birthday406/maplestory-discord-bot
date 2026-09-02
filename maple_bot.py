@@ -1490,6 +1490,62 @@ def current_ranking_scan_date(now: datetime | None = None):
     return (current - RANKING_DAILY_START).date()
 
 
+def ranking_collection_status_text(
+    inbox_path: Path, scan_date: date | None = None
+) -> str:
+    """메인 서버에 도착한 최신 배치로 분산 수집기 진행상황을 요약합니다."""
+    scan_date = scan_date or current_ranking_scan_date()
+    prefix = f"{scan_date.isoformat()}-"
+    latest: dict[str, Path] = {}
+    for directory in (inbox_path / "processed", inbox_path):
+        for path in directory.glob(f"{prefix}*.jsonl"):
+            match = re.match(rf"^{re.escape(prefix)}(.+)-\d+\.jsonl$", path.name)
+            if not match:
+                continue
+            worker = match.group(1)
+            if worker not in latest or path.stat().st_mtime > latest[worker].stat().st_mtime:
+                latest[worker] = path
+
+    labels = {
+        "oracle-worker-main": "메인",
+        "oracle-worker-e2": "보조 E2",
+        "oracle-worker-a1-bera": "보조 Bera",
+        "oracle-worker-a1-hyperion": "보조 Hyperion",
+    }
+    lines = [f"랭킹 수집 상태 ({scan_date.isoformat()} UTC)"]
+    for worker in sorted(
+        latest, key=lambda value: (value not in labels, labels.get(value, value))
+    ):
+        path = latest[worker]
+        try:
+            with path.open(encoding="utf-8") as handle:
+                last = next((json.loads(line) for line in reversed(handle.readlines()) if line.strip()), None)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not last:
+            continue
+        world = RANKING_WORLDS.get(
+            last.get("world_id"), f"월드 {last.get('world_id')}"
+        )
+        page = int(last.get("page_index", 0))
+        ranking_type = last.get("ranking_type", "world")
+        if ranking_type == "world":
+            progress = f"{world} {page:,}위까지"
+        else:
+            kind = "유니온" if ranking_type == "legion" else "업적"
+            progress = f"경험치 완료 · {world} {kind} {page:,}위"
+        updated = datetime.fromtimestamp(
+            path.stat().st_mtime, timezone.utc
+        ).strftime("%H:%M:%S")
+        lines.append(f"{labels.get(worker, worker)}: {progress} · {updated}")
+
+    failed = sum(1 for _ in (inbox_path / "failed").glob(f"{prefix}*.jsonl"))
+    if not latest:
+        lines.append("오늘 도착한 수집 배치가 없습니다.")
+    lines.append(f"실패 배치: {failed}개")
+    return "\n".join(lines)
+
+
 @lru_cache(maxsize=16)
 def ranking_font(name: str, size: int) -> ImageFont.FreeTypeFont:
     font = ImageFont.truetype(str(RANKING_FONT_PATHS[name]), size)
@@ -4386,13 +4442,26 @@ class MapleNewsBot(commands.Bot):
             return f"백필 원격 제어에 실패했습니다.\n{detail[-1000:]}"
         return stdout.decode(errors="replace").strip()
 
+    async def ranking_collection_status(self) -> str:
+        return await asyncio.to_thread(
+            ranking_collection_status_text, self._ranking_inbox_path
+        )
+
     async def on_message(self, message: discord.Message) -> None:
         command = "".join(message.content.split())
         actions = {"백필상태": "status", "백필확인": "status", "백필재시작": "restart"}
-        if message.guild is None and not message.author.bot and command in actions:
-            if await self.is_owner(message.author):
-                await message.channel.send(await self.run_backfill_control(actions[command]))
-            return
+        ranking_status_commands = {"랭킹상태", "랭킹확인"}
+        if message.guild is None and not message.author.bot:
+            if command in actions:
+                if await self.is_owner(message.author):
+                    await message.channel.send(
+                        await self.run_backfill_control(actions[command])
+                    )
+                return
+            if command in ranking_status_commands:
+                if await self.is_owner(message.author):
+                    await message.channel.send(await self.ranking_collection_status())
+                return
         await self.process_commands(message)
 
     async def on_ready(self) -> None:

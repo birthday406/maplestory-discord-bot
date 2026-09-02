@@ -188,6 +188,43 @@ class NewsFilteringTests(unittest.TestCase):
             date(2026, 8, 31),
         )
 
+    def test_ranking_collection_status_uses_latest_worker_batches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            inbox = Path(directory)
+            processed = inbox / "processed"
+            failed = inbox / "failed"
+            processed.mkdir()
+            failed.mkdir()
+            (processed / "2026-09-01-oracle-worker-main-1.jsonl").write_text(
+                json.dumps(
+                    {
+                        "world_id": 45,
+                        "page_index": 1201,
+                        "ranking_type": "world",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (processed / "2026-09-01-oracle-worker-e2-2.jsonl").write_text(
+                json.dumps(
+                    {
+                        "world_id": 45,
+                        "page_index": 931,
+                        "ranking_type": "achievement",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (failed / "2026-09-01-broken-3.jsonl").touch()
+
+            status = maple_bot.ranking_collection_status_text(
+                inbox, date(2026, 9, 1)
+            )
+
+        self.assertIn("메인: Kronos 1,201위까지", status)
+        self.assertIn("보조 E2: 경험치 완료 · Kronos 업적 931위", status)
+        self.assertIn("실패 배치: 1개", status)
+
     def test_ranking_rate_limit_returns_without_sleeping_inside_fetch(self) -> None:
         async def run() -> RankingRateLimited:
             response = SimpleNamespace(status=403, headers={})
@@ -3500,6 +3537,25 @@ class CommandStatsTests(unittest.IsolatedAsyncioTestCase):
 
         bot.run_backfill_control.assert_awaited_once_with("restart")
         message.channel.send.assert_awaited_once_with("백필을 재시작했습니다.")
+        bot.process_commands.assert_not_awaited()
+
+    async def test_owner_can_check_ranking_collection_by_dm(self) -> None:
+        bot = SimpleNamespace(
+            is_owner=AsyncMock(return_value=True),
+            ranking_collection_status=AsyncMock(return_value="랭킹 수집 상태"),
+            process_commands=AsyncMock(),
+        )
+        message = SimpleNamespace(
+            content="랭킹 상태",
+            guild=None,
+            author=SimpleNamespace(bot=False),
+            channel=SimpleNamespace(send=AsyncMock()),
+        )
+
+        await MapleNewsBot.on_message(bot, message)
+
+        bot.ranking_collection_status.assert_awaited_once_with()
+        message.channel.send.assert_awaited_once_with("랭킹 수집 상태")
         bot.process_commands.assert_not_awaited()
 
 
