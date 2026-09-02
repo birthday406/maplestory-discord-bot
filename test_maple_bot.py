@@ -1185,6 +1185,11 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                 save_snapshot=Mock(return_value=[]),
                 save_default_character=Mock(),
                 queue_priority_refresh=Mock(),
+                get_nickname_trace=Mock(
+                    return_value=[
+                        {"old_name": "OldHome", "new_name": "Home"}
+                    ]
+                ),
             ),
         )
         interaction = SimpleNamespace(
@@ -1194,7 +1199,11 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             followup=SimpleNamespace(send=AsyncMock()),
         )
 
-        await ranking_command.callback(interaction, " Home ")
+        with patch(
+            "maple_bot.create_ranking_history_image",
+            return_value=io.BytesIO(b"image"),
+        ) as create_image:
+            await ranking_command.callback(interaction, " Home ")
 
         interaction.response.defer.assert_awaited_once_with()
         self.assertEqual(
@@ -1214,6 +1223,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         client.ranking_store.save_snapshot.assert_called_once()
         client.ranking_store.save_default_character.assert_called_once_with(123, "Home")
         client.ranking_store.queue_priority_refresh.assert_called_once_with("Home")
+        self.assertEqual(create_image.call_args.kwargs["previous_name"], "OldHome")
 
     async def test_command_reports_no_data_below_level_260(self) -> None:
         client = SimpleNamespace(

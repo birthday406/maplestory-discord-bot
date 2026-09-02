@@ -1572,6 +1572,7 @@ def create_ranking_history_image(
     legion_population: int | None = None,
     achievement_population: int | None = None,
     updated_date: date | str | None = None,
+    previous_name: str | None = None,
 ) -> io.BytesIO:
     """캐릭터 랭킹 정보와 최근 경험치 변화량을 한 장의 PNG로 만듭니다."""
     scale = 2
@@ -1658,12 +1659,21 @@ def create_ranking_history_image(
         except (OSError, ValueError):
             logging.warning("Failed to render ranking character image for %s.", character_name)
 
+    name_font = korean_title_font if re.search(r"[가-힣]", character_name) else title_font
     draw.text(
         (190 * scale, 42 * scale),
         character_name,
-        font=korean_title_font if re.search(r"[가-힣]", character_name) else title_font,
+        font=name_font,
         fill="#E6FF00",
     )
+    if previous_name:
+        name_right = draw.textbbox((190 * scale, 42 * scale), character_name, font=name_font)[2]
+        draw.text(
+            (name_right + 12 * scale, 57 * scale),
+            f"변경 전 닉네임: {previous_name}",
+            font=footer_font,
+            fill="#AFC0CD",
+        )
     draw.text(
         (190 * scale, 84 * scale),
         f"{level_text}  ·  {character['jobName']}  ·  {world}",
@@ -3871,6 +3881,14 @@ async def ranking_command(
         interaction.client.ranking_store, "get_ai_score_populations", None
     )
     populations = population_loader(character["worldID"]) if population_loader else {}
+    trace_loader = getattr(interaction.client.ranking_store, "get_nickname_trace", None)
+    trace = trace_loader(character["characterName"]) if trace_loader else []
+    previous_name = (
+        trace[-1]["old_name"]
+        if trace
+        and trace[-1]["new_name"].casefold() == character["characterName"].casefold()
+        else None
+    )
     ranking_image = await asyncio.to_thread(
         create_ranking_history_image,
         character,
@@ -3881,6 +3899,7 @@ async def ranking_command(
         world_total_count,
         character_image,
         updated_date=scan_date,
+        previous_name=previous_name,
         **populations,
     )
     filename = "ranking-card.png"
