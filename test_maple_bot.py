@@ -1544,6 +1544,16 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(image.size, (1800, 1528))
             self.assertEqual(image.getpixel((0, 0)), (32, 40, 48))
 
+    def test_next_level_estimate_uses_current_level_and_seven_day_average(self) -> None:
+        remaining = LEVEL_EXP[95] - 100
+
+        self.assertEqual(
+            maple_bot.estimate_next_level(295, 100, 50),
+            (remaining, remaining / 50),
+        )
+        self.assertIsNone(maple_bot.estimate_next_level(300, 0, 50))
+        self.assertIsNone(maple_bot.estimate_next_level(295, 100, 0))
+
     def test_history_graph_ignores_faint_character_image_padding(self) -> None:
         source = Image.new("RGBA", (100, 100), (255, 255, 255, 1))
         source.paste((255, 0, 0, 255), (40, 30, 60, 70))

@@ -1478,6 +1478,14 @@ def summarize_exp_gains(gains: list[dict], period: int) -> tuple[int, int]:
     return (round(total / len(recent)) if recent else 0), total
 
 
+def estimate_next_level(level: int, current_exp: int, daily_exp: int) -> tuple[int, float] | None:
+    """최근 일평균을 유지할 때 다음 레벨까지 남은 경험치와 일수를 반환합니다."""
+    if not 200 <= level < 300 or daily_exp <= 0:
+        return None
+    remaining = max(0, LEVEL_EXP[level - 200] - current_exp)
+    return remaining, remaining / daily_exp
+
+
 def format_top_percent(rank: int, total_count: int) -> str:
     if rank == 1:
         return "0%"
@@ -1585,6 +1593,7 @@ def create_ranking_history_image(
     value_font = ranking_font("roboto_bold", 13 * scale)
     small_font = ranking_font("roboto", 13 * scale)
     korean_title_font = ranking_font("korean", 28 * scale)
+    korean_score_font = ranking_font("korean", 20 * scale)
     korean_body_font = ranking_font("korean", 15 * scale)
     korean_value_font = ranking_font("korean", 13 * scale)
     korean_small_font = ranking_font("korean", 13 * scale)
@@ -1798,31 +1807,75 @@ def create_ranking_history_image(
         width=1 * scale,
     )
     summary_colors = ("#E6FF00", "#6EB6D9", "#EEF4F8")
-    for section, heading in enumerate(("일평균 획득 경험치", "누적 획득 경험치")):
-        section_left = 58 + section * 408
+    section_left = 58
+    draw.text(
+        (section_left * scale, 338 * scale),
+        "일평균 획득 경험치",
+        font=korean_body_font,
+        fill="#FFFFFF",
+    )
+    for index, period in enumerate((7, 14, 30)):
+        average, _ = summarize_exp_gains(gains, period)
+        display_value = compact_exp(average) if gains else "-"
+        value_x = section_left + index * 122
         draw.text(
-            (section_left * scale, 338 * scale),
-            heading,
-            font=korean_body_font,
-            fill="#FFFFFF",
+            (value_x * scale, 371 * scale),
+            f"{period}일",
+            font=korean_small_font,
+            fill="#DCE7EE",
         )
-        for index, period in enumerate((7, 14, 30)):
-            average, total = summarize_exp_gains(gains, period)
-            value = average if section == 0 else total
-            display_value = compact_exp(value) if gains else "-"
-            value_x = section_left + index * 122
-            draw.text(
-                (value_x * scale, 371 * scale),
-                f"{period}일",
-                font=korean_small_font,
-                fill="#DCE7EE",
-            )
-            draw.text(
-                ((value_x + 32) * scale, 367 * scale),
-                display_value,
-                font=score_font,
-                fill=summary_colors[index],
-            )
+        draw.text(
+            ((value_x + 32) * scale, 367 * scale),
+            display_value,
+            font=score_font,
+            fill=summary_colors[index],
+        )
+
+    daily_exp, _ = summarize_exp_gains(gains, 7)
+    estimate = estimate_next_level(level, current_exp, daily_exp)
+    draw.text(
+        (466 * scale, 338 * scale),
+        (
+            f"다음 레벨 예상 · Lv.{level + 1} (7일 평균 기준)"
+            if level < 300
+            else "다음 레벨 예상"
+        ),
+        font=korean_body_font,
+        fill="#FFFFFF",
+    )
+    if estimate:
+        remaining_exp, days = estimate
+        draw.text(
+            (466 * scale, 371 * scale),
+            "필요 경험치",
+            font=korean_small_font,
+            fill="#DCE7EE",
+        )
+        draw.text(
+            (548 * scale, 367 * scale),
+            compact_exp(remaining_exp),
+            font=score_font,
+            fill="#6EB6D9",
+        )
+        draw.text(
+            (682 * scale, 371 * scale),
+            "예상 소요",
+            font=korean_small_font,
+            fill="#DCE7EE",
+        )
+        draw.text(
+            (738 * scale, 367 * scale),
+            f"{days:.1f}일",
+            font=korean_score_font,
+            fill="#E6FF00",
+        )
+    else:
+        draw.text(
+            (466 * scale, 369 * scale),
+            "7일 경험치 기록이 쌓이면 계산됩니다" if level < 300 else "최고 레벨입니다",
+            font=korean_value_font,
+            fill="#AFC0CD",
+        )
 
     graph_gains = gains[-14:]
 
