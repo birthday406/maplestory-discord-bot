@@ -15,6 +15,7 @@ RUNNER = ROOT / "tools" / "run_maplebot_backfill_aux.sh"
 LOG_PATH = ROOT / "maplebot-backfill-280-plus.log"
 ALERT_PATH = ROOT / "maplebot-backfill-alert.txt"
 CURRENT_LEVEL_PATH = ROOT / "maplebot-backfill-current-level"
+COUNT_CACHE_PATH = ROOT / ".maplebot-backfill-counts.json"
 
 
 def backfill_processes() -> list[tuple[int, str]]:
@@ -30,20 +31,43 @@ def backfill_processes() -> list[tuple[int, str]]:
 
 
 def checkpoint_counts(root: Path = ROOT) -> dict[int, int]:
+    cache_path = root / COUNT_CACHE_PATH.name
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        cache = {}
     counts = {}
+    changed = False
     for path in root.glob("maplebot-backfill-level-*.jsonl"):
         match = re.search(r"level-(\d+)\.jsonl$", path.name)
         if not match:
             continue
-        names = set()
-        for line in path.read_text(encoding="utf-8").splitlines():
-            try:
-                item = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if item.get("gains"):
-                names.add(str(item.get("name", "")).casefold())
-        counts[int(match.group(1))] = len(names)
+        stat = path.stat()
+        cached = cache.get(path.name, {})
+        if cached.get("size") == stat.st_size and cached.get("mtime_ns") == stat.st_mtime_ns:
+            count = int(cached["count"])
+        else:
+            names = set()
+            with path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if item.get("gains"):
+                        names.add(str(item.get("name", "")).casefold())
+            count = len(names)
+            cache[path.name] = {
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+                "count": count,
+            }
+            changed = True
+        counts[int(match.group(1))] = count
+    if changed:
+        temporary = cache_path.with_suffix(f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(cache, separators=(",", ":")), encoding="utf-8")
+        temporary.replace(cache_path)
     return counts
 
 
