@@ -1375,6 +1375,36 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["reason"], "incomplete_snapshot")
 
+    def test_nickname_change_detector_rejects_zero_exp_boundary_match(self) -> None:
+        old = self.character(characterName="OldName", rank=535_404, exp=0)
+        new = self.character(characterName="NewName", rank=535_433, exp=0)
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(old, date(2026, 8, 30))
+            store.save_snapshot(new, date(2026, 8, 31))
+            result = store.detect_nickname_changes(
+                date(2026, 8, 30),
+                date(2026, 8, 31),
+                min_snapshot_count=1,
+            )
+
+        self.assertEqual(result["saved"], 0)
+
+    def test_nickname_change_detector_rejects_weak_rank_match(self) -> None:
+        old = self.character(characterName="OldName", rank=10_000, exp=123_456)
+        new = self.character(characterName="NewName", rank=11_000, exp=123_456)
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(old, date(2026, 8, 30))
+            store.save_snapshot(new, date(2026, 8, 31))
+            result = store.detect_nickname_changes(
+                date(2026, 8, 30),
+                date(2026, 8, 31),
+                min_snapshot_count=1,
+            )
+
+        self.assertEqual(result["saved"], 0)
+
     def test_default_character_is_saved_per_discord_user(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = RankingStore(Path(directory) / "ranking.db")

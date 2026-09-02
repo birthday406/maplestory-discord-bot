@@ -405,8 +405,12 @@ class RankingStore:
             for score, old, new, ambiguous in sorted(proposals, reverse=True, key=lambda x: x[0]):
                 if old["name_key"] in used_old or new["name_key"] in used_new:
                     continue
-                confidence = "HIGH" if score >= 65 and not ambiguous else "POSSIBLE"
-                status = "AMBIGUOUS" if ambiguous else "PENDING"
+                # Lv.260 경계의 EXP 0 캐릭터는 같은 순위에 대량으로 겹칩니다.
+                # 자동 연결은 오탐을 피하기 위해 강하고 유일한 후보만 허용합니다.
+                if score < 65 or ambiguous or not old["exp"]:
+                    continue
+                confidence = "HIGH"
+                status = "PENDING"
                 if save:
                     connection.execute(
                         """INSERT INTO nickname_changes
