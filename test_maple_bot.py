@@ -1357,6 +1357,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             trace = store.get_nickname_trace("newname")
 
         self.assertEqual(preview["saved"], 1)
+        self.assertEqual(preview["preview"][0]["old_name"], "OldName")
         self.assertEqual(result["saved"], 1)
         self.assertEqual(repeated["reason"], "already_processed")
         self.assertEqual(

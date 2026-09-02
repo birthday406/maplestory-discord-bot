@@ -401,6 +401,7 @@ class RankingStore:
                     proposals.append((matches[0][0], old, matches[0][1], ambiguous))
 
             used_old, used_new, saved = set(), set(), 0
+            preview = []
             for score, old, new, ambiguous in sorted(proposals, reverse=True, key=lambda x: x[0]):
                 if old["name_key"] in used_old or new["name_key"] in used_new:
                     continue
@@ -424,6 +425,16 @@ class RankingStore:
                 used_old.add(old["name_key"])
                 used_new.add(new["name_key"])
                 saved += 1
+                if len(preview) < 20:
+                    preview.append(
+                        {
+                            "old_name": old["name"],
+                            "new_name": new["name"],
+                            "score": score,
+                            "confidence": confidence,
+                            "status": status,
+                        }
+                    )
             if save:
                 connection.execute(
                     """INSERT INTO nickname_detection_runs
@@ -431,7 +442,12 @@ class RankingStore:
                        VALUES (?, ?, ?)""",
                     (old_day, new_day, saved),
                 )
-        return {"saved": saved, "reason": "ok", "counts": [old_count, new_count]}
+        return {
+            "saved": saved,
+            "reason": "ok",
+            "counts": [old_count, new_count],
+            "preview": preview,
+        }
 
     def get_nickname_trace(self, nickname: str) -> list[dict]:
         """과거 이름이나 현재 이름 어느 쪽으로 조회해도 저장된 변경 연결을 반환합니다."""
