@@ -6109,10 +6109,12 @@ class MapleNewsBot(commands.Bot):
             )
             if result["reason"] == "ok":
                 logging.warning(
-                    "nickname_detection_complete old_date=%s new_date=%s saved=%s",
+                    "nickname_detection_complete old_date=%s new_date=%s "
+                    "saved=%s observed_level_300=%s",
                     new_date - timedelta(days=1),
                     new_date,
                     result["saved"],
+                    result["observed"],
                 )
 
     @check_news.error

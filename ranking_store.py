@@ -131,6 +131,21 @@ class RankingStore:
                     PRIMARY KEY (old_snapshot_date, new_snapshot_date)
                 );
 
+                CREATE TABLE IF NOT EXISTS nickname_change_observations (
+                    old_name_key TEXT NOT NULL,
+                    old_name TEXT NOT NULL,
+                    new_name_key TEXT NOT NULL,
+                    new_name TEXT NOT NULL,
+                    old_snapshot_date TEXT NOT NULL,
+                    new_snapshot_date TEXT NOT NULL,
+                    old_rank INTEGER NOT NULL,
+                    new_rank INTEGER NOT NULL,
+                    rank_gap INTEGER NOT NULL,
+                    legion_level INTEGER NOT NULL,
+                    achievement_score INTEGER NOT NULL,
+                    PRIMARY KEY (old_name_key, new_name_key, new_snapshot_date)
+                );
+
                 CREATE TABLE IF NOT EXISTS ranking_scan_state (
                     world_id INTEGER PRIMARY KEY,
                     scan_date TEXT NOT NULL,
@@ -371,6 +386,25 @@ class RankingStore:
                     (item["world_id"], item["job_name"], item["level"]), []
                 ).append(item)
 
+            observations = []
+            for old in disappeared:
+                if (
+                    old["level"] != 300
+                    or not old["legion_level"]
+                    or not old["achievement_score"]
+                ):
+                    continue
+                matches = [
+                    new
+                    for new in appeared_by_identity.get(
+                        (old["world_id"], old["job_name"], 300), []
+                    )
+                    if new["legion_level"] == old["legion_level"]
+                    and new["achievement_score"] == old["achievement_score"]
+                ]
+                if len(matches) == 1:
+                    observations.append((old, matches[0]))
+
             proposals = []
             for old in disappeared:
                 matches = []
@@ -379,17 +413,6 @@ class RankingStore:
                         (old["world_id"], old["job_name"], level), []
                     ):
                         if old["level"] == new["level"] == 300:
-                            if old["ranking"] != new["ranking"]:
-                                continue
-                            score = 70
-                            for metric in ("legion_level", "achievement_score"):
-                                old_value, new_value = old[metric] or 0, new[metric] or 0
-                                if old_value and new_value:
-                                    if new_value < old_value:
-                                        break
-                                    score += 5
-                            else:
-                                matches.append((score, new))
                             continue
                         old_total = ranking_total_exp(old["level"], old["exp"])
                         new_total = ranking_total_exp(new["level"], new["exp"])
@@ -455,6 +478,22 @@ class RankingStore:
                         }
                     )
             if save:
+                connection.executemany(
+                    """INSERT OR REPLACE INTO nickname_change_observations
+                       (old_name_key, old_name, new_name_key, new_name,
+                        old_snapshot_date, new_snapshot_date, old_rank, new_rank,
+                        rank_gap, legion_level, achievement_score)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        (
+                            old["name_key"], old["name"], new["name_key"], new["name"],
+                            old_day, new_day, old["ranking"], new["ranking"],
+                            abs(new["ranking"] - old["ranking"]),
+                            old["legion_level"], old["achievement_score"],
+                        )
+                        for old, new in observations
+                    ],
+                )
                 connection.execute(
                     """INSERT INTO nickname_detection_runs
                         (old_snapshot_date, new_snapshot_date, saved)
@@ -466,6 +505,16 @@ class RankingStore:
             "reason": "ok",
             "counts": [old_count, new_count],
             "preview": preview,
+            "observed": len(observations),
+            "observation_preview": [
+                {
+                    "old_name": old["name"],
+                    "new_name": new["name"],
+                    "old_rank": old["ranking"],
+                    "new_rank": new["ranking"],
+                }
+                for old, new in observations[:20]
+            ],
         }
 
     def get_nickname_trace(self, nickname: str) -> list[dict]:
