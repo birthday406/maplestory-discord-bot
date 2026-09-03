@@ -222,6 +222,7 @@ SUNNY_SUNDAY_IMAGE_PATH = Path(__file__).parent / "assets" / "title-sunny-sunday
 CASH_SHOP_TRANSFER_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-transfer.png"
 CASH_SHOP_UPDATE_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-update.png"
 VOYAGE_GUIDE_IMAGE_PATH = Path(__file__).parent / "assets" / "gms-voyage-guide.png"
+DOPING_GUIDE_IMAGE_PATH = Path(__file__).parent / "assets" / "gms-doping-guide.webp"
 URSUS_ACTIVE_IMAGE_PATH = Path(__file__).parent / "assets" / "ursus-golden-time.jpg"
 URSUS_INACTIVE_IMAGE_PATH = Path(__file__).parent / "assets" / "ursus-golden-time-inactive.jpg"
 BOSS_THUMBNAIL_PATHS = {
@@ -3089,7 +3090,7 @@ async def help_command(interaction: discord.Interaction) -> None:
     )
     embed.add_field(
         name="편의",
-        value="`/랭킹` `/ㅁ` `/심볼` `/항해` `!항해`",
+        value="`/랭킹` `/ㅁ` `/심볼` `/항해` `!항해` `/도핑` `!도핑`",
         inline=False,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -3721,6 +3722,22 @@ async def voyage_command(interaction: discord.Interaction) -> None:
 async def voyage_prefix_command(ctx: commands.Context) -> None:
     await ctx.send(
         file=discord.File(VOYAGE_GUIDE_IMAGE_PATH, filename="gms-voyage-guide.png")
+    )
+
+
+@app_commands.command(name="도핑", description="GMS 보스 물약·도핑 목록을 보여줍니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def doping_command(interaction: discord.Interaction) -> None:
+    await interaction.response.send_message(
+        file=discord.File(DOPING_GUIDE_IMAGE_PATH, filename="gms-doping-guide.webp")
+    )
+
+
+@commands.command(name="도핑")
+async def doping_prefix_command(ctx: commands.Context) -> None:
+    await ctx.send(
+        file=discord.File(DOPING_GUIDE_IMAGE_PATH, filename="gms-doping-guide.webp")
     )
 
 
@@ -4580,6 +4597,7 @@ class MapleNewsBot(commands.Bot):
             patch_command,
             time_command,
             voyage_command,
+            doping_command,
             sunny_sunday_command,
             sunny_sunday_list_command,
             cash_shop_transfer_command,
@@ -4605,6 +4623,7 @@ class MapleNewsBot(commands.Bot):
         self.add_command(patch_prefix_command)
         self.add_command(time_prefix_command)
         self.add_command(voyage_prefix_command)
+        self.add_command(doping_prefix_command)
         await self.tree.sync()
         self.persist_state()
 

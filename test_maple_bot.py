@@ -3606,6 +3606,21 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
         interaction.response.send_message.assert_awaited_once_with(file=image_file)
         context.send.assert_awaited_once_with(file=image_file)
 
+    async def test_doping_commands_send_the_guide_image_without_embed(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+        context = SimpleNamespace(send=AsyncMock())
+        image_file = Mock(filename="gms-doping-guide.webp")
+
+        with patch("maple_bot.discord.File", return_value=image_file) as file_class:
+            await maple_bot.doping_command.callback(interaction)
+            await maple_bot.doping_prefix_command.callback(context)
+
+        self.assertEqual(file_class.call_count, 2)
+        interaction.response.send_message.assert_awaited_once_with(file=image_file)
+        context.send.assert_awaited_once_with(file=image_file)
+
     async def test_existing_patch_detail_is_refreshed_only_every_five_minutes(self) -> None:
         post = {
             "id": 42853,
@@ -3694,6 +3709,8 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("!시간", field_text)
         self.assertIn("/항해", field_text)
         self.assertIn("!항해", field_text)
+        self.assertIn("/도핑", field_text)
+        self.assertIn("!도핑", field_text)
         self.assertIn("/아이템검색", field_text)
         self.assertIn("/외형검색", field_text)
         self.assertIn("/랭킹", field_text)
@@ -3913,11 +3930,13 @@ class AppearanceSearchTests(unittest.IsolatedAsyncioTestCase):
         bot.tree.add_command.assert_any_call(appearance_search_command)
         bot.tree.add_command.assert_any_call(quick_copy_symbol_command)
         bot.tree.add_command.assert_any_call(maple_bot.voyage_command)
+        bot.tree.add_command.assert_any_call(maple_bot.doping_command)
         bot.add_command.assert_any_call(quick_copy_symbol_prefix_command)
         bot.add_command.assert_any_call(maple_bot.patch_prefix_command)
         bot.add_command.assert_any_call(maple_bot.time_prefix_command)
         bot.add_command.assert_any_call(maple_bot.voyage_prefix_command)
-        self.assertEqual(bot.add_command.call_count, 4)
+        bot.add_command.assert_any_call(maple_bot.doping_prefix_command)
+        self.assertEqual(bot.add_command.call_count, 5)
 
     def test_search_filters_hair_and_face(self) -> None:
         hair = search_cash_items("30000", category="Hair", limit=1)
