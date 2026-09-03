@@ -3968,9 +3968,16 @@ async def nickname_trace_command(
         return
     trace = interaction.client.ranking_store.get_nickname_trace(nickname)
     if not trace:
+        first_seen = interaction.client.ranking_store.get_first_seen_date(nickname)
+        detail = (
+            f"\n신규 관측: **{first_seen.isoformat()} UTC**"
+            "\n260 이상 진입·월드 리프·랭킹 재등장 가능성이 있습니다."
+            if first_seen
+            else ""
+        )
         await interaction.response.send_message(
             f"**{discord.utils.escape_markdown(nickname)}** 캐릭터의 검증 가능한 "
-            "닉네임 변경 기록이 아직 없습니다.",
+            f"닉네임 변경 기록이 아직 없습니다.{detail}",
             ephemeral=True,
         )
         return

@@ -1426,6 +1426,31 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             [("OldName", "NewName")],
         )
 
+    def test_newly_observed_transfer_is_not_saved_as_a_nickname_change(self) -> None:
+        stable = self.character(characterName="Stable")
+        kaorun = self.character(
+            characterName="Kaorun",
+            worldID=45,
+            jobName="Erel Light",
+            level=285,
+            rank=43_595,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(stable, date(2026, 9, 2))
+            store.save_snapshot(stable, date(2026, 9, 3))
+            store.save_snapshot(kaorun, date(2026, 9, 3))
+            result = store.detect_nickname_changes(
+                date(2026, 9, 2),
+                date(2026, 9, 3),
+                min_snapshot_count=1,
+                min_size_ratio=0,
+            )
+
+            self.assertEqual(result["saved"], 0)
+            self.assertEqual(store.get_nickname_trace("Kaorun"), [])
+            self.assertEqual(store.get_first_seen_date("Kaorun"), date(2026, 9, 3))
+
     def test_nickname_change_detector_rejects_incomplete_days(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = RankingStore(Path(directory) / "ranking.db")

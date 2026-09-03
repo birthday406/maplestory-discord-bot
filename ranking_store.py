@@ -539,6 +539,15 @@ class RankingStore:
             key = row["new_name_key"]
         return result
 
+    def get_first_seen_date(self, nickname: str) -> date | None:
+        """닉변 근거가 없는 신규 진입·월드 리프·재등장의 첫 관측일을 반환합니다."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT MIN(snapshot_date) AS first_seen FROM ranking_snapshots WHERE name_key = ?",
+                (nickname.casefold(),),
+            ).fetchone()
+        return date.fromisoformat(row["first_seen"]) if row["first_seen"] else None
+
     def get_default_character(self, discord_user_id: int) -> str | None:
         """사용자가 이름 없이 /랭킹을 실행했을 때 사용할 캐릭터를 반환합니다."""
         with self._connect() as connection:
