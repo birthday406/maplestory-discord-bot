@@ -471,6 +471,27 @@ class NewsFilteringTests(unittest.TestCase):
     def test_time_channel_rename_interval_avoids_discord_rate_limit(self) -> None:
         self.assertEqual(maple_bot.MapleNewsBot.update_time_channels.minutes, 10.0)
 
+    def test_server_time_embed_uses_automatic_dst_for_each_region(self) -> None:
+        embed = maple_bot.build_server_time_embed(
+            datetime(2026, 9, 3, 6, 32, tzinfo=timezone.utc)
+        )
+
+        self.assertEqual(embed.title, "· 서버시간")
+        self.assertIn("9월 3일 AM 06:32", embed.description)
+        self.assertEqual(
+            [field.name for field in embed.fields],
+            [
+                "PDT [서부시간]",
+                "CDT [중부시간]",
+                "EDT [동부시간]",
+                "CEST [유럽시간]",
+                "KST [한국시간]",
+                "AEST [호주시간]",
+            ],
+        )
+        self.assertIn("9월 2일 PM 11:32", embed.fields[0].value)
+        self.assertIn("9월 3일 PM 03:32", embed.fields[4].value)
+
     def test_missing_naver_usd_rate_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             parse_usd_exchange_rate("<table><tr><td>일본 JPY</td></tr></table>")
@@ -833,6 +854,18 @@ class NewsFilteringTests(unittest.TestCase):
         )
         self.assertFalse(
             is_patch_notes({"category": "general", "name": "Patch Notes"})
+        )
+
+    def test_patch_display_title_removes_update_date_and_suffix(self) -> None:
+        self.assertEqual(
+            maple_bot.patch_display_title(
+                {
+                    "name": (
+                        "[Updated 7/22] v.270 - Ride the Lightning Patch Notes"
+                    )
+                }
+            ),
+            "v.270 - Ride the Lightning",
         )
 
     def test_patch_event_sections_are_extracted_from_updated_patch_notes(self) -> None:
@@ -3502,6 +3535,89 @@ class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
 
 
 class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_patch_commands_share_cached_title_link_and_preview_url(self) -> None:
+        post = {
+            "id": 42415,
+            "category": "update",
+            "name": "[Updated 7/22] v.270 - Ride the Lightning Patch Notes",
+        }
+        client = SimpleNamespace(latest_patch=post, fetch_posts=AsyncMock())
+        interaction = SimpleNamespace(
+            client=client,
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+        context = SimpleNamespace(bot=client, send=AsyncMock())
+        expected = (
+            "v.270 - Ride the Lightning\n"
+            "https://www.nexon.com/maplestory/news/update/42415/"
+            "updated-7-22-v-270-ride-the-lightning-patch-notes"
+        )
+
+        await maple_bot.patch_command.callback(interaction)
+        await maple_bot.patch_prefix_command.callback(context)
+
+        interaction.response.send_message.assert_awaited_once_with(expected)
+        context.send.assert_awaited_once_with(expected)
+        client.fetch_posts.assert_not_awaited()
+
+    async def test_time_commands_send_the_same_embed_layout(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+        context = SimpleNamespace(send=AsyncMock())
+        now = datetime(2026, 9, 3, 6, 32, tzinfo=timezone.utc)
+
+        with patch("maple_bot.datetime") as mocked_datetime:
+            mocked_datetime.now.return_value = now
+            await maple_bot.time_command.callback(interaction)
+            await maple_bot.time_prefix_command.callback(context)
+
+        slash_embed = interaction.response.send_message.await_args.kwargs["embed"]
+        prefix_embed = context.send.await_args.kwargs["embed"]
+        self.assertEqual(slash_embed.to_dict(), prefix_embed.to_dict())
+
+    async def test_voyage_commands_send_the_guide_image_without_embed(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+        context = SimpleNamespace(send=AsyncMock())
+        image_file = Mock(filename="gms-voyage-guide.png")
+
+        with patch("maple_bot.discord.File", return_value=image_file) as file_class:
+            await maple_bot.voyage_command.callback(interaction)
+            await maple_bot.voyage_prefix_command.callback(context)
+
+        self.assertEqual(file_class.call_count, 2)
+        interaction.response.send_message.assert_awaited_once_with(file=image_file)
+        context.send.assert_awaited_once_with(file=image_file)
+
+    async def test_existing_patch_detail_is_refreshed_only_every_five_minutes(self) -> None:
+        post = {
+            "id": 42853,
+            "category": "update",
+            "name": "v.270 - Ride the Lightning Patch Notes",
+            "liveDate": "2026-08-11T00:00:00Z",
+        }
+        bot = SimpleNamespace(
+            fetch_posts=AsyncMock(return_value=[post]),
+            fetch_post_detail=AsyncMock(return_value={"body": "<p>Patch notes</p>"}),
+            create_patch_event_schedule=Mock(return_value=None),
+            sent_ids={post["id"]},
+            patch_events={"post_id": post["id"]},
+            latest_cash_shop=None,
+            maintenance_watch=None,
+            sunny_sunday={},
+            saved_categories=set(maple_bot.WATCHED_CATEGORIES),
+            persist_state=Mock(),
+        )
+
+        await maple_bot.MapleNewsBot.check_news.coro(bot)
+        await maple_bot.MapleNewsBot.check_news.coro(bot)
+
+        self.assertEqual(maple_bot.MapleNewsBot.check_news.minutes, 1.0)
+        self.assertEqual(bot.fetch_posts.await_count, 2)
+        bot.fetch_post_detail.assert_awaited_once_with(post["id"])
+
     async def test_polling_saves_latest_cash_shop_update_without_resending_post(self) -> None:
         post = {
             "id": 42853,
@@ -3557,6 +3673,12 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/우르스", field_text)
         self.assertIn("/서버", field_text)
         self.assertIn("/캐샵", field_text)
+        self.assertIn("/패치", field_text)
+        self.assertIn("!패치", field_text)
+        self.assertIn("/시간", field_text)
+        self.assertIn("!시간", field_text)
+        self.assertIn("/항해", field_text)
+        self.assertIn("!항해", field_text)
         self.assertIn("/아이템검색", field_text)
         self.assertIn("/외형검색", field_text)
         self.assertIn("/랭킹", field_text)
@@ -3775,7 +3897,12 @@ class AppearanceSearchTests(unittest.IsolatedAsyncioTestCase):
 
         bot.tree.add_command.assert_any_call(appearance_search_command)
         bot.tree.add_command.assert_any_call(quick_copy_symbol_command)
-        bot.add_command.assert_called_once_with(quick_copy_symbol_prefix_command)
+        bot.tree.add_command.assert_any_call(maple_bot.voyage_command)
+        bot.add_command.assert_any_call(quick_copy_symbol_prefix_command)
+        bot.add_command.assert_any_call(maple_bot.patch_prefix_command)
+        bot.add_command.assert_any_call(maple_bot.time_prefix_command)
+        bot.add_command.assert_any_call(maple_bot.voyage_prefix_command)
+        self.assertEqual(bot.add_command.call_count, 4)
 
     def test_search_filters_hair_and_face(self) -> None:
         hair = search_cash_items("30000", category="Hair", limit=1)
@@ -3867,13 +3994,9 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
             await maple_bot.familiar_command.callback(interaction)
 
         message = interaction.response.send_message.await_args.kwargs
-        embed = message["embed"]
         self.assertEqual(maple_bot.familiar_command.name, "퍼밀리어")
-        self.assertIsNone(embed.title)
-        self.assertEqual(embed.color.value, 0x954506)
-        self.assertIsNone(embed.description)
-        self.assertEqual(embed.footer.text, "누적 횟수: 1회")
-        self.assertEqual(embed.image.url, "attachment://familiar-result.png")
+        self.assertNotIn("embed", message)
+        self.assertEqual(message["content"], "누적 횟수: 1회")
         self.assertEqual(message["file"].filename, "familiar-result.png")
         self.assertEqual(message["view"].children[0].label, "다시 뽑기")
         self.assertIsNone(message["view"].children[0].emoji)
@@ -3895,8 +4018,9 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         ):
             await maple_bot.familiar_command.callback(interaction)
 
-        embed = interaction.response.send_message.await_args.kwargs["embed"]
-        self.assertIn("더블 프라임", embed.description)
+        message = interaction.response.send_message.await_args.kwargs
+        self.assertNotIn("embed", message)
+        self.assertIn("더블 프라임", message["content"])
 
     async def test_reroll_button_replaces_the_card_image(self) -> None:
         initial_result = ("공격력 +6%", "최대 MP +6%", False)
@@ -3905,12 +4029,12 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         interaction = SimpleNamespace(
             response=SimpleNamespace(edit_message=AsyncMock())
         )
-        embed = maple_bot.discord.Embed(color=0x954506)
+        content = "누적 횟수: 2회"
         file = maple_bot.discord.File(io.BytesIO(b"image"), filename="familiar-result.png")
 
         with patch(
             "maple_bot.build_familiar_result",
-            return_value=(embed, file, next_result),
+            return_value=(content, file, next_result),
         ) as build_result:
             await view.children[0].callback(interaction)
 
@@ -3918,7 +4042,7 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view.draw_count, 2)
         self.assertEqual(view.result, next_result)
         interaction.response.edit_message.assert_awaited_once_with(
-            embed=embed, attachments=[file], view=view
+            content=content, attachments=[file], view=view
         )
 
     async def test_expectation_button_shows_current_result_only_to_user(self) -> None:

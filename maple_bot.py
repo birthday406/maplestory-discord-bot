@@ -221,6 +221,7 @@ class KoreanCommandTranslator(app_commands.Translator):
 SUNNY_SUNDAY_IMAGE_PATH = Path(__file__).parent / "assets" / "title-sunny-sunday.webp"
 CASH_SHOP_TRANSFER_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-transfer.png"
 CASH_SHOP_UPDATE_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-update.png"
+VOYAGE_GUIDE_IMAGE_PATH = Path(__file__).parent / "assets" / "gms-voyage-guide.png"
 URSUS_ACTIVE_IMAGE_PATH = Path(__file__).parent / "assets" / "ursus-golden-time.jpg"
 URSUS_INACTIVE_IMAGE_PATH = Path(__file__).parent / "assets" / "ursus-golden-time-inactive.jpg"
 BOSS_THUMBNAIL_PATHS = {
@@ -279,7 +280,16 @@ RANKING_FONT_PATHS = {
 }
 URSUS_TIMEZONE = ZoneInfo("America/Los_Angeles")
 INFO_CHANNEL_TIMEZONE = ZoneInfo("Asia/Seoul")
-POLL_INTERVAL_MINUTES = 5
+SERVER_TIMEZONES = (
+    ("서부시간", ZoneInfo("America/Los_Angeles")),
+    ("중부시간", ZoneInfo("America/Chicago")),
+    ("동부시간", ZoneInfo("America/New_York")),
+    ("유럽시간", ZoneInfo("Europe/Berlin")),
+    ("한국시간", ZoneInfo("Asia/Seoul")),
+    ("호주시간", ZoneInfo("Australia/Sydney")),
+)
+POLL_INTERVAL_MINUTES = 1
+NEWS_DETAIL_REFRESH_SECONDS = 5 * 60
 SUNNY_SUNDAY_DURATION_SECONDS = 24 * 60 * 60
 MODEL = "gpt-5.6-luna"
 ALERT_NEWS = "news"
@@ -644,6 +654,32 @@ def format_utc_channel_name(now: datetime) -> str:
     utc_now = now.astimezone(timezone.utc)
     display_minute = utc_now.minute - utc_now.minute % 5
     return f"UTC: {utc_now.hour:02d}:{display_minute:02d}"
+
+
+def format_server_time(now: datetime, zone: ZoneInfo = timezone.utc) -> str:
+    local_now = now.astimezone(zone)
+    period = "AM" if local_now.hour < 12 else "PM"
+    hour = local_now.hour % 12 or 12
+    return (
+        f"```ml\n{local_now.month}월 {local_now.day}일 "
+        f"{period} {hour:02d}:{local_now.minute:02d}\n```"
+    )
+
+
+def build_server_time_embed(now: datetime) -> discord.Embed:
+    embed = discord.Embed(
+        title="· 서버시간",
+        description=format_server_time(now),
+        color=2_793_880,
+    )
+    for korean_name, zone in SERVER_TIMEZONES:
+        local_now = now.astimezone(zone)
+        embed.add_field(
+            name=f"{local_now.tzname()} [{korean_name}]",
+            value=format_server_time(now, zone),
+            inline=True,
+        )
+    return embed
 
 
 def parse_usd_exchange_rate(source: str) -> Decimal:
@@ -1024,6 +1060,12 @@ def is_patch_notes(post: dict) -> bool:
     # update 카테고리라도 Preview나 단독 콘텐츠 소개 글은 제외하고 실제 패치노트만 찾습니다.
     title = post.get("name", "").lower()
     return post.get("category") == "update" and "patch notes" in title and "preview" not in title
+
+
+def patch_display_title(post: dict) -> str:
+    """공지의 수정일 접두사와 Patch Notes 접미사를 화면용 제목에서 뺍니다."""
+    title = re.sub(r"^\[[^]]+\]\s*", "", post["name"])
+    return re.sub(r"\s+Patch Notes$", "", title, flags=re.IGNORECASE)
 
 
 def is_cash_shop_update(post: dict) -> bool:
@@ -3023,7 +3065,8 @@ async def help_command(interaction: discord.Interaction) -> None:
         name="일정 확인",
         value=(
             "`/썬데이` `/썬데이목록` `/캐시이동` `/우르스` `/서버`\n"
-            "`/캐샵` `/미라클큐브` `/핫위크` `/큐브세일`"
+            "`/패치` `!패치` `/시간` `!시간` `/캐샵` `/미라클큐브`\n"
+            "`/핫위크` `/큐브세일`"
         ),
         inline=False,
     )
@@ -3034,7 +3077,7 @@ async def help_command(interaction: discord.Interaction) -> None:
     )
     embed.add_field(
         name="편의",
-        value="`/랭킹` `/ㅁ` `/심볼`",
+        value="`/랭킹` `/ㅁ` `/심볼` `/항해` `!항해`",
         inline=False,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -3314,19 +3357,16 @@ def familiar_expectation_text(
 
 def build_familiar_result(
     draw_count: int,
-) -> tuple[discord.Embed, discord.File, tuple[str, str, bool]]:
+) -> tuple[str, discord.File, tuple[str, str, bool]]:
     """퍼밀리어 잠재능력을 새로 추첨하고 카드 이미지까지 만듭니다."""
     first_line, second_line, double_prime = draw_unique_familiar_potential()
-    embed = discord.Embed(
-        description="✨ **더블 프라임!**" if double_prime else None,
-        color=0x954506,
-    )
-    embed.set_footer(text=f"누적 횟수: {draw_count:,}회")
+    content = (
+        "✨ **더블 프라임!**\n" if double_prime else ""
+    ) + f"누적 횟수: {draw_count:,}회"
     filename = "familiar-result.png"
-    embed.set_image(url=f"attachment://{filename}")
     result = (first_line, second_line, double_prime)
     return (
-        embed,
+        content,
         discord.File(
             create_familiar_result_image(first_line, second_line), filename=filename
         ),
@@ -3352,9 +3392,9 @@ class FamiliarSimulatorView(UserOwnedView):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         self.draw_count += 1
-        embed, file, self.result = build_familiar_result(self.draw_count)
+        content, file, self.result = build_familiar_result(self.draw_count)
         await interaction.response.edit_message(
-            embed=embed, attachments=[file], view=self
+            content=content, attachments=[file], view=self
         )
 
     @discord.ui.button(label="기대값 계산하기", style=discord.ButtonStyle.secondary)
@@ -3376,9 +3416,9 @@ class FamiliarSimulatorView(UserOwnedView):
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def familiar_command(interaction: discord.Interaction) -> None:
     """유니크 퍼밀리어 카드 한 장의 잠재능력 결과를 보여줍니다."""
-    embed, file, result = build_familiar_result(1)
+    content, file, result = build_familiar_result(1)
     await interaction.response.send_message(
-        embed=embed,
+        content=content,
         file=file,
         view=FamiliarSimulatorView(interaction.user.id, result),
     )
@@ -3603,6 +3643,71 @@ async def cash_shop_command(interaction: discord.Interaction) -> None:
             CASH_SHOP_UPDATE_IMAGE_PATH,
             filename="cash-shop-update.png",
         ),
+    )
+
+
+@app_commands.command(name="패치", description="최신 공식 패치노트 링크를 보여줍니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def patch_command(interaction: discord.Interaction) -> None:
+    latest = await latest_patch_post(interaction.client)
+    if latest is None:
+        await interaction.response.send_message(
+            "공식 패치노트를 찾지 못했습니다. 잠시 후 다시 시도해주세요.",
+            ephemeral=True,
+        )
+        return
+    # URL을 그대로 보내 Discord가 공식 페이지의 썸네일 미리보기를 만들게 합니다.
+    await interaction.response.send_message(
+        f"{patch_display_title(latest)}\n{post_url(latest)}"
+    )
+
+
+async def latest_patch_post(client: commands.Bot) -> dict | None:
+    latest = getattr(client, "latest_patch", None)
+    if latest is None:
+        posts = await client.fetch_posts()
+        latest = next((post for post in posts if is_patch_notes(post)), None)
+        client.latest_patch = latest
+    return latest
+
+
+@commands.command(name="패치")
+async def patch_prefix_command(ctx: commands.Context) -> None:
+    latest = await latest_patch_post(ctx.bot)
+    if latest is None:
+        await ctx.send("공식 패치노트를 찾지 못했습니다. 잠시 후 다시 시도해주세요.")
+        return
+    await ctx.send(f"{patch_display_title(latest)}\n{post_url(latest)}")
+
+
+@app_commands.command(name="시간", description="주요 지역의 현재 시각을 보여줍니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def time_command(interaction: discord.Interaction) -> None:
+    await interaction.response.send_message(
+        embed=build_server_time_embed(datetime.now(timezone.utc))
+    )
+
+
+@commands.command(name="시간")
+async def time_prefix_command(ctx: commands.Context) -> None:
+    await ctx.send(embed=build_server_time_embed(datetime.now(timezone.utc)))
+
+
+@app_commands.command(name="항해", description="GMS 항해 가이드를 보여줍니다.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def voyage_command(interaction: discord.Interaction) -> None:
+    await interaction.response.send_message(
+        file=discord.File(VOYAGE_GUIDE_IMAGE_PATH, filename="gms-voyage-guide.png")
+    )
+
+
+@commands.command(name="항해")
+async def voyage_prefix_command(ctx: commands.Context) -> None:
+    await ctx.send(
+        file=discord.File(VOYAGE_GUIDE_IMAGE_PATH, filename="gms-voyage-guide.png")
     )
 
 
@@ -4424,6 +4529,8 @@ class MapleNewsBot(commands.Bot):
         self._ranking_profile_cache: dict[str, tuple[float, tuple]] = {}
         self._ranking_profile_refresh_requests: set[str] = set()
         self._last_backfill_alert: str | None = None
+        self._last_news_detail_refresh_at: float | None = None
+        self.latest_patch: dict | None = None
         self.familiar_expectation_store = FamiliarExpectationStore(FAMILIAR_DB_PATH)
         # OpenAI 키는 코드에 적지 않고 .env 파일에서만 읽습니다.
         self.openai = AsyncOpenAI()
@@ -4431,7 +4538,7 @@ class MapleNewsBot(commands.Bot):
         self.google_api_key = os.environ["GOOGLE_TRANSLATE_API_KEY"]
 
     async def setup_hook(self) -> None:
-        # Discord 연결이 준비되면 5분마다 새 공지를 확인하는 작업을 시작합니다.
+        # Discord 연결이 준비되면 1분마다 새 공지를 확인하는 작업을 시작합니다.
         self.session = aiohttp.ClientSession()
         await self.tree.set_translator(KoreanCommandTranslator())
         # 전역 슬래시 명령을 Discord에 등록합니다. 명령 내용이 바뀌어도 재시작 시 동기화됩니다.
@@ -4457,6 +4564,9 @@ class MapleNewsBot(commands.Bot):
             pssb_command,
             pssb_initials_command,
             cash_shop_command,
+            patch_command,
+            time_command,
+            voyage_command,
             sunny_sunday_command,
             sunny_sunday_list_command,
             cash_shop_transfer_command,
@@ -4479,6 +4589,9 @@ class MapleNewsBot(commands.Bot):
         ):
             self.tree.add_command(command)
         self.add_command(quick_copy_symbol_prefix_command)
+        self.add_command(patch_prefix_command)
+        self.add_command(time_prefix_command)
+        self.add_command(voyage_prefix_command)
         await self.tree.sync()
         self.persist_state()
 
@@ -4969,13 +5082,9 @@ class MapleNewsBot(commands.Bot):
         if not entries:
             return None
 
-        patch_title = re.sub(r"^\[[^]]+\]\s*", "", post["name"])
-        patch_title = re.sub(
-            r"\s+Patch Notes$", "", patch_title, flags=re.IGNORECASE
-        )
         return {
             "post_id": post["id"],
-            "title": patch_title,
+            "title": patch_display_title(post),
             "url": post_url(post),
             "entries": await self.translate_sunny_sunday(entries),
         }
@@ -5287,10 +5396,19 @@ class MapleNewsBot(commands.Bot):
 
     @tasks.loop(minutes=POLL_INTERVAL_MINUTES)
     async def check_news(self) -> None:
-        # 이 함수는 5분마다 자동 실행되는 봇의 핵심 작업입니다.
+        # 새 글 목록은 1분마다 확인하되, 기존 본문은 5분마다만 다시 읽습니다.
         posts = await self.fetch_posts()
+        now = asyncio.get_running_loop().time()
+        last_refresh = getattr(self, "_last_news_detail_refresh_at", None)
+        refresh_existing_details = (
+            last_refresh is None
+            or now - last_refresh >= NEWS_DETAIL_REFRESH_SECONDS
+        )
+        if refresh_existing_details:
+            self._last_news_detail_refresh_at = now
         current_ids = {post["id"] for post in posts}
         latest_patch = next((post for post in posts if is_patch_notes(post)), None)
+        self.latest_patch = latest_patch
         latest_patch_detail = None
 
         # 새 기능을 처음 배포해도 이미 읽은 최신 점검 공지에서 감시 일정을 한 번 복원합니다.
@@ -5317,8 +5435,10 @@ class MapleNewsBot(commands.Bot):
                     self.persist_state()
 
         # 진행 중인 점검 공지가 수정되면 연장된 종료 시각도 5분 안에 반영합니다.
-        if self.maintenance_watch is not None and not self.maintenance_watch.get(
-            "completed", False
+        if (
+            refresh_existing_details
+            and self.maintenance_watch is not None
+            and not self.maintenance_watch.get("completed", False)
         ):
             maintenance_post = next(
                 (
@@ -5370,11 +5490,14 @@ class MapleNewsBot(commands.Bot):
                     self.persist_state()
 
         # 이미 읽은 최신 패치노트도 다시 확인해 사후 추가된 이벤트 일정을 반영합니다.
-        should_refresh_patch = latest_patch is not None and (
-            self.sent_ids is None or latest_patch["id"] in self.sent_ids
-        ) and (
-            self.patch_events is None
-            or self.patch_events.get("post_id") == latest_patch["id"]
+        should_refresh_patch = (
+            refresh_existing_details
+            and latest_patch is not None
+            and (self.sent_ids is None or latest_patch["id"] in self.sent_ids)
+            and (
+                self.patch_events is None
+                or self.patch_events.get("post_id") == latest_patch["id"]
+            )
         )
         if should_refresh_patch:
             latest_patch_detail = await self.fetch_post_detail(latest_patch["id"])
