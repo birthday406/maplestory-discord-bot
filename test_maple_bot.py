@@ -3535,13 +3535,18 @@ class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
 
 
 class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_patch_commands_share_cached_title_link_and_preview_url(self) -> None:
+    async def test_patch_commands_attach_thumbnail_without_link_embed(self) -> None:
         post = {
             "id": 42415,
             "category": "update",
             "name": "[Updated 7/22] v.270 - Ride the Lightning Patch Notes",
+            "imageThumbnail": "/maplestory/news/ride-the-lightning.jpg",
         }
-        client = SimpleNamespace(latest_patch=post, fetch_posts=AsyncMock())
+        client = SimpleNamespace(
+            latest_patch=post,
+            fetch_posts=AsyncMock(),
+            fetch_character_image=AsyncMock(return_value=b"thumbnail"),
+        )
         interaction = SimpleNamespace(
             client=client,
             response=SimpleNamespace(send_message=AsyncMock()),
@@ -3553,11 +3558,21 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
             "updated-7-22-v-270-ride-the-lightning-patch-notes"
         )
 
-        await maple_bot.patch_command.callback(interaction)
-        await maple_bot.patch_prefix_command.callback(context)
+        files = [Mock(), Mock()]
+        with patch("maple_bot.discord.File", side_effect=files) as file_class:
+            await maple_bot.patch_command.callback(interaction)
+            await maple_bot.patch_prefix_command.callback(context)
 
-        interaction.response.send_message.assert_awaited_once_with(expected)
-        context.send.assert_awaited_once_with(expected)
+        interaction.response.send_message.assert_awaited_once_with(
+            expected, file=files[0], suppress_embeds=True
+        )
+        context.send.assert_awaited_once_with(
+            expected, file=files[1], suppress_embeds=True
+        )
+        self.assertEqual(file_class.call_count, 2)
+        self.assertEqual(file_class.call_args_list[0].kwargs["filename"], "patch-thumbnail.jpg")
+        self.assertEqual(file_class.call_args_list[1].kwargs["filename"], "patch-thumbnail.jpg")
+        self.assertEqual(client.fetch_character_image.await_count, 2)
         client.fetch_posts.assert_not_awaited()
 
     async def test_time_commands_send_the_same_embed_layout(self) -> None:

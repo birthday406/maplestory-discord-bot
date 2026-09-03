@@ -1068,6 +1068,18 @@ def patch_display_title(post: dict) -> str:
     return re.sub(r"\s+Patch Notes$", "", title, flags=re.IGNORECASE)
 
 
+async def patch_message(client: commands.Bot, post: dict) -> tuple[str, discord.File | None]:
+    content = f"{patch_display_title(post)}\n{post_url(post)}"
+    image_path = post.get("imageThumbnail")
+    image = await client.fetch_character_image(thumbnail_url(post)) if image_path else None
+    if image is None:
+        return content, None
+    suffix = Path(image_path).suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        suffix = ".jpg"
+    return content, discord.File(io.BytesIO(image), filename=f"patch-thumbnail{suffix}")
+
+
 def is_cash_shop_update(post: dict) -> bool:
     # sale 카테고리의 일반 판매 글이 최신 캐시샵 링크를 덮어쓰지 않게 제목도 함께 확인합니다.
     return (
@@ -3657,9 +3669,9 @@ async def patch_command(interaction: discord.Interaction) -> None:
             ephemeral=True,
         )
         return
-    # URL을 그대로 보내 Discord가 공식 페이지의 썸네일 미리보기를 만들게 합니다.
+    content, file = await patch_message(interaction.client, latest)
     await interaction.response.send_message(
-        f"{patch_display_title(latest)}\n{post_url(latest)}"
+        content, file=file, suppress_embeds=True
     )
 
 
@@ -3678,7 +3690,8 @@ async def patch_prefix_command(ctx: commands.Context) -> None:
     if latest is None:
         await ctx.send("공식 패치노트를 찾지 못했습니다. 잠시 후 다시 시도해주세요.")
         return
-    await ctx.send(f"{patch_display_title(latest)}\n{post_url(latest)}")
+    content, file = await patch_message(ctx.bot, latest)
+    await ctx.send(content, file=file, suppress_embeds=True)
 
 
 @app_commands.command(name="시간", description="주요 지역의 현재 시각을 보여줍니다.")
