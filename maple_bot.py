@@ -292,6 +292,7 @@ ALERT_URSUS = "ursus"
 ALERT_SERVER = "server"
 ALERT_EXCHANGE_LOG = "exchange_log"
 INFO_TIME = "info_time"
+INFO_UTC = "info_utc"
 INFO_EXCHANGE = "info_exchange"
 ALERT_TYPES = (
     ALERT_NEWS,
@@ -304,6 +305,7 @@ ALERT_TYPES = (
     ALERT_SERVER,
     ALERT_EXCHANGE_LOG,
     INFO_TIME,
+    INFO_UTC,
     INFO_EXCHANGE,
 )
 
@@ -637,6 +639,13 @@ def format_time_channel_name(now: datetime) -> str:
     )
 
 
+def format_utc_channel_name(now: datetime) -> str:
+    """UTC 현재 시각을 직전 5분 단위의 채널 이름으로 만듭니다."""
+    utc_now = now.astimezone(timezone.utc)
+    display_minute = utc_now.minute - utc_now.minute % 5
+    return f"UTC: {utc_now.hour:02d}:{display_minute:02d}"
+
+
 def parse_usd_exchange_rate(source: str) -> Decimal:
     """네이버 금융 환율표에서 미국 USD의 매매기준율을 꺼냅니다."""
     for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", source, re.IGNORECASE | re.DOTALL):
@@ -752,6 +761,7 @@ def normalize_alert_channels(
             ALERT_SERVER: set(),
             ALERT_EXCHANGE_LOG: set(),
             INFO_TIME: set(),
+            INFO_UTC: set(),
             INFO_EXCHANGE: set(),
         }
     return {
@@ -4246,6 +4256,26 @@ async def info_channel_command(
     )
 
 
+@app_commands.command(name="utc채널", description="UTC 시간 음성 채널의 자동 갱신을 설정합니다.")
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+@app_commands.rename(channel="채널", action="동작")
+@app_commands.describe(
+    channel="UTC 시각을 표시할 음성 채널",
+    action="자동 갱신 ON 또는 OFF",
+)
+@app_commands.choices(action=ALERT_ACTION_CHOICES)
+async def utc_channel_command(
+    interaction: discord.Interaction,
+    channel: discord.VoiceChannel,
+    action: app_commands.Choice[str],
+) -> None:
+    await interaction.client.configure_info_channel(
+        interaction, channel, INFO_UTC, action.value == "on"
+    )
+
+
 def load_state() -> tuple[
     set[int] | None,
     set[str],
@@ -4445,6 +4475,7 @@ class MapleNewsBot(commands.Bot):
             cube_sale_alert_command,
             exchange_log_alert_command,
             info_channel_command,
+            utc_channel_command,
         ):
             self.tree.add_command(command)
         self.add_command(quick_copy_symbol_prefix_command)
@@ -5047,7 +5078,7 @@ class MapleNewsBot(commands.Bot):
         info_type: str,
         enabled: bool,
     ) -> None:
-        """관리자가 고른 음성 채널을 시간 또는 환율 표시 채널로 설정합니다."""
+        """관리자가 고른 음성 채널을 시간·UTC 또는 환율 표시 채널로 설정합니다."""
         if interaction.guild is None or not interaction.permissions.administrator:
             await interaction.response.send_message(
                 "이 설정은 서버 관리자만 변경할 수 있습니다.", ephemeral=True
@@ -5059,7 +5090,11 @@ class MapleNewsBot(commands.Bot):
             )
             return
 
-        label = "시간 채널" if info_type == INFO_TIME else "환율 채널"
+        label = {
+            INFO_TIME: "시간 채널",
+            INFO_UTC: "UTC 채널",
+            INFO_EXCHANGE: "환율 채널",
+        }[info_type]
         already_enabled = channel.id in self.alert_channels[info_type]
         if enabled == already_enabled:
             state = "이미 켜져" if enabled else "이미 꺼져"
@@ -5070,10 +5105,11 @@ class MapleNewsBot(commands.Bot):
             return
 
         if enabled:
-            other_type = INFO_EXCHANGE if info_type == INFO_TIME else INFO_TIME
-            if channel.id in self.alert_channels[other_type]:
+            other_types = {INFO_TIME, INFO_UTC, INFO_EXCHANGE} - {info_type}
+            if any(channel.id in self.alert_channels[item] for item in other_types):
                 await interaction.response.send_message(
-                    "같은 채널에 시간과 환율을 동시에 표시할 수 없습니다.", ephemeral=True
+                    "같은 채널에 시간·UTC·환율을 동시에 표시할 수 없습니다.",
+                    ephemeral=True,
                 )
                 return
             bot_member = channel.guild.me
@@ -5092,6 +5128,8 @@ class MapleNewsBot(commands.Bot):
             try:
                 if info_type == INFO_TIME:
                     name = format_time_channel_name(datetime.now(timezone.utc))
+                elif info_type == INFO_UTC:
+                    name = format_utc_channel_name(datetime.now(timezone.utc))
                 else:
                     name = format_exchange_channel_name(
                         await self.fetch_usd_exchange_rate()
@@ -5708,11 +5746,13 @@ class MapleNewsBot(commands.Bot):
     @tasks.loop(minutes=10)
     async def update_time_channels(self) -> None:
         # Discord 채널 이름 변경 제한에 걸리지 않도록 10분마다 갱신합니다.
-        if not self.alert_channels[INFO_TIME]:
+        if not (self.alert_channels[INFO_TIME] or self.alert_channels[INFO_UTC]):
             return
-        await self.rename_info_channels(
-            INFO_TIME, format_time_channel_name(datetime.now(timezone.utc))
-        )
+        now = datetime.now(timezone.utc)
+        if self.alert_channels[INFO_TIME]:
+            await self.rename_info_channels(INFO_TIME, format_time_channel_name(now))
+        if self.alert_channels[INFO_UTC]:
+            await self.rename_info_channels(INFO_UTC, format_utc_channel_name(now))
 
     @tasks.loop(minutes=10)
     async def update_exchange_channels(self) -> None:

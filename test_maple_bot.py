@@ -37,6 +37,7 @@ from maple_bot import (
     ALERT_URSUS,
     INFO_EXCHANGE,
     INFO_TIME,
+    INFO_UTC,
     EPIC_DUNGEON_BONUSES,
     EPIC_DUNGEONS,
     EXP_COUPON_BURNING_OPTIONS,
@@ -86,6 +87,7 @@ from maple_bot import (
     fetch_cached_ranking_profile,
     format_exchange_channel_name,
     format_time_channel_name,
+    format_utc_channel_name,
     format_sunny_sunday_date,
     format_boss_hp_as_k,
     find_ranking_character,
@@ -94,6 +96,7 @@ from maple_bot import (
     hot_week_command,
     html_to_text,
     info_channel_command,
+    utc_channel_command,
     is_cash_shop_update,
     is_patch_notes,
     is_server_maintenance_post,
@@ -344,6 +347,7 @@ class NewsFilteringTests(unittest.TestCase):
                 ALERT_SERVER: set(),
                 ALERT_EXCHANGE_LOG: set(),
                 INFO_TIME: set(),
+                INFO_UTC: set(),
                 INFO_EXCHANGE: set(),
             },
         )
@@ -360,6 +364,7 @@ class NewsFilteringTests(unittest.TestCase):
                 ALERT_SERVER: set(),
                 ALERT_EXCHANGE_LOG: set(),
                 INFO_TIME: set(),
+                INFO_UTC: set(),
                 INFO_EXCHANGE: set(),
             },
         )
@@ -402,6 +407,12 @@ class NewsFilteringTests(unittest.TestCase):
             {choice.value for choice in info_channel_command.parameters[2].choices},
             {"on", "off"},
         )
+        self.assertTrue(utc_channel_command.guild_only)
+        self.assertTrue(utc_channel_command.default_permissions.administrator)
+        self.assertEqual(
+            {choice.value for choice in utc_channel_command.parameters[1].choices},
+            {"on", "off"},
+        )
 
     def test_server_status_requires_all_logins_and_one_game_channel(self) -> None:
         payload = {
@@ -428,7 +439,7 @@ class NewsFilteringTests(unittest.TestCase):
             {"Scania": False, "Bera": False, "Kronos": False, "Hyperion": False},
         )
 
-    def test_info_channel_names_use_korea_time_and_naver_usd_rate(self) -> None:
+    def test_info_channel_names_use_korea_and_utc_time_and_naver_usd_rate(self) -> None:
         self.assertEqual(
             format_time_channel_name(
                 datetime(2026, 8, 13, 23, 2, tzinfo=timezone.utc)
@@ -440,6 +451,12 @@ class NewsFilteringTests(unittest.TestCase):
                 datetime(2026, 8, 13, 23, 7, tzinfo=timezone.utc)
             ),
             "08월 14일 08시 05분",
+        )
+        self.assertEqual(
+            format_utc_channel_name(
+                datetime(2026, 8, 13, 23, 7, tzinfo=timezone.utc)
+            ),
+            "UTC: 23:05",
         )
         source = """
         <table class="tbl_exchange"><tbody>
@@ -658,6 +675,7 @@ class NewsFilteringTests(unittest.TestCase):
             ALERT_SERVER: set(),
             ALERT_EXCHANGE_LOG: set(),
             INFO_TIME: set(),
+            INFO_UTC: set(),
             INFO_EXCHANGE: set(),
         }
         patch_events = {"post_id": 42415, "miracle_time": []}
