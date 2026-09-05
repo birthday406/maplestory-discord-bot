@@ -26,7 +26,12 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ai_score import calculate_ai_score
 from familiar_store import FamiliarExpectationStore
-from ranking_store import MIN_TRACKED_LEVEL, RankingStore, scan_rankings
+from ranking_store import (
+    MIN_TRACKED_LEVEL,
+    RankingStore,
+    ranking_scan_started_at,
+    scan_rankings,
+)
 
 from maple_calculators import (
     calculate_arcane_symbol_completion,
@@ -1486,6 +1491,15 @@ def find_ranking_character(payload: dict, nickname: str) -> dict | None:
     return None
 
 
+def maple_nickname_bytes(nickname: str) -> int:
+    """메이플스토리 닉네임 규칙(한글 2, 그 외 1)으로 길이를 계산합니다."""
+    return sum(2 if "가" <= character <= "힣" else 1 for character in nickname)
+
+
+def valid_maple_nickname(nickname: str) -> bool:
+    return bool(nickname) and maple_nickname_bytes(nickname) <= 12
+
+
 async def count_eligible_ranking_characters(
     fetch_page,
     total_count: int,
@@ -1536,11 +1550,14 @@ def ranking_axis_scale(maximum: int) -> tuple[int, int]:
     return step, math.ceil(maximum / step) * step
 
 
-def summarize_exp_gains(gains: list[dict], period: int) -> tuple[int, int]:
+def summarize_exp_gains(gains: list[dict], period: int) -> tuple[int | None, int]:
     """최근 기간의 일평균과 누적 획득 경험치를 반환합니다."""
     recent = gains[-period:]
-    total = sum(item["exp"] for item in recent)
-    return (round(total / len(recent)) if recent else 0), total
+    values = [item.get("exp") for item in recent]
+    total = sum(value for value in values if value is not None)
+    if len(recent) < period or any(value is None for value in values):
+        return None, total
+    return round(total / period), total
 
 
 def estimate_next_level(level: int, current_exp: int, daily_exp: int) -> tuple[int, float] | None:
@@ -1555,7 +1572,10 @@ def format_top_percent(rank: int, total_count: int) -> str:
     if rank == 1:
         return "0%"
     percent = Decimal(rank) * 100 / Decimal(total_count)
-    return "0.0001%" if percent < Decimal("0.0001") else f"{percent:.4f}%"
+    if percent < Decimal("0.0001"):
+        return "0.0001%"
+    decimals = 4 if percent < Decimal("0.1") else 3 if percent < 1 else 2
+    return f"{percent:.{decimals}f}%"
 
 
 def current_ranking_scan_date(now: datetime | None = None):
@@ -1563,19 +1583,34 @@ def current_ranking_scan_date(now: datetime | None = None):
     return (current - RANKING_DAILY_START).date()
 
 
+def format_status_duration(seconds: float) -> str:
+    minutes = max(0, round(seconds / 60))
+    hours, minutes = divmod(minutes, 60)
+    if hours and minutes:
+        return f"{hours}시간 {minutes}분"
+    if hours:
+        return f"{hours}시간"
+    return f"{minutes}분"
+
+
 def ranking_collection_status_text(
-    inbox_path: Path, scan_date: date | None = None
+    inbox_path: Path,
+    scan_date: date | None = None,
+    store: RankingStore | None = None,
+    now: datetime | None = None,
 ) -> str:
     """메인 서버에 도착한 최신 배치로 분산 수집기 진행상황을 요약합니다."""
     scan_date = scan_date or current_ranking_scan_date()
     prefix = f"{scan_date.isoformat()}-"
     latest: dict[str, Path] = {}
+    batches: dict[str, list[Path]] = {}
     for directory in (inbox_path / "processed", inbox_path):
         for path in directory.glob(f"{prefix}*.jsonl"):
             match = re.match(rf"^{re.escape(prefix)}(.+)-\d+\.jsonl$", path.name)
             if not match:
                 continue
             worker = match.group(1)
+            batches.setdefault(worker, []).append(path)
             if worker not in latest or path.stat().st_mtime > latest[worker].stat().st_mtime:
                 latest[worker] = path
 
@@ -1585,16 +1620,95 @@ def ranking_collection_status_text(
         "oracle-worker-a1-bera": "보조 Bera",
         "oracle-worker-a1-hyperion": "보조 Hyperion",
     }
-    lines = [f"랭킹 수집 상태 ({scan_date.isoformat()} UTC)"]
+    latest_records = {}
+    for worker, path in latest.items():
+        try:
+            with path.open(encoding="utf-8") as handle:
+                latest_records[worker] = next(
+                    (json.loads(line) for line in reversed(handle.readlines()) if line.strip()),
+                    None,
+                )
+        except (OSError, json.JSONDecodeError):
+            latest_records[worker] = None
+
+    required_workers = set(latest_records)
+    collection_complete = len(required_workers) >= 4 and all(
+        latest_records[worker]
+        and latest_records[worker].get("ranking_type", "world") != "world"
+        for worker in required_workers
+    )
+    completed_at = None
+    if collection_complete:
+        transitions = []
+        for worker in required_workers:
+            first_representative = None
+            for path in sorted(
+                batches[worker], key=lambda item: item.stat().st_mtime, reverse=True
+            ):
+                try:
+                    with path.open(encoding="utf-8") as handle:
+                        last = next(
+                            (
+                                json.loads(line)
+                                for line in reversed(handle.readlines())
+                                if line.strip()
+                            ),
+                            None,
+                        )
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if last and last.get("ranking_type", "world") == "world":
+                    break
+                if last:
+                    first_representative = path.stat().st_mtime
+            if first_representative is not None:
+                transitions.append(first_representative)
+        if len(transitions) == len(required_workers):
+            completed_at = datetime.fromtimestamp(max(transitions), timezone.utc)
+
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    started_at = datetime.fromtimestamp(
+        ranking_scan_started_at(scan_date), timezone.utc
+    )
+    lines = [
+        f"랭킹 수집 상태 ({scan_date.isoformat()} UTC)",
+        f"시작: {started_at:%Y-%m-%d %H:%M} UTC",
+    ]
+    if store is not None:
+        collected, target = store.get_daily_collection_progress(scan_date)
+        if target:
+            ratio = collected / target
+            if collection_complete:
+                lines.append(f"진행률: 100.0% ({collected:,}명 저장)")
+                finished = completed_at or current
+                elapsed = max((finished - started_at).total_seconds(), 0)
+                lines.extend(
+                    (
+                        f"완료: {finished:%Y-%m-%d %H:%M} UTC",
+                        f"총 소요: {format_status_duration(elapsed)}",
+                    )
+                )
+            else:
+                displayed_ratio = min(ratio, 0.999)
+                lines.append(
+                    f"진행률: {displayed_ratio * 100:.1f}% "
+                    f"({collected:,} / 전일 기준 {target:,}명)"
+                )
+                elapsed = max((current - started_at).total_seconds(), 0)
+            if not collection_complete and 0 < ratio < 1 and elapsed > 0:
+                remaining = elapsed * (1 - ratio) / ratio
+                estimated_at = current + timedelta(seconds=remaining)
+                lines.append(
+                    f"예상 종료: {estimated_at:%Y-%m-%d %H:%M} UTC "
+                    f"(약 {format_status_duration(remaining)} 남음)"
+                )
+        else:
+            lines.append(f"진행률: 목표 인원 계산 중 ({collected:,}명 저장)")
     for worker in sorted(
         latest, key=lambda value: (value not in labels, labels.get(value, value))
     ):
         path = latest[worker]
-        try:
-            with path.open(encoding="utf-8") as handle:
-                last = next((json.loads(line) for line in reversed(handle.readlines()) if line.strip()), None)
-        except (OSError, json.JSONDecodeError):
-            continue
+        last = latest_records.get(worker)
         if not last:
             continue
         world = RANKING_WORLDS.get(
@@ -1633,6 +1747,18 @@ def ranking_font(name: str, size: int) -> ImageFont.FreeTypeFont:
     return font
 
 
+def ellipsize_text(draw, text: str, font, max_width: int) -> str:
+    """고정 카드 폭을 넘는 텍스트 끝을 말줄임표로 줄입니다."""
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+    suffix = "…"
+    if draw.textlength(suffix, font=font) > max_width:
+        return ""
+    while text and draw.textlength(text + suffix, font=font) > max_width:
+        text = text[:-1]
+    return text + suffix
+
+
 def create_ranking_history_image(
     character: dict,
     gains: list[dict],
@@ -1656,13 +1782,14 @@ def create_ranking_history_image(
     score_font = ranking_font("roboto", 20 * scale)
     body_font = ranking_font("roboto", 15 * scale)
     value_font = ranking_font("roboto_bold", 13 * scale)
-    small_font = ranking_font("roboto", 13 * scale)
+    small_font = ranking_font("roboto", 14 * scale)
     korean_title_font = ranking_font("korean", 28 * scale)
     korean_score_font = ranking_font("korean", 20 * scale)
     korean_body_font = ranking_font("korean", 15 * scale)
     korean_value_font = ranking_font("korean", 13 * scale)
-    korean_small_font = ranking_font("korean", 13 * scale)
-    footer_font = ranking_font("korean", 11 * scale)
+    korean_small_font = ranking_font("korean", 14 * scale)
+    footer_font = ranking_font("korean", 12 * scale)
+    badge_font = ranking_font("korean", 13 * scale)
 
     draw.rounded_rectangle(
         (16 * scale, 16 * scale, (width - 16) * scale, (height - 16) * scale),
@@ -1683,7 +1810,7 @@ def create_ranking_history_image(
             float(Decimal(current_exp) / Decimal(LEVEL_EXP[level - 200])),
         )
     level_text = f"Lv. {level}"
-    score, tags = maple_addict_power(
+    score, tag_badges = maple_addict_badges(
         {
             "level": level,
             "exp": current_exp,
@@ -1742,9 +1869,15 @@ def create_ranking_history_image(
     )
     if previous_name:
         name_right = draw.textbbox((190 * scale, 42 * scale), character_name, font=name_font)[2]
+        previous_text = ellipsize_text(
+            draw,
+            f"변경 전 닉네임: {previous_name}",
+            footer_font,
+            max(0, 820 * scale - name_right - 12 * scale),
+        )
         draw.text(
             (name_right + 12 * scale, 57 * scale),
-            f"변경 전 닉네임: {previous_name}",
+            previous_text,
             font=footer_font,
             fill="#AFC0CD",
         )
@@ -1759,12 +1892,17 @@ def create_ranking_history_image(
         radius=8 * scale,
         fill="#1A222B",
     )
-    draw.rounded_rectangle(
-        (190 * scale, 108 * scale, (190 + 630 * level_progress) * scale, 136 * scale),
-        radius=8 * scale,
-        fill="#6EB6D9",
-    )
     if 200 <= level < 300:
+        draw.rounded_rectangle(
+            (
+                190 * scale,
+                108 * scale,
+                (190 + 630 * level_progress) * scale,
+                136 * scale,
+            ),
+            radius=8 * scale,
+            fill="#6EB6D9",
+        )
         progress_text = (
             f"{level_progress * 100:.3f}%  "
             f"({compact_exp(current_exp)} / {compact_exp(LEVEL_EXP[level - 200])})"
@@ -1775,8 +1913,16 @@ def create_ranking_history_image(
             font=value_font,
             fill="#F8FBFD",
             anchor="mm",
-            stroke_width=2 * scale,
+            stroke_width=1 * scale,
             stroke_fill="#202830",
+        )
+    elif level == 300:
+        draw.text(
+            (505 * scale, 122 * scale),
+            "최고 레벨 달성",
+            font=korean_value_font,
+            fill="#DCE7EE",
+            anchor="mm",
         )
     draw.rounded_rectangle(
         (190 * scale, 148 * scale, 820 * scale, 184 * scale),
@@ -1792,28 +1938,40 @@ def create_ranking_history_image(
         fill="#DCE7EE",
     )
     draw.text(
-        (330 * scale, 154 * scale),
+        (305 * scale, 154 * scale),
         f"{score:.2f}",
         font=score_font,
-        fill="#E6FF00",
+        fill="#6EB6D9",
     )
     draw.line(
-        (410 * scale, 157 * scale, 410 * scale, 176 * scale),
+        (375 * scale, 157 * scale, 375 * scale, 176 * scale),
         fill="#526878",
         width=1 * scale,
     )
     draw.text(
-        (427 * scale, 159 * scale),
+        (390 * scale, 159 * scale),
         "태그",
         font=korean_value_font,
         fill="#DCE7EE",
     )
-    draw.text(
-        (472 * scale, 159 * scale),
-        " · ".join(tags),
-        font=korean_value_font,
-        fill="#EEF4F8",
-    )
+    tag_x = 422 * scale
+    for tag, tag_score in tag_badges:
+        tag_width = draw.textlength(tag, font=korean_value_font) + 16 * scale
+        if tag_x + tag_width > 808 * scale:
+            break
+        draw.rounded_rectangle(
+            (tag_x, 153 * scale, tag_x + tag_width, 179 * scale),
+            radius=8 * scale,
+            fill=maple_index_tag_color(tag_score),
+        )
+        draw.text(
+            (tag_x + tag_width / 2, 166 * scale),
+            tag,
+            font=korean_value_font,
+            fill="#F8FBFD",
+            anchor="mm",
+        )
+        tag_x += tag_width + 5 * scale
 
     world_rank_text = f"{world_rank:,}위" if world_rank is not None else "확인 불가"
     if (
@@ -1846,19 +2004,23 @@ def create_ranking_history_image(
             ((left + 16) * scale, 224 * scale),
             heading,
             font=korean_small_font,
-            fill="#E6EEF4",
+            fill="#C5D2DB",
         )
         draw.text(
             ((left + 16) * scale, 247 * scale),
             main_value,
-            font=korean_body_font if re.search(r"[가-힣]", main_value) else score_font,
+            font=(
+                korean_body_font
+                if main_value == "대표 캐릭터에서만"
+                else korean_score_font
+            ),
             fill="#EEF4F8",
         )
         draw.text(
             ((left + 16) * scale, 279 * scale),
             detail,
             font=korean_small_font if re.search(r"[가-힣]", detail) else small_font,
-            fill="#F3F7FA",
+            fill="#E6EEF4",
         )
 
     draw.rounded_rectangle(
@@ -1881,7 +2043,7 @@ def create_ranking_history_image(
     )
     for index, period in enumerate((7, 14, 30)):
         average, _ = summarize_exp_gains(gains, period)
-        display_value = compact_exp(average) if gains else "-"
+        display_value = compact_exp(average) if average is not None else "-"
         value_x = section_left + index * 122
         draw.text(
             (value_x * scale, 371 * scale),
@@ -1897,13 +2059,13 @@ def create_ranking_history_image(
         )
 
     daily_exp, _ = summarize_exp_gains(gains, 7)
-    estimate = estimate_next_level(level, current_exp, daily_exp)
+    estimate = estimate_next_level(level, current_exp, daily_exp or 0)
     draw.text(
         (466 * scale, 338 * scale),
         (
-            f"다음 레벨 예상 · Lv.{level + 1} (7일 평균 기준)"
+            f"Lv.{level + 1}까지 · 7일 평균 기준"
             if level < 300
-            else "다음 레벨 예상"
+            else "레벨 정보"
         ),
         font=korean_body_font,
         fill="#FFFFFF",
@@ -1929,7 +2091,7 @@ def create_ranking_history_image(
             fill="#DCE7EE",
         )
         draw.text(
-            (738 * scale, 367 * scale),
+            (750 * scale, 367 * scale),
             f"{days:.1f}일",
             font=korean_score_font,
             fill="#E6FF00",
@@ -1960,9 +2122,17 @@ def create_ranking_history_image(
             anchor="mm",
         )
     else:
+        draw.text(
+            (82 * scale, 438 * scale),
+            f"최근 {len(graph_gains)}일 획득 경험치",
+            font=korean_small_font,
+            fill="#DCE7EE",
+        )
         left, top, right, bottom = 82, 470, 850, 680
-        maximum = max(item["exp"] for item in graph_gains) or 1
-        tick_step, axis_maximum = ranking_axis_scale(maximum)
+        maximum = max(item["exp"] for item in graph_gains)
+        tick_step, axis_maximum = ranking_axis_scale(
+            max(1, math.ceil(maximum * 1.15))
+        )
         tick_count = axis_maximum // tick_step
         for index in range(tick_count + 1):
             value = axis_maximum - tick_step * index
@@ -2004,16 +2174,28 @@ def create_ranking_history_image(
                 width=4 * scale,
                 joint="curve",
             )
-        for (x, y), item in zip(points, graph_gains):
+
+        for index, ((x, y), item) in enumerate(zip(points, graph_gains)):
+            level_up_to = item.get("level_up_to")
+            latest = index == len(graph_gains) - 1
+            point_radius = 8 if level_up_to else (7 if latest else 5)
             draw.ellipse(
                 (
-                    (x - 6) * scale,
-                    (y - 6) * scale,
-                    (x + 6) * scale,
-                    (y + 6) * scale,
+                    (x - point_radius) * scale,
+                    (y - point_radius) * scale,
+                    (x + point_radius) * scale,
+                    (y + point_radius) * scale,
                 ),
-                fill="#DDFE38",
-                outline="#F6FFC7",
+                fill=(
+                    "#FF9F43"
+                    if level_up_to
+                    else ("#DDFE38" if latest else "#DCE7EE")
+                ),
+                outline=(
+                    "#FFE0B8"
+                    if level_up_to
+                    else ("#F6FFC7" if latest else "#9FB0BE")
+                ),
                 width=2 * scale,
             )
             exp_text = compact_exp(item["exp"])
@@ -2033,7 +2215,11 @@ def create_ranking_history_image(
                 ),
                 radius=5 * scale,
                 fill="#1A222B",
-                outline="#526878",
+                outline=(
+                    "#FF9F43"
+                    if level_up_to
+                    else ("#DDFE38" if latest else "#526878")
+                ),
                 width=1 * scale,
             )
             draw.text(
@@ -2043,6 +2229,34 @@ def create_ranking_history_image(
                 fill="#F8FBFD",
                 anchor="ms",
             )
+            if level_up_to:
+                badge_text = f"Lv.{level_up_to} 달성"
+                badge_position = (x * scale, exp_box[1] - 10 * scale)
+                badge_box = draw.textbbox(
+                    badge_position,
+                    badge_text,
+                    font=badge_font,
+                    anchor="mb",
+                )
+                draw.rounded_rectangle(
+                    (
+                        badge_box[0] - 4 * scale,
+                        badge_box[1] - 2 * scale,
+                        badge_box[2] + 4 * scale,
+                        badge_box[3] + 2 * scale,
+                    ),
+                    radius=4 * scale,
+                    fill="#53351F",
+                    outline="#FF9F43",
+                    width=1 * scale,
+                )
+                draw.text(
+                    badge_position,
+                    badge_text,
+                    font=badge_font,
+                    fill="#FFE0B8",
+                    anchor="mb",
+                )
             draw.text(
                 (x * scale, (bottom + 14) * scale),
                 item["date"][5:].replace("-", "/"),
@@ -2061,7 +2275,7 @@ def create_ranking_history_image(
             (width * scale // 2, 736 * scale),
             f"기록 업데이트: {update_text} (UTC)",
             font=footer_font,
-            fill="#9FB0BE",
+            fill="#C5D2DB",
             anchor="mm",
         )
 
@@ -2088,9 +2302,9 @@ def ranking_position_score(rank: int | None) -> float:
     return 100 / (1 + math.log10(rank) / 4)
 
 
-def maple_index_tags(
+def maple_index_tag_badges(
     score: float, indices: dict[str, float], *, is_alt_character: bool = False
-) -> list[str]:
+) -> list[tuple[str, float]]:
     if score >= 95:
         tier = "메이플 마스터"
     elif score >= 80:
@@ -2106,17 +2320,44 @@ def maple_index_tags(
         "union_growth": "유니온 장인",
         "achievement": "업적 사냥꾼",
     }
-    tags = [tier]
-    if min(indices.values()) >= 40 and max(indices.values()) - min(indices.values()) <= 3:
-        tags.append("균형의 달인")
-    tags.append(specialties[max(indices, key=indices.get)])
+    ranked = sorted(indices.items(), key=lambda item: item[1], reverse=True)
+    tags = [(tier, score)]
     if is_alt_character:
-        tags.append("부캐")
+        tags.extend(((specialties[ranked[0][0]], ranked[0][1]), ("부캐", 0.0)))
+    elif min(indices.values()) >= 40 and max(indices.values()) - min(indices.values()) <= 3:
+        tags.extend(
+            (("균형의 달인", min(indices.values())), (specialties[ranked[0][0]], ranked[0][1]))
+        )
+    else:
+        tags.extend((specialties[name], value) for name, value in ranked[:2])
     return tags
 
 
-def maple_addict_power(entry: dict) -> tuple[float, list[str]]:
-    """레벨·유니온·업적을 합쳐 재미용 메이플 종합 지수와 태그를 만듭니다."""
+def maple_index_tags(
+    score: float, indices: dict[str, float], *, is_alt_character: bool = False
+) -> list[str]:
+    return [
+        tag
+        for tag, _ in maple_index_tag_badges(
+            score, indices, is_alt_character=is_alt_character
+        )
+    ]
+
+
+def maple_index_tag_color(score: float) -> str:
+    if score >= 95:
+        return "#2F6849"
+    if score >= 80:
+        return "#756429"
+    if score >= 60:
+        return "#5C4778"
+    if score >= 40:
+        return "#345D7B"
+    return "#4A5560"
+
+
+def maple_addict_badges(entry: dict) -> tuple[float, list[tuple[str, float]]]:
+    """종합 점수와 태그별 기준 점수를 함께 반환합니다."""
     is_alt_character = all(
         entry.get(key) is None
         for key in (
@@ -2133,7 +2374,7 @@ def maple_addict_power(entry: dict) -> tuple[float, list[str]]:
             name: ai_result["indices"][name]
             for name in ("character_growth", "union_growth", "achievement")
         }
-        return score, maple_index_tags(
+        return score, maple_index_tag_badges(
             score, indices, is_alt_character=is_alt_character
         )
 
@@ -2157,15 +2398,21 @@ def maple_addict_power(entry: dict) -> tuple[float, list[str]]:
     score = 99.9 if all_first else min(99.8, character_score + union_score + achievement_score)
 
     score = round(score, 2)
-    return score, maple_index_tags(
+    return score, maple_index_tag_badges(
         score,
         {
-            "character_growth": character_score,
-            "union_growth": union_score,
-            "achievement": achievement_score,
+            "character_growth": character_score / 0.40,
+            "union_growth": union_score / 0.30,
+            "achievement": achievement_score / 0.30,
         },
         is_alt_character=is_alt_character,
     )
+
+
+def maple_addict_power(entry: dict) -> tuple[float, list[str]]:
+    """레벨·유니온·업적을 합쳐 재미용 메이플 종합 지수와 태그를 만듭니다."""
+    score, badges = maple_addict_badges(entry)
+    return score, [tag for tag, _ in badges]
 
 
 def simulate_seed_ring(level: int, stone_count: int, roll: int | None = None) -> dict:
@@ -3885,20 +4132,42 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
     if cache is None:
         cache = client._ranking_profile_cache = {}
     key = nickname.casefold()
+    ranking_store = getattr(client, "ranking_store", None)
+    representative_loader = getattr(
+        ranking_store, "get_representative_rankings", None
+    )
+    representatives = (
+        representative_loader(nickname)
+        if representative_loader is not None
+        else (None, None)
+    )
+
+    def add_collected_representatives(profile):
+        if profile is None:
+            return None
+        legion = profile[3] or representatives[0]
+        achievement = profile[4] or representatives[1]
+        if legion is profile[3] and achievement is profile[4]:
+            return profile
+        return (*profile[:3], legion, achievement, *profile[5:])
+
     cached = cache.get(key)
     cached_is_fresh = (
         cached is not None and now - cached[0] < RANKING_PROFILE_CACHE_SECONDS
     )
-    if cached_is_fresh and cached[1][3] is not None and cached[1][4] is not None:
-        return cached[1]
+    if cached_is_fresh:
+        cached = (cached[0], add_collected_representatives(cached[1]))
+        cache[key] = cached
+        if cached[1][3] is not None and cached[1][4] is not None:
+            return cached[1]
 
-    ranking_store = getattr(client, "ranking_store", None)
     stored = (
         ranking_store.get_ranking_profile(nickname)
         if ranking_store is not None
         and hasattr(ranking_store, "get_ranking_profile")
         else None
     )
+    stored = add_collected_representatives(stored)
     if cached_is_fresh:
         cached_representative_count = sum(
             cached[1][index] is not None for index in (3, 4)
@@ -3927,6 +4196,7 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
             nickname,
             include_representative_rankings=False,
         )
+        profile = add_collected_representatives(profile)
         if (
             profile[0] is not None
             and ranking_store is not None
@@ -3961,9 +4231,10 @@ async def nickname_trace_command(
     interaction: discord.Interaction, nickname: str
 ) -> None:
     nickname = nickname.strip()
-    if not nickname or len(nickname) > 20:
+    if not valid_maple_nickname(nickname):
         await interaction.response.send_message(
-            "닉네임을 1~20자로 입력해주세요.", ephemeral=True
+            "닉네임을 12바이트 이내로 입력해주세요. (한글 2바이트, 영문·숫자 1바이트)",
+            ephemeral=True,
         )
         return
     trace = interaction.client.ranking_store.get_nickname_trace(nickname)
@@ -4016,9 +4287,10 @@ async def ranking_command(
             )
             return
     nickname = nickname.strip()
-    if not nickname or len(nickname) > 20:
+    if not valid_maple_nickname(nickname):
         await interaction.response.send_message(
-            "닉네임을 1~20자로 입력해주세요.", ephemeral=True
+            "닉네임을 12바이트 이내로 입력해주세요. (한글 2바이트, 영문·숫자 1바이트)",
+            ephemeral=True,
         )
         return
 
@@ -4705,7 +4977,10 @@ class MapleNewsBot(commands.Bot):
 
     async def ranking_collection_status(self) -> str:
         return await asyncio.to_thread(
-            ranking_collection_status_text, self._ranking_inbox_path
+            ranking_collection_status_text,
+            self._ranking_inbox_path,
+            None,
+            self.ranking_store,
         )
 
     async def on_message(self, message: discord.Message) -> None:
@@ -4781,6 +5056,11 @@ class MapleNewsBot(commands.Bot):
             return
         await self.send_owner_dm(f"⚠️ **랭킹 백필 수집기 문제**\n```text\n{alert[:1800]}\n```")
         self._last_backfill_alert = alert
+        try:
+            if BACKFILL_ALERT_PATH.read_text(encoding="utf-8").strip() == alert:
+                BACKFILL_ALERT_PATH.write_text("", encoding="utf-8")
+        except OSError:
+            logging.exception("Failed to clear the consumed backfill alert.")
 
     async def fetch_server_status(self) -> dict[str, bool]:
         # 넥슨 공식 상태 API 한 번으로 주요 4개 월드를 함께 확인합니다.

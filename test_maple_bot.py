@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import os
 import tempfile
 import unittest
 from datetime import date, datetime, timedelta, timezone
@@ -10,7 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import maple_bot
-from PIL import Image
+from PIL import Image, ImageDraw
 from maple_calculators import (
     calculate_arcane_symbol_completion,
     calculate_symbol,
@@ -105,6 +106,8 @@ from maple_bot import (
     known_sunny_sunday_translation,
     localize_sunny_sunday_text,
     load_state,
+    maple_nickname_bytes,
+    maple_index_tag_color,
     merge_patch_events,
     migrate_sunny_sunday_state,
     miracle_time_alert_command,
@@ -221,12 +224,71 @@ class NewsFilteringTests(unittest.TestCase):
             (failed / "2026-09-01-broken-3.jsonl").touch()
 
             status = maple_bot.ranking_collection_status_text(
-                inbox, date(2026, 9, 1)
+                inbox,
+                date(2026, 9, 1),
+                Mock(get_daily_collection_progress=Mock(return_value=(350_000, 700_000))),
+                datetime(2026, 9, 1, 20, 10, tzinfo=timezone.utc),
             )
 
+        self.assertIn("시작: 2026-09-01 17:10 UTC", status)
+        self.assertIn("진행률: 50.0% (350,000 / 전일 기준 700,000명)", status)
+        self.assertIn("예상 종료: 2026-09-01 23:10 UTC (약 3시간 남음)", status)
         self.assertIn("메인: Kronos 1,201위까지", status)
         self.assertIn("보조 E2: 경험치 완료 · Kronos 업적 931위", status)
         self.assertIn("실패 배치: 최근 10분 1개 · 누적 1개", status)
+
+    def test_ranking_collection_status_shows_recorded_finish_time(self) -> None:
+        workers = (
+            "oracle-worker-main",
+            "oracle-worker-e2",
+            "oracle-worker-a1-bera",
+            "oracle-worker-a1-hyperion",
+        )
+        finished_at = datetime(2026, 9, 1, 22, 10, tzinfo=timezone.utc).timestamp()
+        with tempfile.TemporaryDirectory() as directory:
+            inbox = Path(directory)
+            processed = inbox / "processed"
+            processed.mkdir()
+            for offset, worker in enumerate(workers):
+                path = processed / f"2026-09-01-{worker}-{offset}.jsonl"
+                path.write_text(
+                    json.dumps(
+                        {
+                            "world_id": 45,
+                            "page_index": 1,
+                            "ranking_type": "legion",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                os.utime(path, (finished_at + offset, finished_at + offset))
+
+            status = maple_bot.ranking_collection_status_text(
+                inbox,
+                date(2026, 9, 1),
+                Mock(get_daily_collection_progress=Mock(return_value=(700_000, 700_000))),
+                datetime(2026, 9, 2, 1, 10, tzinfo=timezone.utc),
+            )
+
+        self.assertIn("진행률: 100.0% (700,000명 저장)", status)
+        self.assertIn("완료: 2026-09-01 22:10 UTC", status)
+        self.assertIn("총 소요: 5시간", status)
+
+    def test_ranking_collection_does_not_show_complete_from_count_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            inbox = Path(directory)
+            inbox.mkdir(exist_ok=True)
+            status = maple_bot.ranking_collection_status_text(
+                inbox,
+                date(2026, 9, 1),
+                Mock(get_daily_collection_progress=Mock(return_value=(795_013, 790_471))),
+                datetime(2026, 9, 1, 20, 10, tzinfo=timezone.utc),
+            )
+
+        self.assertIn(
+            "진행률: 99.9% (795,013 / 전일 기준 790,471명)", status
+        )
+        self.assertNotIn("완료:", status)
 
     def test_ranking_rate_limit_returns_without_sleeping_inside_fetch(self) -> None:
         async def run() -> RankingRateLimited:
@@ -1160,6 +1222,34 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(first[4])
         self.assertEqual(client._ranking_profile_refresh_requests, {"home"})
 
+    async def test_first_profile_uses_already_collected_representative_data(self) -> None:
+        character = self.character()
+        legion = {"legionLevel": 9_576, "rank": 17_969}
+        achievement = {"score": 19_410, "rank": 20_468}
+        store = SimpleNamespace(
+            get_ranking_profile=Mock(return_value=None),
+            get_representative_rankings=Mock(
+                return_value=(legion, achievement)
+            ),
+            save_ranking_profile=Mock(),
+        )
+        client = SimpleNamespace(
+            ranking_store=store,
+            _ranking_profile_cache={},
+            fetch_ranking_character=AsyncMock(
+                side_effect=[character, self.character(rank=1309)]
+            ),
+            fetch_ranking_total_count=AsyncMock(return_value=1_000_000),
+            fetch_character_image=AsyncMock(return_value=b"image"),
+        )
+
+        profile = await fetch_cached_ranking_profile(client, "Home")
+
+        self.assertEqual(profile[3], legion)
+        self.assertEqual(profile[4], achievement)
+        self.assertEqual(client.fetch_ranking_character.await_count, 2)
+        store.save_ranking_profile.assert_called_once()
+
     async def test_saved_profile_skips_official_ranking_requests(self) -> None:
         character = self.character()
         store = SimpleNamespace(
@@ -1355,7 +1445,10 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(store.save_snapshot(first, date(2026, 8, 15)), [])
             gains = store.save_snapshot(second, date(2026, 8, 16))
 
-        self.assertEqual(gains, [{"date": "2026-08-16", "exp": 150}])
+        self.assertEqual(
+            gains,
+            [{"date": "2026-08-16", "exp": 150, "level_up_to": 296}],
+        )
 
     def test_snapshot_repairs_a_future_dated_record(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1365,7 +1458,10 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             store.save_snapshot(self.character(exp=200), date(2026, 8, 31))
             gains = store.save_snapshot(self.character(exp=200), date(2026, 8, 30))
 
-        self.assertEqual(gains, [{"date": "2026-08-30", "exp": 100}])
+        self.assertEqual(
+            gains,
+            [{"date": "2026-08-30", "exp": 100, "level_up_to": None}],
+        )
 
     def test_snapshot_keeps_representative_legion_and_achievement(self) -> None:
         representative = self.character(
@@ -1389,7 +1485,16 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                     ("home", scan_date.isoformat()),
                 ).fetchone()
 
+            representative = store.get_representative_rankings("HOME")
+
         self.assertEqual(tuple(row), (10_221, 2_923, 33_370, 810))
+        self.assertEqual(
+            representative,
+            (
+                {"legionLevel": 10_221, "rank": 2_923},
+                {"score": 33_370, "rank": 810},
+            ),
+        )
 
     def test_nickname_change_detector_links_a_strong_match(self) -> None:
         old = self.character(characterName="OldName", rank=1_000, exp=123_456)
@@ -1599,7 +1704,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(score, 99.9)
-        self.assertEqual(tags, ["메이플 마스터", "레벨 장인"])
+        self.assertEqual(tags, ["메이플 마스터", "레벨 장인", "유니온 장인"])
 
     def test_complete_population_data_uses_new_ai_score(self) -> None:
         score, tags = maple_addict_power(
@@ -1630,6 +1735,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(tags[-1], "부캐")
+        self.assertEqual(len(tags), 3)
 
     def test_character_with_representative_ranking_is_not_tagged_as_alt(self) -> None:
         _, tags = maple_addict_power(
@@ -1643,6 +1749,18 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertNotIn("부캐", tags)
+        self.assertEqual(len(tags), 3)
+
+    def test_tag_badges_use_each_tags_own_score(self) -> None:
+        badges = maple_bot.maple_index_tag_badges(
+            87,
+            {"character_growth": 96, "union_growth": 72, "achievement": 43},
+        )
+
+        self.assertEqual(
+            badges,
+            [("메이플 베테랑", 87), ("레벨 장인", 96), ("유니온 장인", 72)],
+        )
 
     def test_population_snapshots_are_saved_by_date_and_world(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1724,6 +1842,14 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(maple_bot.summarize_exp_gains(gains, 7), (27, 189))
         self.assertEqual(maple_bot.summarize_exp_gains(gains, 30), (16, 465))
+        self.assertEqual(
+            maple_bot.summarize_exp_gains(gains[:6], 7),
+            (None, 21),
+        )
+        self.assertEqual(
+            maple_bot.summarize_exp_gains([*gains[:6], {"exp": None}], 7),
+            (None, 21),
+        )
 
     def test_history_graph_axis_uses_readable_t_steps(self) -> None:
         self.assertEqual(
@@ -1733,6 +1859,41 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             maple_bot.ranking_axis_scale(86_360_000_000_000),
             (10_000_000_000_000, 90_000_000_000_000),
+        )
+
+    def test_ranking_text_is_ellipsized_to_card_width(self) -> None:
+        image = Image.new("RGB", (200, 50))
+        draw = ImageDraw.Draw(image)
+        font = maple_bot.ranking_font("korean", 14)
+
+        result = maple_bot.ellipsize_text(
+            draw,
+            "메이플 베테랑 · 균형의 달인 · 유니온 장인",
+            font,
+            100,
+        )
+
+        self.assertTrue(result.endswith("…"))
+        self.assertLessEqual(draw.textlength(result, font=font), 100)
+
+    def test_maple_nickname_uses_twelve_byte_limit(self) -> None:
+        self.assertEqual(maple_nickname_bytes("가나다ABC123"), 12)
+        self.assertTrue(maple_bot.valid_maple_nickname("가나다ABC123"))
+        self.assertTrue(maple_bot.valid_maple_nickname("abcdefghijkl"))
+        self.assertFalse(maple_bot.valid_maple_nickname("가나다라마바사"))
+        self.assertFalse(maple_bot.valid_maple_nickname("abcdefghijklm"))
+
+    def test_top_percent_uses_adaptive_precision(self) -> None:
+        self.assertEqual(maple_bot.format_top_percent(1, 1_000_000), "0%")
+        self.assertEqual(maple_bot.format_top_percent(2, 10_000_000_000), "0.0001%")
+        self.assertEqual(maple_bot.format_top_percent(170, 1_000_000), "0.0170%")
+        self.assertEqual(maple_bot.format_top_percent(4_571, 1_000_000), "0.457%")
+        self.assertEqual(maple_bot.format_top_percent(12_340, 1_000_000), "1.23%")
+
+    def test_maple_index_tag_colors_follow_score_tiers(self) -> None:
+        self.assertEqual(
+            [maple_index_tag_color(score) for score in (95, 80, 60, 40, 39.99)],
+            ["#2F6849", "#756429", "#5C4778", "#345D7B", "#4A5560"],
         )
 
     async def test_missing_character_returns_short_private_message(self) -> None:
@@ -3845,8 +4006,17 @@ class CommandStatsTests(unittest.IsolatedAsyncioTestCase):
                 await MapleNewsBot.check_backfill_alert.coro(bot)
                 await MapleNewsBot.check_backfill_alert.coro(bot)
 
+                restarted_bot = SimpleNamespace(
+                    _last_backfill_alert=None,
+                    send_owner_dm=AsyncMock(),
+                )
+                await MapleNewsBot.check_backfill_alert.coro(restarted_bot)
+                cleared_alert = alert_path.read_text(encoding="utf-8")
+
         bot.send_owner_dm.assert_awaited_once()
         self.assertIn("blocked by MapleBot", bot.send_owner_dm.await_args.args[0])
+        self.assertEqual(cleared_alert, "")
+        restarted_bot.send_owner_dm.assert_not_awaited()
 
     async def test_owner_can_restart_backfill_by_dm(self) -> None:
         bot = SimpleNamespace(

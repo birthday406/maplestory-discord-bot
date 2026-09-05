@@ -589,6 +589,31 @@ class RankingStore:
             return None
         return tuple(profile) if len(profile) == 5 else None
 
+    def get_representative_rankings(
+        self, character_name: str
+    ) -> tuple[dict | None, dict | None]:
+        """전체 수집에서 이미 확인한 유니온·업적 대표 값을 반환합니다."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT legion_level, legion_rank,
+                          achievement_score, achievement_rank
+                     FROM characters WHERE name_key = ?""",
+                (character_name.casefold(),),
+            ).fetchone()
+        if row is None:
+            return None, None
+        legion = (
+            {"legionLevel": row["legion_level"], "rank": row["legion_rank"]}
+            if row["legion_level"] > 0 and row["legion_rank"] is not None
+            else None
+        )
+        achievement = (
+            {"score": row["achievement_score"], "rank": row["achievement_rank"]}
+            if row["achievement_score"] > 0 and row["achievement_rank"] is not None
+            else None
+        )
+        return legion, achievement
+
     def save_population(
         self,
         scan_date: date,
@@ -631,6 +656,41 @@ class RankingStore:
                 parameters,
             ).fetchone()
         return row["population"] if row is not None else None
+
+    def get_daily_collection_progress(self, scan_date: date) -> tuple[int, int | None]:
+        """기준일에 저장된 캐릭터 수와 Lv.260+ 수집 목표를 반환합니다."""
+        day = scan_date.isoformat()
+        with self._connect() as connection:
+            collected = connection.execute(
+                "SELECT COUNT(*) FROM ranking_snapshots WHERE snapshot_date = ?",
+                (day,),
+            ).fetchone()[0]
+            row = connection.execute(
+                """
+                SELECT population
+                FROM ranking_populations
+                WHERE snapshot_date = ? AND metric = 'level_260_plus'
+                  AND world_id = 0
+                """,
+                (day,),
+            ).fetchone()
+            if row is None:
+                row = connection.execute(
+                    """
+                    SELECT COUNT(*) AS population
+                    FROM ranking_snapshots
+                    WHERE snapshot_date = (
+                        SELECT MAX(snapshot_date)
+                        FROM ranking_snapshots
+                        WHERE snapshot_date < ?
+                    )
+                      AND level >= ?
+                      AND world_id IS NOT NULL
+                    """,
+                    (day, MIN_TRACKED_LEVEL),
+                ).fetchone()
+        target = row["population"] if row is not None else 0
+        return collected, target or None
 
     def get_ai_score_populations(self, world_id: int) -> dict[str, int | None]:
         """카드에 필요한 최신 모집단 3개를 DB 연결 한 번으로 읽습니다."""
@@ -1239,6 +1299,11 @@ class RankingStore:
                 {
                     "date": current["snapshot_date"],
                     "exp": current_total - previous_total,
+                    "level_up_to": (
+                        current["level"]
+                        if current["level"] > previous["level"]
+                        else None
+                    ),
                 }
             )
         return gains[-limit:]
