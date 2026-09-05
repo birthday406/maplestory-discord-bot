@@ -1,6 +1,9 @@
 # API keys and private bot settings
 .env
 
+# Local SSH connection cache
+.deploy_known_hosts
+
 # Runtime data and Python cache files
 state.json
 ranking.db
