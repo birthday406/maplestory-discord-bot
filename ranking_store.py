@@ -68,7 +68,10 @@ class RankingStore:
         return connection
 
     def _initialize(self) -> None:
+        from ranking_audit import initialize_audit
+
         with self._connect() as connection:
+            initialize_audit(connection)
             # 수집기의 쓰기 작업이 /랭킹 읽기를 막지 않도록 WAL을 사용합니다.
             connection.execute("PRAGMA journal_mode = WAL")
             connection.execute("PRAGMA synchronous = NORMAL")
@@ -109,6 +112,11 @@ class RankingStore:
 
                 CREATE INDEX IF NOT EXISTS idx_ranking_snapshots_date
                 ON ranking_snapshots (snapshot_date);
+
+                CREATE TABLE IF NOT EXISTS ranking_archive_first_seen (
+                    name_key TEXT PRIMARY KEY,
+                    first_seen_date TEXT NOT NULL
+                );
 
                 CREATE TABLE IF NOT EXISTS nickname_changes (
                     old_name_key TEXT NOT NULL,
@@ -543,8 +551,12 @@ class RankingStore:
         """닉변 근거가 없는 신규 진입·월드 리프·재등장의 첫 관측일을 반환합니다."""
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT MIN(snapshot_date) AS first_seen FROM ranking_snapshots WHERE name_key = ?",
-                (nickname.casefold(),),
+                """SELECT MIN(snapshot_date) AS first_seen FROM (
+                    SELECT snapshot_date FROM ranking_snapshots WHERE name_key = ?
+                    UNION ALL
+                    SELECT first_seen_date FROM ranking_archive_first_seen WHERE name_key = ?
+                )""",
+                (nickname.casefold(), nickname.casefold()),
             ).fetchone()
         return date.fromisoformat(row["first_seen"]) if row["first_seen"] else None
 
@@ -588,6 +600,18 @@ class RankingStore:
         except (json.JSONDecodeError, TypeError):
             return None
         return tuple(profile) if len(profile) == 5 else None
+
+    def get_latest_snapshot(self, character_name: str) -> dict | None:
+        """카드에 쓸 최신 수집값과 그 값의 실제 기준일을 함께 읽습니다."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT snapshot_date, level, exp, ranking AS rank,
+                          world_id AS worldID, job_name AS jobName
+                     FROM ranking_snapshots WHERE name_key = ?
+                     ORDER BY snapshot_date DESC LIMIT 1""",
+                (character_name.casefold(),),
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     def get_representative_rankings(
         self, character_name: str
@@ -1128,12 +1152,16 @@ class RankingStore:
 
     def import_batch(self, batch_path: Path) -> int:
         """보조 수집기의 JSONL 묶음을 운영 DB에 중복 없이 합칩니다."""
+        from ranking_audit import record_audit
+
         grouped: dict[tuple[date, str], list[dict]] = {}
+        records = []
         with batch_path.open(encoding="utf-8") as batch:
             for line in batch:
                 if not line.strip():
                     continue
                 record = json.loads(line)
+                records.append(record)
                 snapshot_date = date.fromisoformat(record["scan_date"])
                 ranking_type = record.get("ranking_type", "world")
                 page_index = int(record["page_index"])
@@ -1159,6 +1187,8 @@ class RankingStore:
                 )
             else:
                 raise ValueError(f"Unsupported ranking type: {ranking_type}")
+        with self._connect() as connection:
+            record_audit(connection, records)
         return imported
 
     def known_character_keys(self, world_id: int) -> set[str]:
@@ -1244,7 +1274,9 @@ class RankingStore:
                 updated += 1
         return updated
 
-    def save_snapshot(self, character: dict, scan_date: date) -> list[dict]:
+    def save_snapshot(
+        self, character: dict, scan_date: date, *, only_missing: bool = False
+    ) -> list[dict]:
         """명령어로 조회한 한 캐릭터도 자동 수집과 같은 표에 기록합니다."""
         self.save_page(
             [character],
@@ -1252,7 +1284,9 @@ class RankingStore:
             next_index=1,
             world_id=character["worldID"],
             update_checkpoint=False,
-            discard_newer=True,
+            # 실시간 조회는 DB 충돌 처리로 기존 기록을 보존해 수집기와의 경합을 막습니다.
+            preserve_newer=only_missing,
+            discard_newer=not only_missing,
         )
         if character["level"] >= MIN_TRACKED_LEVEL:
             self.prioritize_character(character["characterName"], scan_date)
@@ -1307,14 +1341,6 @@ class RankingStore:
                 }
             )
         return gains[-limit:]
-
-    def remove_old_snapshots(self, keep_since: date) -> None:
-        """그래프에 쓰지 않는 오래된 일별 기록이 계속 쌓이지 않게 정리합니다."""
-        with self._connect() as connection:
-            connection.execute(
-                "DELETE FROM ranking_snapshots WHERE snapshot_date < ?",
-                (keep_since.isoformat(),),
-            )
 
     def character_count(self) -> int:
         with self._connect() as connection:

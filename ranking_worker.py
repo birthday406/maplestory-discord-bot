@@ -73,9 +73,8 @@ class RankingBatchWriter:
         page_index: int,
         characters: list[dict],
         ranking_type: str = "world",
+        **metadata,
     ) -> None:
-        if not characters:
-            return
         if self._file is None:
             name = f"{scan_date}-{self.worker_name}-{time.time_ns()}.part"
             self._path = self.outbox / name
@@ -87,6 +86,8 @@ class RankingBatchWriter:
                 "page_index": page_index,
                 "ranking_type": ranking_type,
                 "characters": characters,
+                "audit_version": 1,
+                **metadata,
             },
             self._file,
             ensure_ascii=False,
@@ -107,6 +108,13 @@ class RankingBatchWriter:
         self._file = None
         self._path = None
         self._pages = 0
+
+    def complete(self, scan_date, world_id, page_index, ranking_type, shard_index):
+        """page_index는 이 샤드에서 더 이상 자료가 필요 없는 첫 페이지입니다."""
+        # 마지막 페이지와 완료 표식을 함께 전송해야 누락 구간을 검사할 수 있습니다.
+        self.write(scan_date, world_id, page_index, [], ranking_type,
+                   completed=True, shard_index=shard_index)
+        self.finalize()
 
 
 async def sync_ready_batches(outbox: Path) -> int:
@@ -261,6 +269,8 @@ async def run_worker() -> None:
             for page_index, payload in zip(page_indices, payloads):
                 ranks = payload.get("ranks", [])
                 if not ranks:
+                    writer.complete(current_ranking_scan_date(), world_id, page_index,
+                                    ranking_type, shard_index)
                     store.finish_representative_scan(world_id, state_type)
                     break
                 matches = eligible_representatives(ranks, ranking_type)
@@ -274,6 +284,8 @@ async def run_worker() -> None:
                 next_index = page_index + len(ranks)
                 total_count = int(payload.get("totalCount", 0))
                 if total_count and next_index > total_count:
+                    writer.complete(current_ranking_scan_date(), world_id, page_index + shard_step,
+                                    ranking_type, shard_index)
                     store.finish_representative_scan(world_id, state_type)
                     logging.warning(
                         "ranking_worker_complete phase=representative type=%s world=%s",
@@ -299,6 +311,7 @@ async def run_worker() -> None:
             for page_index, payload in zip(page_indices, payloads):
                 ranks = payload.get("ranks", [])
                 if not ranks:
+                    writer.complete(scan_date, world_id, page_index, "world", shard_index)
                     store.finish_scan(scan_date, world_id=scan_id)
                     return True
                 eligible = [
@@ -314,6 +327,7 @@ async def run_worker() -> None:
                     source_page_index=page_index,
                 )
                 if len(eligible) != len(ranks):
+                    writer.complete(scan_date, world_id, page_index + shard_step, "world", shard_index)
                     store.finish_scan(scan_date, world_id=scan_id)
                     return True
             return False
@@ -377,7 +391,7 @@ async def run_worker() -> None:
                                 retry_until, timezone.utc
                             ).isoformat(),
                         )
-                    except (aiohttp.ClientError, TimeoutError, ValueError, OSError):
+                    except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError, OSError):
                         logging.exception(
                             "ranking_worker_error phase=collect world=%s page=%s "
                             "type=%s",
@@ -440,6 +454,7 @@ async def run_worker() -> None:
                     )
                 except (
                     aiohttp.ClientError,
+                    asyncio.TimeoutError,
                     TimeoutError,
                     ValueError,
                     OSError,

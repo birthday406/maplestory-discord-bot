@@ -1156,6 +1156,189 @@ class NewsFilteringTests(unittest.TestCase):
 
 
 class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
+    def test_on_demand_snapshot_only_fills_missing_dates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(self.character(exp=900), date(2026, 9, 7))
+            store.save_snapshot(self.character(exp=100), date(2026, 9, 7), only_missing=True)
+            store.save_snapshot(self.character(exp=100), date(2026, 9, 6), only_missing=True)
+            self.assertEqual(store.get_latest_snapshot("Home")["exp"], 900)
+            self.assertEqual(store.get_gains("Home")[-1]["exp"], 800)
+
+    async def test_command_uses_today_level_even_when_old_profile_was_below_260(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(self.character(level=260, exp=900), date(2026, 9, 7))
+            store.save_ranking_profile("Home", (self.character(level=259), None, None, None, None))
+            interaction = SimpleNamespace(
+                client=SimpleNamespace(ranking_store=store), user=SimpleNamespace(id=123),
+                response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()),
+            )
+            with patch("maple_bot.current_ranking_scan_date", return_value=date(2026, 9, 7)), patch(
+                "maple_bot.create_ranking_history_image", return_value=io.BytesIO(b"image")
+            ) as render:
+                await ranking_command.callback(interaction, "Home")
+            self.assertTrue(render.called)
+            self.assertEqual(render.call_args.args[0]["level"], 260)
+
+    async def test_daily_lookup_not_found_keeps_last_good_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            old = self.character(exp=100)
+            store.save_snapshot(old, date(2026, 9, 6))
+            store.save_ranking_profile("Home", (old, None, None, None, None))
+            with patch("maple_bot.fetch_live_ranking_profile", return_value=(None,) * 6), patch(
+                "maple_bot.current_ranking_scan_date", return_value=date(2026, 9, 7)
+            ):
+                profile, failed = await maple_bot.fetch_daily_ranking_profile(SimpleNamespace(ranking_store=store), "Home")
+            self.assertTrue(failed)
+            self.assertEqual(profile[0]["exp"], 100)
+            self.assertEqual(store.get_latest_snapshot("Home")["snapshot_date"], "2026-09-06")
+
+    async def test_daily_lookup_preserves_collector_result_arriving_during_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            async def live(*args, **kwargs):
+                store.save_snapshot(self.character(exp=900), date(2026, 9, 7))
+                return (self.character(exp=100), None, None, None, None, None)
+            with patch("maple_bot.fetch_live_ranking_profile", side_effect=live), patch(
+                "maple_bot.current_ranking_scan_date", return_value=date(2026, 9, 7)
+            ):
+                await maple_bot.fetch_daily_ranking_profile(SimpleNamespace(ranking_store=store), "Home")
+            self.assertEqual(store.get_latest_snapshot("Home")["exp"], 900)
+
+    async def test_daily_shared_request_survives_one_user_cancelling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = SimpleNamespace(ranking_store=RankingStore(Path(directory) / "ranking.db"))
+            started, release = asyncio.Event(), asyncio.Event()
+            async def live(*args, **kwargs):
+                started.set()
+                await release.wait()
+                return (self.character(exp=900), None, None, None, None, None)
+            with patch("maple_bot.fetch_live_ranking_profile", side_effect=live) as fetch:
+                first = asyncio.create_task(maple_bot.fetch_daily_ranking_profile(client, "Home"))
+                await started.wait()
+                second = asyncio.create_task(maple_bot.fetch_daily_ranking_profile(client, "home"))
+                first.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await first
+                release.set()
+                profile, failed = await second
+            self.assertEqual(fetch.await_count, 1)
+            self.assertEqual(profile[0]["exp"], 900)
+            self.assertFalse(failed)
+
+    async def test_daily_lookup_refreshes_stale_profile_once_for_concurrent_users(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            old = self.character(exp=100)
+            store.save_snapshot(old, date(2026, 9, 6))
+            store.save_ranking_profile("Home", (old, None, None, None, None))
+            client = SimpleNamespace(ranking_store=store)
+            async def live(*args, **kwargs):
+                await asyncio.sleep(0)
+                return (self.character(exp=900), None, None, None, None, None)
+            with patch("maple_bot.fetch_live_ranking_profile", side_effect=live) as fetch, patch(
+                "maple_bot.current_ranking_scan_date", return_value=date(2026, 9, 7)
+            ):
+                results = await asyncio.gather(*[
+                    maple_bot.fetch_daily_ranking_profile(client, name)
+                    for name in ("Home", "home", "HOME")
+                ])
+                again = await maple_bot.fetch_daily_ranking_profile(client, "Home")
+            self.assertEqual(fetch.await_count, 1)
+            self.assertTrue(all(profile[0]["exp"] == 900 and not failed for profile, failed in results))
+            self.assertFalse(again[1])
+            self.assertEqual(store.get_latest_snapshot("Home")["snapshot_date"], "2026-09-07")
+            self.assertEqual(store.get_gains("Home")[-1]["exp"], 800)
+
+    async def test_daily_lookup_uses_collected_snapshot_without_profile_or_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_snapshot(self.character(exp=900), date(2026, 9, 7))
+            with patch("maple_bot.fetch_live_ranking_profile", side_effect=AssertionError("network")), patch(
+                "maple_bot.current_ranking_scan_date", return_value=date(2026, 9, 7)
+            ):
+                profile, failed = await maple_bot.fetch_daily_ranking_profile(SimpleNamespace(ranking_store=store), "Home")
+            self.assertEqual(profile[0]["exp"], 900)
+            self.assertFalse(failed)
+
+    async def test_daily_lookup_failure_preserves_old_record(self):
+        for error in (asyncio.TimeoutError(), RankingRateLimited("Home", 429, 30), ValueError("bad response")):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as directory:
+                store = RankingStore(Path(directory) / "ranking.db")
+                store.save_snapshot(self.character(exp=100), date(2026, 9, 6))
+                with patch("maple_bot.fetch_live_ranking_profile", side_effect=error), patch(
+                    "maple_bot.current_ranking_scan_date", return_value=date(2026, 9, 7)
+                ):
+                    profile, failed = await maple_bot.fetch_daily_ranking_profile(SimpleNamespace(ranking_store=store), "Home")
+                self.assertTrue(failed)
+                self.assertEqual(profile[0]["exp"], 100)
+                self.assertEqual(store.get_latest_snapshot("Home")["snapshot_date"], "2026-09-06")
+
+    async def test_cached_command_preserves_collected_history_and_uses_its_date(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            old = self.character(exp=100, rank=100)
+            store.save_ranking_profile("Home", (old, old, 1000, None, None))
+            store.save_snapshot(self.character(exp=200), date(2026, 9, 5))
+            store.save_snapshot(self.character(exp=900, rank=90), date(2026, 9, 6))
+            client = SimpleNamespace(ranking_store=store)
+            interaction = SimpleNamespace(
+                client=client, user=SimpleNamespace(id=123),
+                response=SimpleNamespace(defer=AsyncMock()),
+                followup=SimpleNamespace(send=AsyncMock()),
+            )
+            with store._connect() as connection:
+                before = [tuple(row) for row in connection.execute("SELECT * FROM ranking_snapshots")]
+            with patch("maple_bot.current_ranking_scan_date", return_value=date(2026, 9, 6)) as today, patch(
+                "maple_bot.create_ranking_history_image", return_value=io.BytesIO(b"image")
+            ) as render, patch("maple_bot.fetch_live_ranking_profile", side_effect=asyncio.TimeoutError()):
+                # 두 번째 호출은 메모리 캐시 경로도 확인합니다.
+                for _ in range(2):
+                    await ranking_command.callback(interaction, "Home")
+                    with store._connect() as connection:
+                        after = [tuple(row) for row in connection.execute("SELECT * FROM ranking_snapshots")]
+                    self.assertEqual(after, before)
+                    self.assertEqual(render.call_args.args[0]["exp"], 900)
+                    self.assertEqual(render.call_args.args[0]["rank"], 90)
+                    self.assertEqual(render.call_args.args[1][-1]["exp"], 700)
+                    self.assertEqual(render.call_args.kwargs["updated_date"], "2026-09-06")
+                    self.assertIsNone(render.call_args.args[2])
+                    self.assertEqual(store.get_ranking_profile("Home")[0]["exp"], 100)
+                    today.return_value = date(2026, 9, 7)
+            self.assertEqual(store.next_priority_character(date(2026, 9, 7)), "Home")
+
+    async def test_only_live_profile_fetch_creates_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            client = SimpleNamespace(ranking_store=store)
+            profile = (self.character(exp=900), None, None, None, None, None)
+            with patch("maple_bot.fetch_live_ranking_profile", AsyncMock(return_value=profile)), patch(
+                "maple_bot.current_ranking_scan_date", return_value=date(2026, 9, 6)
+            ):
+                await fetch_cached_ranking_profile(client, "Home")
+            with store._connect() as connection:
+                rows = connection.execute("SELECT snapshot_date, exp FROM ranking_snapshots").fetchall()
+            self.assertEqual([tuple(row) for row in rows], [("2026-09-06", 900)])
+
+    async def test_profile_without_dated_history_does_not_invent_today(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_ranking_profile("Home", (self.character(), None, None, None, None))
+            interaction = SimpleNamespace(
+                client=SimpleNamespace(ranking_store=store), user=SimpleNamespace(id=123),
+                response=SimpleNamespace(defer=AsyncMock()),
+                followup=SimpleNamespace(send=AsyncMock()),
+            )
+            with patch("maple_bot.create_ranking_history_image", return_value=io.BytesIO(b"image")) as render, patch(
+                "maple_bot.fetch_live_ranking_profile", side_effect=asyncio.TimeoutError()
+            ):
+                await ranking_command.callback(interaction, "Home")
+            self.assertIsNone(store.get_latest_snapshot("Home"))
+            self.assertEqual(render.call_args.kwargs["updated_date"], "기준일 확인 불가")
+            self.assertIn("실패", interaction.followup.send.await_args.kwargs["content"])
+
     @staticmethod
     def character(**changes) -> dict:
         character = {
@@ -1232,6 +1415,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                 return_value=(legion, achievement)
             ),
             save_ranking_profile=Mock(),
+            save_snapshot=Mock(),
         )
         client = SimpleNamespace(
             ranking_store=store,
@@ -1324,6 +1508,8 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             fetch_ranking_total_count=AsyncMock(return_value=1_000_000),
             ranking_store=SimpleNamespace(
                 save_snapshot=Mock(return_value=[]),
+                get_latest_snapshot=Mock(return_value=None),
+                get_gains=Mock(return_value=[]),
                 save_default_character=Mock(),
                 queue_priority_refresh=Mock(),
                 get_nickname_trace=Mock(
@@ -1371,6 +1557,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             fetch_ranking_character=AsyncMock(return_value=self.character(level=259)),
             ranking_store=SimpleNamespace(
                 save_snapshot=Mock(),
+                get_latest_snapshot=Mock(return_value=None),
                 save_default_character=Mock(),
             ),
         )
@@ -1408,6 +1595,8 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
                 get_default_character=Mock(return_value="Home"),
                 save_default_character=Mock(),
                 save_snapshot=Mock(return_value=[]),
+                get_latest_snapshot=Mock(return_value=None),
+                get_gains=Mock(return_value=[]),
                 queue_priority_refresh=Mock(),
             ),
         )
@@ -1898,7 +2087,10 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_character_returns_short_private_message(self) -> None:
         interaction = SimpleNamespace(
-            client=SimpleNamespace(fetch_ranking_character=AsyncMock(return_value=None)),
+            client=SimpleNamespace(
+                fetch_ranking_character=AsyncMock(return_value=None),
+                ranking_store=SimpleNamespace(get_latest_snapshot=Mock(return_value=None)),
+            ),
             response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
             followup=SimpleNamespace(send=AsyncMock()),
         )
@@ -3314,9 +3506,13 @@ class ExpCouponTests(unittest.IsolatedAsyncioTestCase):
                 calculate_exp_coupons(coupon_name, level, 0, 1)
 
     async def test_coupon_autocomplete_filters_advanced_coupon_by_level(self) -> None:
-        missing_level = SimpleNamespace(namespace=SimpleNamespace(current_level=None))
-        low_level = SimpleNamespace(namespace=SimpleNamespace(current_level=259))
-        high_level = SimpleNamespace(namespace=SimpleNamespace(current_level=260))
+        context = SimpleNamespace(_state=None, guild_id=None, guild=None)
+        def interaction_at(level):
+            options = [] if level is None else [{"name": "시작레벨", "type": 4, "value": level}]
+            return SimpleNamespace(namespace=maple_bot.app_commands.Namespace(context, {}, options))
+        missing_level = interaction_at(None)
+        low_level = interaction_at(259)
+        high_level = interaction_at(260)
 
         missing_choices = await exp_coupon_autocomplete(missing_level, "")
         low_choices = await exp_coupon_autocomplete(low_level, "")
@@ -3325,6 +3521,7 @@ class ExpCouponTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(missing_choices, [])
         self.assertEqual([choice.value for choice in low_choices], ["EXP 교환권"])
         self.assertEqual({choice.value for choice in high_choices}, set(EXP_COUPONS))
+        self.assertEqual([choice.value for choice in await exp_coupon_autocomplete(interaction_at(270), "")], ["상급 EXP 교환권"])
 
     def test_command_offers_requested_burning_types(self) -> None:
         burning_parameter = next(
@@ -3735,7 +3932,8 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
         )
         interaction = SimpleNamespace(
             client=client,
-            response=SimpleNamespace(send_message=AsyncMock()),
+            response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
         )
         context = SimpleNamespace(bot=client, send=AsyncMock())
         expected = (
@@ -3749,7 +3947,7 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
             await maple_bot.patch_command.callback(interaction)
             await maple_bot.patch_prefix_command.callback(context)
 
-        interaction.response.send_message.assert_awaited_once_with(
+        interaction.followup.send.assert_awaited_once_with(
             expected, file=files[0], suppress_embeds=True
         )
         context.send.assert_awaited_once_with(
@@ -4592,20 +4790,20 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(current_embed.title, "☀️ 이번 주 썬데이 메이플 ☀️")
 
-    async def test_placeholder_events_report_no_active_event(self) -> None:
+    async def test_events_report_none_after_checking_official_posts(self) -> None:
         for command, event_name in (
             (hot_week_command, "핫위크"),
             (cube_sale_command, "큐브세일"),
         ):
             interaction = SimpleNamespace(
-                response=SimpleNamespace(send_message=AsyncMock())
+                client=SimpleNamespace(fetch_posts=AsyncMock(return_value=[])),
+                response=SimpleNamespace(defer=AsyncMock()),
+                followup=SimpleNamespace(send=AsyncMock()),
             )
             await command.callback(interaction)
-            embed = interaction.response.send_message.await_args.kwargs["embed"]
-            self.assertEqual(
-                embed.description,
-                f"현재 진행 중인 {event_name} 이벤트가 없습니다.",
-            )
+            embed = interaction.followup.send.await_args.kwargs["embed"]
+            self.assertIn("진행 중이거나 예정된", embed.description)
+            self.assertIn("https://www.nexon.com/maplestory/news", embed.description)
 
 
 class ChannelRecommendationTests(unittest.IsolatedAsyncioTestCase):

@@ -26,6 +26,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ai_score import calculate_ai_score
 from familiar_store import FamiliarExpectationStore
+from ranking_archive import archive_snapshots
 from ranking_store import (
     MIN_TRACKED_LEVEL,
     RankingStore,
@@ -1216,6 +1217,19 @@ def extract_miracle_time(source: str) -> list[dict]:
 
 
 def merge_patch_events(current: dict | None, updated: dict) -> dict:
+    # 본문 재수집이나 새 패치에서 같은 일정을 읽어도 종료 알림 기록을 보존합니다.
+    previous = current or {}
+    old_events = [previous.get("cash_shop_transfer") or {}, *previous.get("miracle_time", [])]
+    new_events = [updated.get("cash_shop_transfer") or {}, *updated.get("miracle_time", [])]
+    old, new = old_events[0], new_events[0]
+    if old.get("start_timestamp") == new.get("start_timestamp") and "ending_notified" in old:
+        new["ending_notified"] = dict(old["ending_notified"])
+    for new in new_events[1:]:
+        old = next((item for item in old_events[1:]
+                    if item["start_timestamp"] == new["start_timestamp"]
+                    and item.get("equipment") == new.get("equipment")), {})
+        if "ending_notified" in old:
+            new["ending_notified"] = dict(old["ending_notified"])
     # 같은 패치노트가 수정돼도 이미 보낸 미라클 알림 기록은 유지합니다.
     if current is None or current.get("post_id") != updated["post_id"]:
         return updated
@@ -1254,6 +1268,39 @@ def should_send_cash_shop_transfer(
         event["start_timestamp"] <= now_timestamp < alert_end
         and channel_id not in event.get("notified_channel_ids", [])
     )
+
+
+async def send_event_ending_reminders(client, event, channel_ids, label, lead_seconds, now_timestamp):
+    """종료 직전 구간에서 채널별 한 번 알리고, 성공 기록을 즉시 저장합니다."""
+    start, end = event["start_timestamp"], event["end_timestamp"]
+    if not max(start, end - lead_seconds) <= now_timestamp < end:
+        return
+    notified = event.setdefault("ending_notified", {}).setdefault(str(end), [])
+    for channel_id in sorted(channel_ids):
+        if channel_id in notified:
+            continue
+        channel = client.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            continue
+        equipment = event.get("equipment")
+        title = f"{label} ({equipment})" if equipment else label
+        # 늦게 재시작해도 '24시간 남음'처럼 틀린 시간을 쓰지 않고 실제 종료를 표시합니다.
+        message = f"⏰ **{title} 종료 임박**\n종료: <t:{end}:F> · <t:{end}:R>"
+        try:
+            if label == "캐시이동":
+                # /캐시이동과 같은 안내·이미지를 재사용하고 알림 제목만 구분합니다.
+                embed = build_cash_shop_transfer_embed(client.patch_events)
+                embed.title = f"{LADY_BLAIR_EMOJI} 캐시 보관함 이동 이벤트 · 종료 임박"
+                with discord.File(CASH_SHOP_TRANSFER_IMAGE_PATH) as attachment:
+                    await channel.send(embed=embed, file=attachment,
+                                       allowed_mentions=discord.AllowedMentions.none())
+            else:
+                await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            logging.exception("Failed to send %s ending reminder to %s.", label, channel_id)
+            continue
+        notified.append(channel_id)
+        client.persist_state()
 
 
 def ursus_daily_windows(
@@ -2727,14 +2774,123 @@ async def growth_potion_command(
     await interaction.response.send_message(embed=embed)
 
 
+class ExpCouponModal(discord.ui.Modal, title="EXP 쿠폰 수치 입력"):
+    def __init__(self, panel):
+        super().__init__(timeout=300)
+        self.panel = panel
+        values = panel.values or (None, 0, None)
+        self.level_input = discord.ui.TextInput(label="시작레벨 (200~299)", default=str(values[0]) if values[0] is not None else None, max_length=3)
+        self.percent_input = discord.ui.TextInput(label="현재 경험치 % (0 이상 100 미만)", default=str(values[1]), max_length=20)
+        self.count_input = discord.ui.TextInput(label="쿠폰 개수 (1~1억)", default=str(values[2]) if values[2] is not None else None, max_length=15)
+        for item in (self.level_input, self.percent_input, self.count_input):
+            self.add_item(item)
+
+    async def on_submit(self, interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
+        try:
+            level = int(self.level_input.value)
+            percent = float(self.percent_input.value)
+            count = int(self.count_input.value.replace(",", ""))
+            if not (200 <= level <= 299 and 0 <= percent < 100 and 1 <= count <= 100_000_000):
+                raise ValueError
+        except ValueError:
+            await interaction.response.send_message(
+                "레벨은 200~299, 경험치는 0 이상 100 미만, 개수는 1~1억의 숫자로 입력해주세요.", ephemeral=True
+            )
+            return
+        # 모두 검증한 뒤 한 번에 반영해 잘못된 입력이 기존 설정을 바꾸지 않게 합니다.
+        self.panel.values = (level, percent, count)
+        self.panel.update_options()
+        await interaction.response.edit_message(embed=self.panel.settings_embed(), view=self.panel)
+
+
+class ExpCouponView(UserOwnedView):
+    def __init__(self, user_id, burning):
+        super().__init__(user_id, timeout=600)
+        self.values = None
+        self.coupon = "EXP 교환권"
+        self.burning = burning if burning in EXP_COUPON_BURNING_OPTIONS else "X"
+        self.message = None
+        self.expired = False
+        self.update_options()
+
+    def update_options(self):
+        # 레벨을 바꾸면 사용할 수 있는 쿠폰만 남기고 선택값도 맞춥니다.
+        available = [name for name, (minimum, table) in EXP_COUPONS.items()
+                     if self.values is None or minimum <= self.values[0] < minimum + len(table)]
+        if self.coupon not in available:
+            self.coupon = available[0]
+        self.coupon_select.options = [discord.SelectOption(label=name, value=name, default=name == self.coupon) for name in available]
+        self.burning_select.options = [discord.SelectOption(label=name, value=name, default=name == self.burning) for name in EXP_COUPON_BURNING_OPTIONS]
+        self.calculate.disabled = self.values is None
+
+    def settings_embed(self):
+        numbers = "아래 **수치 입력** 버튼으로 시작레벨·경험치·개수를 입력해주세요."
+        if self.values:
+            level, percent, count = self.values
+            numbers = f"**시작레벨**　{level}\n**경험치**　{percent:g}%\n**개수**　{count:,}개"
+        embed = discord.Embed(title="EXP 쿠폰 계산 설정", description=f"**쿠폰**　{self.coupon}\n**버닝**　{self.burning}\n\n{numbers}", color=0xF1C40F)
+        embed.set_footer(text="설정 후 계산하기를 누르세요. 10분 동안 사용하지 않으면 만료됩니다.")
+        return embed
+
+    async def interaction_check(self, interaction):
+        if self.expired or self.is_finished():
+            await interaction.response.send_message("설정창이 만료되었습니다. /exp쿠폰을 다시 입력해주세요.", ephemeral=True)
+            return False
+        return await super().interaction_check(interaction)
+
+    @discord.ui.select(placeholder="쿠폰 종류 선택", row=0)
+    async def coupon_select(self, interaction, select):
+        self.coupon = select.values[0]
+        self.update_options()
+        await interaction.response.edit_message(embed=self.settings_embed(), view=self)
+
+    @discord.ui.select(placeholder="버닝 선택", row=1)
+    async def burning_select(self, interaction, select):
+        self.burning = select.values[0]
+        preferences = interaction.client.exp_coupon_burning_preferences
+        preferences[str(self.user_id)] = self.burning
+        interaction.client.persist_state()
+        self.update_options()
+        await interaction.response.edit_message(embed=self.settings_embed(), view=self)
+
+    @discord.ui.button(label="수치 입력", style=discord.ButtonStyle.primary, row=2)
+    async def numbers(self, interaction, button):
+        await interaction.response.send_modal(ExpCouponModal(self))
+
+    @discord.ui.button(label="계산하기", style=discord.ButtonStyle.success, row=2)
+    async def calculate(self, interaction, button):
+        if self.values is None:
+            await interaction.response.send_message("수치를 먼저 입력해주세요.", ephemeral=True)
+            return
+        try:
+            embed = build_exp_coupon_result(self.coupon, *self.values, self.burning)
+        except ValueError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def on_timeout(self):
+        self.expired = True
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(content="설정창이 만료되었습니다. /exp쿠폰으로 다시 열어주세요.", view=self)
+            except discord.HTTPException:
+                pass  # 이미 사라진 메시지는 수정할 수 없습니다.
+
+
 async def exp_coupon_autocomplete(
     interaction: discord.Interaction, current: str
 ) -> list[app_commands.Choice[str]]:
     """입력한 시작 레벨에서 실제 사용할 수 있는 EXP 교환권만 보여줍니다."""
-    level = getattr(interaction.namespace, "current_level", None)
+    level = getattr(interaction.namespace, "시작레벨", None)
     if not isinstance(level, int):
         return []
-    available = ["EXP 교환권"] if level < 260 else EXP_COUPONS
+    available = [name for name, (minimum, table) in EXP_COUPONS.items()
+                 if minimum <= level < minimum + len(table)]
     return [
         app_commands.Choice(name=name, value=name)
         for name in available
@@ -2768,10 +2924,10 @@ async def exp_coupon_autocomplete(
 @app_commands.autocomplete(coupon=exp_coupon_autocomplete)
 async def exp_coupon_command(
     interaction: discord.Interaction,
-    current_level: app_commands.Range[int, 200, 299],
-    coupon: str,
-    current_exp_percent: app_commands.Range[float, 0.0, 99.999],
-    count: app_commands.Range[int, 1, 100_000_000],
+    current_level: app_commands.Range[int, 200, 299] | None = None,
+    coupon: str | None = None,
+    current_exp_percent: app_commands.Range[float, 0.0, 99.999] | None = None,
+    count: app_commands.Range[int, 1, 100_000_000] | None = None,
     burning: app_commands.Choice[str] | None = None,
 ) -> None:
     # 버닝을 생략하면 이 사용자가 마지막으로 고른 값을 쓰고, 첫 사용은 X로 계산합니다.
@@ -2782,13 +2938,29 @@ async def exp_coupon_command(
         preferences[user_id] = burning_name
         interaction.client.persist_state()
 
+    if any(value is None for value in (current_level, coupon, current_exp_percent, count)):
+        panel = ExpCouponView(interaction.user.id, burning_name)
+        if current_level is not None and current_exp_percent is not None and count is not None:
+            panel.values = (current_level, current_exp_percent, count)
+        if coupon in EXP_COUPONS:
+            panel.coupon = coupon
+        panel.update_options()
+        await interaction.response.send_message(embed=panel.settings_embed(), view=panel, ephemeral=True)
+        panel.message = await interaction.original_response()
+        return
     try:
-        result_level, result_exp, gained_exp, used_count = calculate_exp_coupons(
-            coupon, current_level, current_exp_percent, count, burning_name
-        )
+        embed = build_exp_coupon_result(coupon, current_level, current_exp_percent, count, burning_name)
     except ValueError as error:
         await interaction.response.send_message(str(error), ephemeral=True)
         return
+    await interaction.response.send_message(embed=embed)
+
+
+def build_exp_coupon_result(coupon, current_level, current_exp_percent, count, burning_name):
+    """명령어 직접 입력과 버튼 계산이 같은 계산식·결과 표시를 사용합니다."""
+    result_level, result_exp, gained_exp, used_count = calculate_exp_coupons(
+        coupon, current_level, current_exp_percent, count, burning_name
+    )
 
     result_text = "Lv.300 (MAX)"
     if result_level < 300:
@@ -2813,7 +2985,7 @@ async def exp_coupon_command(
         color=0xF1C40F,
     )
     embed.set_footer(text="입력한 경험치 퍼센트를 실제 경험치로 환산한 근사 결과입니다.")
-    await interaction.response.send_message(embed=embed)
+    return embed
 
 
 @app_commands.command(name="에픽던전", description="에픽 던전 완료 후 경험치를 계산합니다.")
@@ -3773,7 +3945,7 @@ class PssbSimulatorView(UserOwnedView):
         await interaction.response.defer()
         try:
             rates = await interaction.client.fetch_pssb_rates()
-        except (aiohttp.ClientError, TimeoutError, ValueError):
+        except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError):
             logging.exception("Failed to reload the official PSSB rates.")
             await interaction.followup.send(
                 "공식 PSSB 확률표를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
@@ -3828,7 +4000,7 @@ async def pssb_command(
     await interaction.response.defer()
     try:
         rates = await interaction.client.fetch_pssb_rates()
-    except (aiohttp.ClientError, TimeoutError, ValueError):
+    except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError):
         logging.exception("Failed to load the official PSSB rates.")
         await interaction.followup.send(
             "공식 PSSB 확률표를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
@@ -3910,15 +4082,21 @@ async def cash_shop_command(interaction: discord.Interaction) -> None:
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def patch_command(interaction: discord.Interaction) -> None:
-    latest = await latest_patch_post(interaction.client)
+    # 공지·이미지 다운로드 전에 Discord에 대기 응답을 보내 시간 제한을 지킵니다.
+    await interaction.response.defer()
+    try:
+        latest = await latest_patch_post(interaction.client)
+    except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError):
+        logging.exception("Failed to load the official patch notes.")
+        latest = None
     if latest is None:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "공식 패치노트를 찾지 못했습니다. 잠시 후 다시 시도해주세요.",
             ephemeral=True,
         )
         return
     content, file = await patch_message(interaction.client, latest)
-    await interaction.response.send_message(
+    await interaction.followup.send(
         content, file=file, suppress_embeds=True
     )
 
@@ -4126,7 +4304,9 @@ async def fetch_live_ranking_profile(
     return profile
 
 
-async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
+async def fetch_cached_ranking_profile(
+    client, nickname: str, *, refresh: bool = False, stored_only: bool = False
+) -> tuple:
     now = asyncio.get_running_loop().time()
     cache = getattr(client, "_ranking_profile_cache", None)
     if cache is None:
@@ -4153,7 +4333,7 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
 
     cached = cache.get(key)
     cached_is_fresh = (
-        cached is not None and now - cached[0] < RANKING_PROFILE_CACHE_SECONDS
+        not refresh and cached is not None and now - cached[0] < RANKING_PROFILE_CACHE_SECONDS
     )
     if cached_is_fresh:
         cached = (cached[0], add_collected_representatives(cached[1]))
@@ -4163,7 +4343,7 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
 
     stored = (
         ranking_store.get_ranking_profile(nickname)
-        if ranking_store is not None
+        if not refresh and ranking_store is not None
         and hasattr(ranking_store, "get_ranking_profile")
         else None
     )
@@ -4182,20 +4362,40 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
     if stored is not None:
         character = stored[0]
         fetch_character_image = getattr(client, "fetch_character_image", None)
-        character_image = (
-            await fetch_character_image(character.get("characterImgURL"))
-            if fetch_character_image is not None
-            else None
-        )
+        try:
+            character_image = (
+                await fetch_character_image(character.get("characterImgURL"))
+                if fetch_character_image is not None else None
+            )
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            # 외형 이미지를 못 받아도 저장된 랭킹 카드는 보여줍니다.
+            character_image = None
         profile = (*stored, character_image)
+    elif stored_only:
+        # 프로필 캐시가 없어도 수집된 날짜별 값만으로 카드를 만들 수 있습니다.
+        snapshot = ranking_store.get_latest_snapshot(nickname)
+        character = {"characterName": nickname, **snapshot} if snapshot else None
+        profile = (character, None, None, *representatives, None)
     else:
         # 명령어는 대표 캐릭터 전용 유니온·업적 조회를 기다리지 않습니다.
         # 이 두 값은 우선 수집기가 뒤에서 확인해 저장합니다.
+        scan_date = current_ranking_scan_date()
         profile = await fetch_live_ranking_profile(
             client,
             nickname,
             include_representative_rankings=False,
         )
+        if refresh and (profile[0] is None or profile[0].get("level", 0) < MIN_TRACKED_LEVEL):
+            # 일시적인 미검색 결과로 마지막 정상 캐시를 덮지 않습니다.
+            return profile
+        # 공식 사이트에서 새로 받은 값만 기록합니다. 캐시 재사용은 저장하지 않습니다.
+        if (
+            profile[0] is not None
+            and profile[0].get("level", 0) >= MIN_TRACKED_LEVEL
+            and ranking_store is not None
+        ):
+            # 요청을 기다리는 동안 수집기가 채운 당일·이후 기록은 덮어쓰지 않습니다.
+            ranking_store.save_snapshot(profile[0], scan_date, only_missing=True)
         profile = add_collected_representatives(profile)
         if (
             profile[0] is not None
@@ -4218,6 +4418,45 @@ async def fetch_cached_ranking_profile(client, nickname: str) -> tuple:
             cache.pop(cached_key)
     cache[key] = (now, profile)
     return profile
+
+
+async def fetch_daily_ranking_profile(client, nickname: str) -> tuple[tuple, bool]:
+    """오늘 미수집 캐릭터만 새로 조회하고, 실패하면 저장값과 실패 여부를 반환합니다."""
+    pending = getattr(client, "_ranking_daily_requests", None)
+    if pending is None:
+        pending = client._ranking_daily_requests = {}
+    key = (nickname.casefold(), current_ranking_scan_date())
+
+    async def load():
+        snapshot = client.ranking_store.get_latest_snapshot(nickname)
+        if snapshot and snapshot["snapshot_date"] >= key[1].isoformat():
+            return await fetch_cached_ranking_profile(client, nickname, stored_only=True), False
+        failed = False
+        try:
+            profile = await asyncio.wait_for(
+                fetch_cached_ranking_profile(client, nickname, refresh=True), timeout=45
+            )
+            if profile[0] is not None and profile[0].get("level", 0) >= MIN_TRACKED_LEVEL:
+                return profile, False
+        except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, RankingRateLimited, ValueError, KeyError, OSError):
+            logging.exception(
+                "ranking_lookup phase=refresh_failed name=%s date=%s utc=%s",
+                nickname, key[1], datetime.now(timezone.utc).isoformat(),
+            )
+            failed = True
+            profile = (None,) * 6
+        fallback = await fetch_cached_ranking_profile(client, nickname, stored_only=True)
+        return (fallback, True) if fallback[0] is not None else (profile, failed)
+
+    if key not in pending:
+        task = pending[key] = asyncio.create_task(load())
+        def finished(done):
+            pending.pop(key, None)
+            if not done.cancelled():
+                done.exception()  # 모든 사용자가 취소한 경우에도 작업 예외를 회수합니다.
+        task.add_done_callback(finished)
+    # 한 사용자의 취소가 같은 캐릭터를 기다리는 다른 사용자에게 전파되지 않습니다.
+    return await asyncio.shield(pending[key])
 
 
 @app_commands.command(
@@ -4300,6 +4539,13 @@ async def ranking_command(
         getattr(client, "_ranking_interactive_requests", 0) + 1
     )
     try:
+        snapshot = client.ranking_store.get_latest_snapshot(nickname)
+        if snapshot is None or snapshot["snapshot_date"] < current_ranking_scan_date().isoformat():
+            await interaction.followup.send(
+                "오늘 기록이 없어 최신 정보를 조회하고 있습니다. (최대 45초)",
+                ephemeral=True,
+            )
+        profile, refresh_failed = await fetch_daily_ranking_profile(client, nickname)
         (
             character,
             world_character,
@@ -4307,16 +4553,28 @@ async def ranking_command(
             legion,
             achievement,
             character_image,
-        ) = await asyncio.wait_for(
-            fetch_cached_ranking_profile(client, nickname),
-            timeout=45,
-        )
+        ) = profile
         if character is None:
             await interaction.followup.send(
+                "최신 정보를 가져오지 못했고 저장된 기록도 없습니다. 잠시 후 다시 시도해주세요."
+                if refresh_failed else
                 f"**{discord.utils.escape_markdown(nickname)}** 캐릭터를 찾지 못했습니다.",
                 ephemeral=True,
             )
             return
+        # 예전 프로필보다 수집 기록을 먼저 적용해 새로 260에 진입한 캐릭터도 표시합니다.
+        snapshot = client.ranking_store.get_latest_snapshot(character["characterName"])
+        scan_date = snapshot["snapshot_date"] if snapshot else "기준일 확인 불가"
+        if snapshot:
+            if any(
+                character.get(key) != snapshot[key]
+                for key in ("level", "exp", "rank", "worldID")
+            ):
+                # 다른 시점의 월드 순위를 최신 경험치의 순위처럼 표시하지 않습니다.
+                world_character = None
+            if character["worldID"] != snapshot["worldID"]:
+                world_total_count = None
+            character = {**character, **snapshot}
         if character.get("level", 0) < MIN_TRACKED_LEVEL:
             await interaction.followup.send(
                 f"**{discord.utils.escape_markdown(character['characterName'])}** "
@@ -4328,7 +4586,7 @@ async def ranking_command(
         interaction.client.ranking_store.save_default_character(
             interaction.user.id, character["characterName"]
         )
-    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError):
+    except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError, KeyError):
         logging.exception("Failed to load the official GMS character ranking.")
         await interaction.followup.send(
             "공식 캐릭터 랭킹을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
@@ -4338,15 +4596,8 @@ async def ranking_command(
     finally:
         client._ranking_interactive_requests -= 1
 
-    # 서버 랭킹과 메이플 종합 지수도 같은 최신 조회값을 쓰도록 함께 저장합니다.
-    if legion is not None:
-        character["legionLevel"] = legion["legionLevel"]
-        character["legionRank"] = legion["rank"]
-    if achievement is not None:
-        character["achievementScore"] = achievement["score"]
-        character["achievementRank"] = achievement["rank"]
-    scan_date = current_ranking_scan_date()
-    gains = interaction.client.ranking_store.save_snapshot(character, scan_date)
+    # 조회는 수집 기록을 바꾸지 않고 경험치 변화만 읽습니다.
+    gains = client.ranking_store.get_gains(character["characterName"], limit=30)
     refresh_requests = getattr(client, "_ranking_profile_refresh_requests", set())
     refresh_key = character["characterName"].casefold()
     if refresh_key in refresh_requests:
@@ -4381,6 +4632,7 @@ async def ranking_command(
     )
     filename = "ranking-card.png"
     await interaction.followup.send(
+        content="최신 조회에 실패하여 기존 기록을 표시합니다. 카드의 기록 날짜를 확인해주세요." if refresh_failed else None,
         file=discord.File(
             ranking_image,
             filename=filename,
@@ -4396,7 +4648,7 @@ async def server_status_command(interaction: discord.Interaction) -> None:
     await interaction.response.defer()
     try:
         statuses = await interaction.client.fetch_server_status()
-    except (aiohttp.ClientError, TimeoutError, ValueError):
+    except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError):
         logging.exception("Failed to load the official MapleStory server status.")
         await interaction.followup.send(
             "공식 서버 상태를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
@@ -4406,32 +4658,160 @@ async def server_status_command(interaction: discord.Interaction) -> None:
     await interaction.followup.send(embed=build_server_status_embed(statuses))
 
 
+def extract_event_notice(title: str, source: str, kind: str) -> tuple[list[dict], bool]:
+    """공식 보상 표·판매 기간만 읽고 알 수 없는 형식은 확인 필요로 남깁니다."""
+    entries = []
+    uncertain = False
+    text = html_to_text(source)
+    date_pattern = r"[A-Z][a-z]+ \d{1,2}, \d{4}"
+    if kind == "hot_week":
+        tables = [table for table in re.findall(r"<table\b.*?</table>", source, re.I | re.S)
+                  if re.search(r"Hot Week", html_to_text(table), re.I)]
+        reward_rows = []
+        for table in tables:
+            for row in re.findall(r"<tr\b.*?</tr>", table, re.I | re.S):
+                cells = re.findall(r"<td\b[^>]*>(.*?)</td>", row, re.I | re.S)
+                if len(cells) == 2:
+                    reward_rows.append(cells)
+        if not tables:
+            # 이전 공지는 표 대신 날짜별 중첩 목록을 사용합니다.
+            for row in re.findall(r"<li>\s*<strong>[^<]*Hot Week Box.*?</ul>", source, re.I | re.S):
+                reward_rows.append((row.split("</strong>", 1)[0], row))
+        if not reward_rows:
+            return [], bool(re.search(r"Hot Weeks?", title, re.I))
+        # 상자 소멸 시각(오전 9시)과 보상 수령 기간(UTC 자정~다음 자정)은 다릅니다.
+        if not re.search(r"start at 12:00 AM UTC.*?end at 12:00 AM UTC.*?following day", text, re.I):
+            return [], True
+        for cells in reward_rows:
+            days = re.findall(date_pattern, html_to_text(cells[0]))
+            for day in days:
+                try:
+                    start = int(datetime.strptime(day, "%B %d, %Y").replace(tzinfo=timezone.utc).timestamp())
+                except ValueError:
+                    uncertain = True
+                    continue
+                entries.append({"start": start, "end": start + 86400,
+                                "title": "핫위크 보상", "detail": html_to_text(cells[1])})
+        return entries, uncertain or not entries
+
+    special = r"violet|unicube|equality|bonus bright|black cube"
+    dedicated_sale = bool(re.search(r"cube.*(?:sale|deal)|(?:sale|deal).*cube", title, re.I))
+    excluded_sale = False
+    sections = re.split(r"<h[12]\b[^>]*>(.*?)</h[12]>", source, flags=re.I | re.S)
+    for heading, body in zip(sections[1::2], sections[2::2]):
+        heading = html_to_text(heading)
+        if re.search(special, heading, re.I):
+            excluded_sale = True
+            continue
+        if not re.search(r"cube", heading, re.I):
+            continue
+        if not re.search(r"glowing|bright", heading, re.I):
+            continue
+        # 일반 큐브 상시 판매가 아니라 할인/행사임을 확인할 수 있는 부분만 사용합니다.
+        if not (dedicated_sale or re.search(r"sale|discount|deal", heading, re.I)
+                or re.search(r"line-through|<(?:s|del)>", body, re.I)):
+            continue
+        section_text = html_to_text(body)
+        clock = date_pattern + r" (?:at )?\d{1,2}:\d{2} [AP]M"
+        period = re.search(
+            r"\(UTC\s*([+-]\d{1,2})\):\s*(?:[A-Z][a-z]+, )?(" + clock
+            + r")\s*[-–]\s*(?:[A-Z][a-z]+, )?(" + clock + r")", section_text
+        )
+        try:
+            if period is None:
+                raise ValueError("Unknown sale period")
+            offset, start_text, end_text = period.groups()
+            zone = timezone(timedelta(hours=int(offset)))
+            start, end = [int(datetime.strptime(value.replace(" at ", " "), "%B %d, %Y %I:%M %p").replace(tzinfo=zone).timestamp())
+                          for value in (start_text, end_text)]
+            if end < start:
+                raise ValueError("Reversed sale period")
+        except ValueError:
+            uncertain = True
+            continue
+        detail = re.sub(r"^.*?Available", "Available", section_text, count=1)
+        entries.append({"start": start, "end": end + 60, "title": heading, "detail": detail})
+    if dedicated_sale and not re.search(special, title, re.I) and not entries and not excluded_sale:
+        uncertain = True
+    return entries, uncertain
+
+
+async def fetch_event_notices(client, kind: str) -> tuple[list[dict], bool]:
+    now = asyncio.get_running_loop().time()
+    cache = getattr(client, "_event_notice_cache", {})
+    if kind in cache and now - cache[kind][0] < 300:
+        return cache[kind][1]
+    posts = await client.fetch_posts()
+    candidates = []
+    for post in posts:
+        if post.get("isMSCW"):
+            continue
+        words = post["name"] + " " + post.get("summary", "")
+        matches = re.search(r"hot weeks?" if kind == "hot_week" else r"cube", words, re.I)
+        if matches:
+            candidates.append(post)
+    # 제목에 이벤트가 없는 최신 패치·캐시샵 본문도 확인합니다.
+    for predicate in (is_patch_notes, is_cash_shop_update):
+        latest = next((post for post in posts if not post.get("isMSCW") and predicate(post)), None)
+        if latest is not None and latest not in candidates:
+            candidates.append(latest)
+    entries, uncertain = [], False
+    for post in candidates:
+        detail = await client.fetch_post_detail(post["id"])
+        parsed, unknown = extract_event_notice(post["name"], detail["body"], kind)
+        uncertain |= unknown
+        for entry in parsed:
+            entries.append({**entry, "url": post_url(post), "image": thumbnail_url(post) if post.get("imageThumbnail") else None})
+    result = (entries, uncertain)
+    cache[kind] = (now, result)
+    client._event_notice_cache = cache
+    return result
+
+
+def build_event_notice_embed(kind, entries, uncertain, now_timestamp):
+    label, title, color = ("핫위크", "🔥 핫위크", 0xE67E22) if kind == "hot_week" else ("큐브세일", "🧊 큐브세일", 0x5DADE2)
+    active = sorted((entry for entry in entries if entry["end"] > now_timestamp), key=lambda entry: entry["start"])
+    description = "공식 공지에 게시된 일정입니다. 상세 조건과 전체 내용은 원문을 확인해주세요."
+    if not active:
+        description = f"확인한 공식 공지에 진행 중이거나 예정된 {label} 이벤트가 없습니다."
+    if uncertain:
+        description = "일부 공식 공지의 일정 형식을 확인하지 못했습니다. 이벤트 유무는 원문을 확인해주세요."
+    embed = discord.Embed(title=title, description=f"{description}\n[공식 공지 확인]({SITE_URL})", color=color)
+    for entry in active[:10]:
+        status = "진행 중" if entry["start"] <= now_timestamp else "예정"
+        embed.add_field(name=f"{status} · {entry['title']}"[:256], value=(
+            f"<t:{entry['start']}:f> ~ <t:{entry['end']}:f>\n"
+            f"{discord.utils.escape_markdown(entry['detail'])[:350]}\n[원문 보기]({entry['url']})"
+        ), inline=False)
+    if active and active[0].get("image"):
+        embed.set_image(url=active[0]["image"])
+    embed.set_footer(text="공식 공지 조회 · 최대 5분 캐시 · 상세 내용은 원문 언어 · 최대 10개 일정 표시")
+    return embed
+
+
+async def send_event_notice(interaction, kind):
+    await interaction.response.defer()
+    try:
+        entries, uncertain = await asyncio.wait_for(fetch_event_notices(interaction.client, kind), timeout=45)
+        embed = build_event_notice_embed(kind, entries, uncertain, int(datetime.now(timezone.utc).timestamp()))
+    except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError, KeyError):
+        logging.exception("Failed to load official %s events.", kind)
+        embed = discord.Embed(description=f"공식 이벤트 일정을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.\n[공식 공지 확인]({SITE_URL})")
+    await interaction.followup.send(embed=embed)
+
+
 @app_commands.command(name="핫위크", description="핫위크 일정 안내를 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def hot_week_command(interaction: discord.Interaction) -> None:
-    # 실제 패치노트 수집을 연결하기 전까지 가짜 날짜나 보상을 안내하지 않습니다.
-    embed = discord.Embed(
-        title="🔥 핫위크",
-        description="현재 진행 중인 핫위크 이벤트가 없습니다.",
-        color=0xE67E22,
-    )
-    embed.set_author(name="MapleStory | HOT WEEK")
-    await interaction.response.send_message(embed=embed)
+    await send_event_notice(interaction, "hot_week")
 
 
 @app_commands.command(name="큐브세일", description="큐브세일 일정 안내를 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def cube_sale_command(interaction: discord.Interaction) -> None:
-    # 실제 일정 수집을 연결하기 전까지 가짜 날짜나 할인율을 안내하지 않습니다.
-    embed = discord.Embed(
-        title="🧊 큐브세일",
-        description="현재 진행 중인 큐브세일 이벤트가 없습니다.",
-        color=0x5DADE2,
-    )
-    embed.set_author(name="MapleStory | CUBE SALE")
-    await interaction.response.send_message(embed=embed)
+    await send_event_notice(interaction, "cube_sale")
 
 
 @app_commands.command(name="미라클큐브", description="저장된 미라클 타임 일정을 보여줍니다.")
@@ -4469,6 +4849,68 @@ INFO_CHANNEL_TYPE_CHOICES = [
     app_commands.Choice(name="시간", value=INFO_TIME),
     app_commands.Choice(name="환율", value=INFO_EXCHANGE),
 ]
+
+
+@app_commands.command(name="알림설정확인", description="현재 서버의 알림·정보 채널 설정을 확인합니다.")
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+async def alert_settings_command(interaction: discord.Interaction) -> None:
+    # 명령어 표시 권한이 바뀌더라도 실제 조회는 서버 관리자만 허용합니다.
+    guild = interaction.guild
+    if guild is None or not interaction.permissions.administrator:
+        await interaction.response.send_message(
+            "이 명령어는 서버 관리자만 사용할 수 있습니다.", ephemeral=True
+        )
+        return
+
+    lines = [
+        "**이 서버의 알림 설정**",
+        "현재 서버에서 확인 가능한 채널만 표시합니다. ON은 저장된 설정이며 전송 성공을 보장하지 않습니다.",
+    ]
+    for kind, label in (
+        (ALERT_NEWS, "공지 알림"),
+        (ALERT_SUNNY_DAY, "썬데이 당일 알림"),
+        (ALERT_SUNNY_LIST, "썬데이 목록 알림"),
+        (ALERT_MIRACLE_TIME, "미라클 타임 알림"),
+        (ALERT_CASH_TRANSFER, "캐시이동 알림"),
+        (ALERT_URSUS, "우르스 알림"),
+        (ALERT_SERVER, "서버 오픈 알림"),
+        (ALERT_CUBE_SALE, "큐브세일 알림 (채널 예약만 지원)"),
+        (ALERT_EXCHANGE_LOG, "환율 기록 알림"),
+        (INFO_TIME, "시간 정보 채널"),
+        (INFO_UTC, "UTC 정보 채널"),
+        (INFO_EXCHANGE, "환율 정보 채널"),
+    ):
+        lines.append(f"\n**{label}**")
+        channel_lines = []
+        for channel_id in sorted(interaction.client.alert_channels.get(kind, ())):
+            # 전체 서버 설정에서 현재 서버 소속임을 확인한 채널만 골라냅니다.
+            channel = guild.get_channel(channel_id)
+            if channel is None:
+                continue
+            line = f"ON · {channel.mention}"
+            if kind == ALERT_SERVER:
+                role_id = interaction.client.server_alert_roles.get(str(channel_id))
+                role = guild.get_role(role_id) if role_id is not None else None
+                role_text = role.mention if role else "미설정 또는 확인 불가"
+                line += f" · 역할: {role_text}"
+            channel_lines.append(line)
+        lines.extend(channel_lines or ["등록된 채널 없음"])
+
+    # 채널이 많아도 메시지 길이 제한을 넘지 않도록 나누고, 역할 알림은 울리지 않습니다.
+    pages = [""]
+    for line in lines:
+        if len(pages[-1]) + len(line) + 1 > 1900:
+            pages.append("")
+        pages[-1] += line + "\n"
+    await interaction.response.send_message(
+        pages[0], ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
+    )
+    for page in pages[1:]:
+        await interaction.followup.send(
+            page, ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
+        )
 
 
 async def run_alert_setting_command(
@@ -4535,7 +4977,7 @@ async def sunny_list_alert_command(
     )
 
 
-@app_commands.command(name="미라클큐브알림", description="미라클 타임 당일 알림 채널을 설정합니다.")
+@app_commands.command(name="미라클큐브알림", description="미라클 타임 시작·종료 전 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -4548,11 +4990,11 @@ async def miracle_time_alert_command(
     action: app_commands.Choice[str],
 ) -> None:
     await run_alert_setting_command(
-        interaction, channel, action, ALERT_MIRACLE_TIME, "미라클 타임 당일 알림"
+        interaction, channel, action, ALERT_MIRACLE_TIME, "미라클 타임 시작·종료 전 알림"
     )
 
 
-@app_commands.command(name="캐시이동알림", description="캐시이동 당일 알림 채널을 설정합니다.")
+@app_commands.command(name="캐시이동알림", description="캐시이동 시작·종료 전 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -4565,7 +5007,7 @@ async def cash_shop_transfer_alert_command(
     action: app_commands.Choice[str],
 ) -> None:
     await run_alert_setting_command(
-        interaction, channel, action, ALERT_CASH_TRANSFER, "캐시이동 당일 알림"
+        interaction, channel, action, ALERT_CASH_TRANSFER, "캐시이동 시작·종료 전 알림"
     )
 
 
@@ -4822,6 +5264,13 @@ class MapleNewsBot(commands.Bot):
         ).lower() in {"1", "true", "yes"}
         self._last_ranking_backup_scan_date: date | None = None
         self._ranking_backup_task: asyncio.Task | None = None
+        self._ranking_archive_task: asyncio.Task | None = None
+        self._last_ranking_archive_scan_date: date | None = None
+        self._ranking_archive_path = Path(os.getenv(
+            "RANKING_ARCHIVE_PATH", str(RANKING_BACKUP_PATH.parent / "snapshots")
+        ))
+        replica_path = os.getenv("RANKING_ARCHIVE_REPLICA_PATH")
+        self._ranking_archive_replica_path = Path(replica_path) if replica_path else None
         self._ranking_scan_date = None
         self._ranking_populations_ready_date = None
         self._ranking_active_pages_ready_date = None
@@ -4885,6 +5334,7 @@ class MapleNewsBot(commands.Bot):
             cube_sale_command,
             miracle_time_command,
             server_status_command,
+            alert_settings_command,
             news_alert_command,
             sunny_day_alert_command,
             sunny_list_alert_command,
@@ -4966,7 +5416,7 @@ class MapleNewsBot(commands.Bot):
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=45)
-        except TimeoutError:
+        except (asyncio.TimeoutError, TimeoutError):
             process.kill()
             await process.wait()
             return "백필 서버가 45초 안에 응답하지 않았습니다."
@@ -5023,10 +5473,18 @@ class MapleNewsBot(commands.Bot):
             self.collect_rankings.start()
         if not self.check_backfill_alert.is_running():
             self.check_backfill_alert.start()
+        if self._ranking_import_only and not self.check_ranking_integrity.is_running():
+            self.check_ranking_integrity.start()
         if not self.detect_nickname_changes_daily.is_running():
             self.detect_nickname_changes_daily.start()
 
     async def close(self) -> None:
+        self.check_ranking_integrity.cancel()
+        # 보관 중 종료되어도 검증·DB 정리 작업이 끝나도록 기다립니다.
+        self.collect_rankings.cancel()
+        archive_task = getattr(self, "_ranking_archive_task", None)
+        if archive_task is not None:
+            await asyncio.shield(archive_task)
         if self.session is not None:
             await self.session.close()
         await super().close()
@@ -5045,6 +5503,29 @@ class MapleNewsBot(commands.Bot):
             await application.owner.send(message)
         except discord.HTTPException:
             logging.exception("Failed to send a problem DM to the bot owner.")
+
+    @tasks.loop(minutes=5)
+    async def check_ranking_integrity(self) -> None:
+        from ranking_audit import KINDS, acknowledge_report, check_collection
+
+        try:
+            # DB 집계는 별도 스레드에서 실행해 Discord 응답을 막지 않습니다.
+            reports = await asyncio.to_thread(check_collection, self.ranking_store)
+            for report in reports:
+                issues = json.loads(report["issues"])
+                logging.info("ranking_audit date=%s type=%s checked_at=%s counts=%s issues=%s",
+                             report["day"], report["kind"], report["checked_at"],
+                             report["counts"], report["issues"])
+                if issues:
+                    application = await self.application_info()
+                    message = (f"⚠️ 랭킹 수집 검사 ({report['day']} UTC · {KINDS[report['kind']]})\n"
+                               + "\n".join(issues))
+                    await application.owner.send(message[:1900], allowed_mentions=discord.AllowedMentions.none())
+                # 전송 성공 여부를 DB에 보존해 재시작 때 같은 경고를 반복하지 않습니다.
+                await asyncio.to_thread(acknowledge_report, self.ranking_store,
+                                        report["day"], report["kind"])
+        except (OSError, ValueError, sqlite3.Error, discord.HTTPException):
+            logging.exception("ranking_audit_error checked_at=%s", datetime.now(timezone.utc).isoformat())
 
     @tasks.loop(minutes=1)
     async def check_backfill_alert(self) -> None:
@@ -5198,7 +5679,7 @@ class MapleNewsBot(commands.Bot):
             ) as response:
                 response.raise_for_status()
                 return await response.read()
-        except (aiohttp.ClientError, TimeoutError):
+        except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError):
             logging.warning("Failed to download ranking character image: %s", url)
             return None
 
@@ -5244,6 +5725,25 @@ class MapleNewsBot(commands.Bot):
                 )
             response.raise_for_status()
             return await response.json()
+
+    async def archive_ranking_history(self, scan_date: date) -> None:
+        """최근 90개 기준일은 DB에 두고, 오래된 기록은 두 보관본 검증 후 정리합니다."""
+        replica_path = getattr(self, "_ranking_archive_replica_path", None)
+        if replica_path is None:
+            logging.warning("ranking_archive phase=skipped date=%s reason=replica_not_configured", scan_date)
+            return
+        try:
+            rows = await asyncio.to_thread(
+                archive_snapshots, self.ranking_store,
+                scan_date - timedelta(days=89),
+                self._ranking_archive_path, replica_path,
+            )
+            logging.info("ranking_archive phase=completed date=%s archived_rows=%s utc=%s",
+                         scan_date, rows, datetime.now(timezone.utc).isoformat())
+        except Exception:
+            # 복사·복원 검증 실패 시 해당 묶음 원본은 남기고 다음 기준일에 다시 시도합니다.
+            logging.exception("ranking_archive phase=failed date=%s utc=%s",
+                              scan_date, datetime.now(timezone.utc).isoformat())
 
     async def backup_ranking_database(self) -> None:
         """대용량 DB 백업이 일일 랭킹 수집을 멈추지 않게 별도 스레드에서 실행합니다."""
@@ -5563,7 +6063,7 @@ class MapleNewsBot(commands.Bot):
                         await self.fetch_usd_exchange_rate()
                     )
                 await channel.edit(name=name, reason=f"{label} 자동 갱신 ON")
-            except (aiohttp.ClientError, discord.HTTPException, TimeoutError, ValueError):
+            except (aiohttp.ClientError, discord.HTTPException, asyncio.TimeoutError, TimeoutError, ValueError):
                 logging.exception("Failed to enable %s for channel %s.", label, channel.id)
                 await interaction.followup.send(
                     "채널 이름을 갱신하지 못했습니다. 권한이나 환율 페이지 상태를 확인해주세요.",
@@ -5691,7 +6191,7 @@ class MapleNewsBot(commands.Bot):
                     embed=build_exchange_rate_log_embed(self.exchange_log)
                 )
                 self.exchange_log["message_ids"][str(channel.id)] = message.id
-            except (aiohttp.ClientError, discord.HTTPException, TimeoutError, ValueError):
+            except (aiohttp.ClientError, discord.HTTPException, asyncio.TimeoutError, TimeoutError, ValueError):
                 logging.exception("Failed to enable exchange log for %s.", channel.id)
                 await interaction.followup.send(
                     "선택한 채널에 환율 기록을 보내지 못했습니다.", ephemeral=True
@@ -6011,6 +6511,10 @@ class MapleNewsBot(commands.Bot):
         now_timestamp = int(datetime.now(timezone.utc).timestamp())
         state_changed = False
         for entry in self.patch_events.get("miracle_time", []):
+            await send_event_ending_reminders(
+                self, entry, self.alert_channels[ALERT_MIRACLE_TIME],
+                "미라클 타임", 3600, now_timestamp,
+            )
             for channel_id in sorted(self.alert_channels[ALERT_MIRACLE_TIME]):
                 if not should_send_miracle_time(entry, channel_id, now_timestamp):
                     continue
@@ -6050,6 +6554,10 @@ class MapleNewsBot(commands.Bot):
             return
         now_timestamp = int(datetime.now(timezone.utc).timestamp())
         state_changed = False
+        await send_event_ending_reminders(
+            self, event, self.alert_channels[ALERT_CASH_TRANSFER],
+            "캐시이동", 86_400, now_timestamp,
+        )
         for channel_id in sorted(self.alert_channels[ALERT_CASH_TRANSFER]):
             if not should_send_cash_shop_transfer(event, channel_id, now_timestamp):
                 continue
@@ -6123,7 +6631,7 @@ class MapleNewsBot(commands.Bot):
         # API 오류는 점검으로 저장하지 않고 다음 1분 확인 때 다시 시도합니다.
         try:
             statuses = await self.fetch_server_status()
-        except (aiohttp.ClientError, TimeoutError, ValueError) as error:
+        except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError) as error:
             logging.warning("MapleStory server status check failed: %s", error)
             return
 
@@ -6206,7 +6714,7 @@ class MapleNewsBot(commands.Bot):
             return
         try:
             rate = await self.fetch_usd_exchange_rate()
-        except (aiohttp.ClientError, TimeoutError, ValueError) as error:
+        except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError) as error:
             logging.warning("USD/KRW exchange rate check failed: %s", error)
             return
         if self.alert_channels[INFO_EXCHANGE]:
@@ -6264,15 +6772,17 @@ class MapleNewsBot(commands.Bot):
             return
 
         scan_date = current_ranking_scan_date()
+        archive_task = getattr(self, "_ranking_archive_task", None)
+        if getattr(self, "_last_ranking_archive_scan_date", None) != scan_date and (
+            archive_task is None or archive_task.done()
+        ):
+            # 대량 압축은 별도 작업으로 실행해 수집과 Discord 응답을 막지 않습니다.
+            self._ranking_archive_task = asyncio.create_task(self.archive_ranking_history(scan_date))
+            self._last_ranking_archive_scan_date = scan_date
         if self._ranking_scan_date != scan_date:
             self._ranking_scan_date = scan_date
             self._ranking_world_offset = 0
             self._completed_ranking_world_ids.clear()
-            # 같은 DELETE를 매 수집 배치마다 반복하지 않고 날짜가 바뀔 때 한 번만 합니다.
-            await asyncio.to_thread(
-                self.ranking_store.remove_old_snapshots,
-                scan_date - timedelta(days=30),
-            )
             logging.warning(
                 "ranking_main_start phase=cycle date=%s worlds=%s",
                 scan_date,
@@ -6314,7 +6824,7 @@ class MapleNewsBot(commands.Bot):
                 self.pause_ranking_collection(error)
             except (
                 aiohttp.ClientError,
-                TimeoutError,
+                asyncio.TimeoutError, TimeoutError,
                 ValueError,
                 KeyError,
                 OSError,
@@ -6341,7 +6851,7 @@ class MapleNewsBot(commands.Bot):
                 return
             except (
                 aiohttp.ClientError,
-                TimeoutError,
+                asyncio.TimeoutError, TimeoutError,
                 ValueError,
                 KeyError,
                 OSError,
@@ -6400,7 +6910,7 @@ class MapleNewsBot(commands.Bot):
                 self.pause_ranking_collection(error)
             except (
                 aiohttp.ClientError,
-                TimeoutError,
+                asyncio.TimeoutError, TimeoutError,
                 ValueError,
                 KeyError,
                 OSError,
@@ -6493,7 +7003,7 @@ class MapleNewsBot(commands.Bot):
                 self.pause_ranking_collection(error)
             except (
                 aiohttp.ClientError,
-                TimeoutError,
+                asyncio.TimeoutError, TimeoutError,
                 ValueError,
                 KeyError,
                 OSError,
@@ -6566,7 +7076,7 @@ class MapleNewsBot(commands.Bot):
             ) % len(active_world_ids)
         except (
             aiohttp.ClientError,
-            TimeoutError,
+            asyncio.TimeoutError, TimeoutError,
             ValueError,
             OSError,
             sqlite3.Error,

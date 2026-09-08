@@ -24,3 +24,8 @@ maplebot-backfill-level-*.jsonl
 maplebot-backfill-current-level
 __pycache__/
 *.py[cod]
+
+# 랭킹 압축 보관본·미완성 파일·복원한 조회용 DB
+*.jsonl.gz
+*.jsonl.gz.partial-*
+ranking-archive-restored.db*
