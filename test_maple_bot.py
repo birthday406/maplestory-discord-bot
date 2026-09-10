@@ -75,7 +75,7 @@ from maple_bot import (
     current_sunny_sunday_entry,
     current_ursus_window,
     create_ranking_history_image,
-    epic_dungeon_command,
+    epic_dungeon_calculator as epic_dungeon_command,
     exp_coupon_command,
     exchange_log_alert_command,
     exp_coupon_autocomplete,
@@ -92,7 +92,7 @@ from maple_bot import (
     format_sunny_sunday_date,
     format_boss_hp_as_k,
     find_ranking_character,
-    growth_potion_command,
+    growth_potion_calculator as growth_potion_command,
     help_command,
     hot_week_command,
     html_to_text,
@@ -142,11 +142,10 @@ from maple_bot import (
     sunny_sunday_entry_action,
     sunny_sunday_list_command,
     sunny_sunday_timestamp,
-    symbol_calculator_command,
+    symbol_growth_calculator as symbol_calculator_command,
     simulate_seed_ring,
     thumbnail_url,
     traffic_light_command,
-    traffic_light_difficulty_autocomplete,
     update_alert_channel,
     utc_event_timestamp,
     ursus_alert_command,
@@ -1893,7 +1892,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(score, 99.9)
-        self.assertEqual(tags, ["메이플 마스터", "레벨 장인", "유니온 장인"])
+        self.assertEqual(tags, ["이것이 나의 최종 형태다", "그란디스 준비 중", "나 혼자만 레벨업"])
 
     def test_complete_population_data_uses_new_ai_score(self) -> None:
         score, tags = maple_addict_power(
@@ -1912,7 +1911,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(score, 99.9)
-        self.assertEqual(tags, ["메이플 마스터", "균형의 달인", "레벨 장인"])
+        self.assertEqual(tags, ["육각형 주인공", "기어드락 터줏대감", "내가 바로 군단이다"])
 
     def test_character_without_legion_and_achievement_is_tagged_as_alt(self) -> None:
         _, tags = maple_addict_power(
@@ -1923,7 +1922,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-        self.assertEqual(tags[-1], "부캐")
+        self.assertEqual(tags[0], "부캐")
         self.assertEqual(len(tags), 3)
 
     def test_character_with_representative_ranking_is_not_tagged_as_alt(self) -> None:
@@ -1948,7 +1947,7 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             badges,
-            [("메이플 베테랑", 87), ("레벨 장인", 96), ("유니온 장인", 72)],
+            [("세르니움 입성", 96), ("나 혼자만 레벨업", 96), ("메이플이 본업", 87)],
         )
 
     def test_population_snapshots_are_saved_by_date_and_world(self) -> None:
@@ -2831,7 +2830,8 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
         )
         image_file = object()
 
-        with patch("maple_bot.discord.File", return_value=image_file) as file_class:
+        with patch("maple_bot.discord.File", return_value=image_file) as file_class, patch("maple_bot.datetime") as clock:
+            clock.now.return_value = datetime.fromtimestamp(150, timezone.utc)
             await cash_shop_transfer_command.callback(interaction)
 
         file_class.assert_called_once_with(maple_bot.CASH_SHOP_TRANSFER_IMAGE_PATH)
@@ -2841,6 +2841,23 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
             send_kwargs["embed"].image.url,
             "attachment://cash-shop-transfer.png",
         )
+
+    async def test_cash_transfer_command_hides_expired_schedule(self) -> None:
+        schedule = {
+            "url": "https://example.com/patch",
+            "cash_shop_transfer": {"start_timestamp": 100, "end_timestamp": 200},
+        }
+        for now in (200, 201):
+            with self.subTest(now=now), patch("maple_bot.datetime") as clock:
+                clock.now.return_value = datetime.fromtimestamp(now, timezone.utc)
+                interaction = SimpleNamespace(
+                    client=SimpleNamespace(patch_events=schedule),
+                    response=SimpleNamespace(send_message=AsyncMock()),
+                )
+                await cash_shop_transfer_command.callback(interaction)
+                interaction.response.send_message.assert_awaited_once_with(
+                    "현재 진행 중인 캐시이동 이벤트가 없습니다.", ephemeral=True
+                )
 
     async def test_miracle_time_alert_is_sent_and_recorded_once(self) -> None:
         class DummyTextChannel:
@@ -2912,7 +2929,8 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
             "attachment://cash-shop-transfer.png",
         )
         self.assertEqual(event["notified_channel_ids"], [111])
-        bot.persist_state.assert_called_once_with()
+        self.assertEqual(event["ended_watch_timestamp"], event["end_timestamp"])
+        self.assertEqual(bot.persist_state.call_count, 2)
 
     async def test_one_translated_embed_is_sent_to_every_registered_channel(self) -> None:
         first_channel = SimpleNamespace(
@@ -3000,10 +3018,12 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(format_boss_hp_as_k("24.175T"), "24,175,000,000K")
         self.assertEqual(format_boss_hp_as_k("1.01Q"), "1,010,000,000,000K")
 
-    def test_boss_choices_match_all_provided_health_values(self) -> None:
+    async def test_boss_choices_match_all_provided_health_values(self) -> None:
+        view = maple_bot.TrafficLightView(123)
+        self.addCleanup(view.stop)
         self.assertEqual(len(BOSS_TRAFFIC_LIGHTS), 18)
         self.assertEqual(
-            [choice.value for choice in traffic_light_command.parameters[0].choices][-7:],
+            [choice.value for choice in view.boss_select.options][-7:],
             [
                 "칼로스",
                 "최초의 대적자",
@@ -3015,7 +3035,7 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         boss_choices = {
-            choice.value for choice in traffic_light_command.parameters[0].choices
+            choice.value for choice in view.boss_select.options
         }
         self.assertIn("검밑", boss_choices)
         self.assertTrue(
@@ -3033,115 +3053,24 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("찬란한 흉성", BOSS_TRAFFIC_LIGHTS)
         self.assertNotIn("말레픽 스타", BOSS_TRAFFIC_LIGHTS)
 
-    async def test_difficulty_autocomplete_only_shows_selected_boss_modes(self) -> None:
-        interaction = SimpleNamespace(namespace=SimpleNamespace(**{"보스": "유피테르"}))
-
-        choices = await traffic_light_difficulty_autocomplete(interaction, "")
-
-        self.assertEqual([choice.value for choice in choices], ["노말", "하드"])
-
-    async def test_all_boss_difficulties_are_available_with_choice_object(self) -> None:
-        for boss, difficulties in BOSS_TRAFFIC_LIGHTS.items():
-            interaction = SimpleNamespace(
-                namespace=SimpleNamespace(**{"보스": SimpleNamespace(value=boss)})
-            )
-
-            choices = await traffic_light_difficulty_autocomplete(interaction, "")
-
-            self.assertEqual(
-                [choice.value for choice in choices],
-                list(difficulties),
-                boss,
-            )
-
-    async def test_command_shows_selected_boss_five_percent_requirement(self) -> None:
-        interaction = SimpleNamespace(
-            response=SimpleNamespace(send_message=AsyncMock())
-        )
-
-        with patch("maple_bot.discord.File", return_value=Mock()):
-            await traffic_light_command.callback(
-                interaction,
-                SimpleNamespace(value="발드릭스"),
-                "하드",
-            )
-
-        embed = interaction.response.send_message.await_args.kwargs["embed"]
+    def test_selected_boss_five_percent_requirement(self) -> None:
+        embed = maple_bot.build_traffic_light_embed("발드릭스", "하드")
         self.assertEqual(embed.title, "🚦 하드 발드릭스 5%")
-        self.assertNotIn("**하드 발드릭스**", embed.description)
         self.assertIn("**총 체력**　20,270,000,000,000K", embed.description)
         self.assertIn("**5% 최소 피해량**　1,010,000,000,000K", embed.description)
-        self.assertNotIn("전투력 분석", embed.description)
-        self.assertIsNone(embed.footer.text)
 
-    async def test_black_mage_below_group_shows_all_seven_bosses(self) -> None:
-        interaction = SimpleNamespace(
-            response=SimpleNamespace(send_message=AsyncMock())
-        )
-
-        await traffic_light_command.callback(
-            interaction,
-            SimpleNamespace(value="검밑"),
-            None,
-        )
-
-        message = interaction.response.send_message.await_args.kwargs
-        embed = message["embed"]
+    def test_black_mage_below_group_shows_all_seven_bosses(self) -> None:
+        embed = maple_bot.build_traffic_light_embed("검밑")
         self.assertEqual(embed.title, "🚦 검밑 보스 5%")
-        self.assertEqual(
-            [name for name in ("스우", "데미안", "루시드", "윌", "더스크", "진 힐라", "듄켈") if name in embed.description],
-            ["스우", "데미안", "루시드", "윌", "더스크", "진 힐라", "듄켈"],
-        )
-        self.assertNotIn("file", message)
+        for boss in ("스우", "데미안", "루시드", "윌", "더스크", "진 힐라", "듄켈"):
+            self.assertIn(boss, embed.description)
+        self.assertIsNone(embed.thumbnail.url)
 
-    async def test_command_title_omits_missing_difficulty(self) -> None:
-        interaction = SimpleNamespace(
-            response=SimpleNamespace(send_message=AsyncMock())
-        )
-
-        with patch("maple_bot.discord.File", return_value=Mock()):
-            await traffic_light_command.callback(
-                interaction,
-                SimpleNamespace(value="헬럭스"),
-                "일반",
-            )
-
-        embed = interaction.response.send_message.await_args.kwargs["embed"]
-        self.assertEqual(embed.title, "🚦 일반 헬럭스 5%")
-
-    async def test_lucid_result_attaches_boss_thumbnail(self) -> None:
-        interaction = SimpleNamespace(
-            response=SimpleNamespace(send_message=AsyncMock())
-        )
-        image_file = Mock()
-
-        with patch("maple_bot.discord.File", return_value=image_file) as file_class:
-            await traffic_light_command.callback(
-                interaction,
-                SimpleNamespace(value="루시드"),
-                "하드",
-            )
-
-        message = interaction.response.send_message.await_args.kwargs
-        self.assertEqual(message["embed"].thumbnail.url, "attachment://boss-lucid.webp")
-        self.assertIs(message["file"], image_file)
-        file_class.assert_called_once_with(maple_bot.BOSS_THUMBNAIL_PATHS["루시드"])
-
-    async def test_command_explains_invalid_boss_difficulty_combination(self) -> None:
-        interaction = SimpleNamespace(
-            response=SimpleNamespace(send_message=AsyncMock())
-        )
-
-        await traffic_light_command.callback(
-            interaction,
-            SimpleNamespace(value="림보"),
-            "카오스",
-        )
-
-        interaction.response.send_message.assert_awaited_once_with(
-            "림보에서 선택 가능한 난이도: **노말, 하드**",
-            ephemeral=True,
-        )
+    def test_single_difficulty_and_thumbnail_rendering(self) -> None:
+        embed = maple_bot.build_traffic_light_embed("헬럭스", "헬")
+        self.assertEqual(embed.title, "🚦 헬럭스 5%")
+        embed = maple_bot.build_traffic_light_embed("루시드", "하드")
+        self.assertEqual(embed.thumbnail.url, "attachment://boss-lucid.webp")
 
 
 class SeedRingSimulatorTests(unittest.IsolatedAsyncioTestCase):
@@ -3157,12 +3086,9 @@ class SeedRingSimulatorTests(unittest.IsolatedAsyncioTestCase):
             first = view.draw()
             second = view.draw()
 
-        self.assertIn("강화에 실패", first.description)
-        self.assertIn("강화에 성공", second.description)
-        fields = {field.name: field.value for field in second.fields}
-        self.assertEqual(fields["시도 횟수"], "2회")
-        self.assertEqual(fields["성공 / 실패"], "1회 / 1회")
-        self.assertEqual(fields["누적 사용 연마석"], "6개")
+        self.assertFalse(first["success"])
+        self.assertTrue(second["success"])
+        self.assertEqual((view.attempts, view.successes, view.stones_used), (2, 1, 6))
 
     async def test_other_user_cannot_press_repeat_button(self) -> None:
         view = SeedRingSimulatorView(user_id=123, level=5, stone_count=1)
@@ -3176,22 +3102,21 @@ class SeedRingSimulatorTests(unittest.IsolatedAsyncioTestCase):
             "이 버튼은 명령어를 실행한 사용자만 누를 수 있습니다.", ephemeral=True
         )
 
-    async def test_command_sends_first_result_with_repeat_button(self) -> None:
+    async def test_command_sends_ready_image_with_enhance_button(self) -> None:
         interaction = SimpleNamespace(
             user=SimpleNamespace(id=123),
             response=SimpleNamespace(send_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            original_response=AsyncMock(),
         )
 
-        await seed_ring_command.callback(
-            interaction,
-            SimpleNamespace(value=4),
-            SimpleNamespace(value=5),
-        )
+        await seed_ring_command.callback(interaction)
 
         arguments = interaction.response.send_message.await_args.kwargs
-        self.assertEqual(arguments["view"].attempts, 1)
-        self.assertEqual(arguments["view"].children[0].label, "같은 조건으로 다시 시도")
-        self.assertIn("성공 확률: **50%**", arguments["embed"].description)
+        self.assertEqual(arguments["view"].attempts, 0)
+        self.assertEqual(arguments["view"].retry.label, "강화")
+        self.assertIn("강화 전", arguments["content"])
+        self.assertEqual(interaction.response.send_message.await_args.kwargs["file"].filename, "polisher.png")
 
 
 class HexaCostTests(unittest.TestCase):
@@ -3918,6 +3843,12 @@ class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
 
 
 class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # 공지 조회 검사가 실제 DM 알림 기록을 읽거나 저장하지 않도록 분리합니다.
+        reminders = patch('data_update_reminders.check_data_updates', new_callable=AsyncMock)
+        reminders.start()
+        self.addCleanup(reminders.stop)
+
     async def test_patch_commands_attach_thumbnail_without_link_embed(self) -> None:
         post = {
             "id": 42415,
@@ -4020,7 +3951,7 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
             patch_events={"post_id": post["id"]},
             latest_cash_shop=None,
             maintenance_watch=None,
-            sunny_sunday={},
+            sunny_sunday={"post_id": post["id"]},
             saved_categories=set(maple_bot.WATCHED_CATEGORIES),
             persist_state=Mock(),
         )
@@ -4073,6 +4004,7 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
 class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_command_guide_is_private_and_lists_only_user_commands(self) -> None:
         interaction = SimpleNamespace(
+            user=SimpleNamespace(id=123),
             response=SimpleNamespace(send_message=AsyncMock())
         )
 
@@ -4081,7 +4013,8 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         arguments = interaction.response.send_message.await_args
         self.assertEqual(help_command.name, "명령어")
         self.assertTrue(arguments.kwargs["ephemeral"])
-        field_text = "\n".join(field.value for field in arguments.kwargs["embed"].fields)
+        # 한 화면 대신 분류 전체에 기존 사용자 명령어가 남아 있는지 확인합니다.
+        field_text = "\n".join(name for rows in maple_bot.HELP_CATEGORIES.values() for name, _ in rows)
         self.assertIn("/심볼계산기", field_text)
         self.assertIn("/5퍼", field_text)
         self.assertIn("/우르스", field_text)
@@ -4098,7 +4031,7 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/아이템검색", field_text)
         self.assertIn("/외형검색", field_text)
         self.assertIn("/랭킹", field_text)
-        self.assertIn("/시드링", field_text)
+        self.assertIn("/연마석", field_text)
         self.assertIn("/ㅁ", field_text)
         self.assertIn("/심볼", field_text)
         self.assertNotIn("/서버랭킹", field_text)

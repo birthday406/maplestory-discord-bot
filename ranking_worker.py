@@ -258,7 +258,7 @@ async def run_worker() -> None:
             world_id: int, ranking_type: str
         ) -> None:
             state_type = f"{ranking_type}-shard-{shard_index}-of-{shard_count}"
-            cursor = store.representative_cursor(world_id, state_type)
+            cursor = store.representative_cursor(world_id, state_type, scan_date)
             if cursor == 1 and shard_index:
                 cursor += RANKING_PAGE_SIZE * shard_index
                 store.advance_representative_scan(world_id, state_type, cursor)
@@ -266,16 +266,20 @@ async def run_worker() -> None:
             payloads = await asyncio.gather(
                 *(request_page(ranking_type, world_id, index) for index in page_indices)
             )
+            # 요청 도중 기준일이 바뀌면 중간 페이지를 새 날짜의 첫 수집으로 기록하지 않습니다.
+            # 다음 바깥 순회에서 새 기준일의 진행 위치를 준비하고 다시 요청합니다.
+            if current_ranking_scan_date() != scan_date:
+                return
             for page_index, payload in zip(page_indices, payloads):
                 ranks = payload.get("ranks", [])
                 if not ranks:
-                    writer.complete(current_ranking_scan_date(), world_id, page_index,
+                    writer.complete(scan_date, world_id, page_index,
                                     ranking_type, shard_index)
                     store.finish_representative_scan(world_id, state_type)
                     break
                 matches = eligible_representatives(ranks, ranking_type)
                 writer.write(
-                    current_ranking_scan_date(),
+                    scan_date,
                     world_id,
                     page_index,
                     matches,
@@ -284,7 +288,7 @@ async def run_worker() -> None:
                 next_index = page_index + len(ranks)
                 total_count = int(payload.get("totalCount", 0))
                 if total_count and next_index > total_count:
-                    writer.complete(current_ranking_scan_date(), world_id, page_index + shard_step,
+                    writer.complete(scan_date, world_id, page_index + shard_step,
                                     ranking_type, shard_index)
                     store.finish_representative_scan(world_id, state_type)
                     logging.warning(
@@ -340,6 +344,7 @@ async def run_worker() -> None:
                     scan_date = today
                     completed.clear()
                     world_offset = 0
+                    representative_offset = 0
                     logging.warning(
                         "ranking_worker_start phase=cycle date=%s worlds=%s",
                         scan_date,

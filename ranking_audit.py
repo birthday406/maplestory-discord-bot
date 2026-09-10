@@ -91,6 +91,12 @@ def check_collection(store, now=None):
                     "AND issues='[]' ORDER BY day DESC LIMIT 1", (day, kind),
                 ).fetchone()
                 baseline = json.loads(previous[0]) if previous else {}
+                # 업적 응답에는 다른 월드 캐릭터도 섞입니다. 같은 날짜의 실제
+                # 소속 월드로 구분하되, DB에 전혀 없는 이름은 누락 검사에 남깁니다.
+                achievement_worlds = dict(connection.execute(
+                    "SELECT name_key, world_id FROM ranking_snapshots WHERE snapshot_date=?",
+                    (day,),
+                )) if kind == "achievement" else {}
                 for world, name in WORLDS.items():
                     pages = {r[0]: json.loads(r[1]) for r in connection.execute(
                         "SELECT page, names FROM ranking_audit_pages WHERE day=? AND kind=? AND world=?",
@@ -109,6 +115,9 @@ def check_collection(store, now=None):
                         sample = ', '.join(map(str, sorted(missing)[:5]))
                         issues.append(f"{name}: 누락 페이지 {len(missing):,}개 (시작 순위 {sample})")
                     names = [nickname for items in pages.values() for nickname in items]
+                    if kind == "achievement":
+                        names = [nickname for nickname in names
+                                 if achievement_worlds.get(nickname, world) == world]
                     unique = set(names)
                     counts[str(world)] = len(unique)
                     duplicate = len(names) - len(unique)

@@ -31,7 +31,8 @@ class EndingReminderTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("참여 조건", sent["embed"].description)
                 self.assertIn("<t:200000:R>", sent["embed"].description)
                 self.assertEqual(sent["embed"].image.url, "attachment://" + maple_bot.CASH_SHOP_TRANSFER_IMAGE_PATH.name)
-                self.assertIs(sent["file"], attachment.return_value.__enter__.return_value)
+                self.assertIs(sent["file"], attachment.return_value)
+                attachment.return_value.close.assert_called_once()
 
     async def test_boundaries_restart_and_both_lead_times(self):
         for lead in (3600, 86400):

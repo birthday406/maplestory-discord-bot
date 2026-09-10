@@ -3,6 +3,15 @@
 
 # Local SSH connection cache
 .deploy_known_hosts
+# 로컬 배포 묶음·검증 로그·접속 보조 설정은 저장소에 올리지 않습니다.
+outputs/
+# 첨부 원본·추출 중간 결과·미리보기와 이전 코드 백업은 로컬에 보존합니다.
+.codex-remote-attachments/
+artifacts/
+image/
+polisher-seam-fixed-preview.png
+*.key
+*.pem
 
 # Runtime data and Python cache files
 state.json
@@ -15,6 +24,12 @@ ranking-worker.db-wal
 familiar.db
 familiar.db-shm
 familiar.db-wal
+translation-corrections.db
+translation-corrections.db-wal
+translation-corrections.db-shm
+patch-history.db
+patch-history.db-wal
+patch-history.db-shm
 *.db-journal
 ranking-update-probe.log
 ranking-update-probe.json
@@ -23,6 +38,17 @@ ranking-outbox/
 maplebot-backfill-level-*.jsonl
 maplebot-backfill-current-level
 __pycache__/
+character-images.db*
+news-44348-repair.json
+news-44314-repair.json
+news-44291-repair.json
+news-44414-repair.json
+patch-v271-view.json
+news-44597-overview-repair.json
+news-44597-overview-v2-repair.json
+news-44597-overview-v3-repair.json
+data-update-reminders.json
+data-update-reminders.tmp
 *.py[cod]
 
 # 랭킹 압축 보관본·미완성 파일·복원한 조회용 DB

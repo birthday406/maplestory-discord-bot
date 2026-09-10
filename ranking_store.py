@@ -185,6 +185,15 @@ class RankingStore:
                     PRIMARY KEY (world_id, ranking_type)
                 );
 
+                CREATE TABLE IF NOT EXISTS ranking_pending_representatives (
+                    name_key TEXT NOT NULL,
+                    snapshot_date TEXT NOT NULL,
+                    ranking_type TEXT NOT NULL,
+                    value INTEGER NOT NULL,
+                    ranking INTEGER NOT NULL,
+                    PRIMARY KEY (snapshot_date, name_key, ranking_type)
+                );
+
                 CREATE TABLE IF NOT EXISTS ranking_profiles (
                     name_key TEXT PRIMARY KEY,
                     profile_json TEXT NOT NULL,
@@ -222,6 +231,12 @@ class RankingStore:
                 VALUES (1, 0, 0);
                 """
             )
+            # 옛 진행 위치에는 기준일이 없으므로 처음 한 번 새 기준일의 첫 페이지부터 돕니다.
+            representative_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(representative_scan_state)")
+            }
+            if "scan_date" not in representative_columns:
+                connection.execute("ALTER TABLE representative_scan_state ADD COLUMN scan_date TEXT")
             # 기존 ranking.db도 지우지 않고 종합 지수에 필요한 열만 안전하게 추가합니다.
             columns = {
                 row["name"]
@@ -1140,6 +1155,8 @@ class RankingStore:
                         character.get("achievementRank"),
                     ),
                 )
+            # 경험치보다 먼저 도착해 보관 중이던 같은 날짜의 대표 랭킹을 합칩니다.
+            self._merge_pending_representatives(connection, day)
             if update_checkpoint:
                 connection.execute(
                     """
@@ -1200,16 +1217,23 @@ class RankingStore:
             ).fetchall()
         return {row["name_key"] for row in rows}
 
-    def representative_cursor(self, world_id: int, ranking_type: str) -> int:
+    def representative_cursor(
+        self, world_id: int, ranking_type: str, scan_date: date | None = None
+    ) -> int:
         now = int(datetime.now(timezone.utc).timestamp())
+        day = (scan_date or (datetime.now(timezone.utc) - timedelta(hours=17, minutes=10)).date()).isoformat()
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT OR IGNORE INTO representative_scan_state
-                    (world_id, ranking_type, next_index, started_at)
-                VALUES (?, ?, 1, ?)
+                INSERT INTO representative_scan_state
+                    (world_id, ranking_type, next_index, started_at, scan_date)
+                VALUES (?, ?, 1, ?, ?)
+                ON CONFLICT(world_id, ranking_type) DO UPDATE SET
+                    next_index=1, started_at=excluded.started_at,
+                    completed_at=NULL, scan_date=excluded.scan_date
+                WHERE representative_scan_state.scan_date IS NOT excluded.scan_date
                 """,
-                (world_id, ranking_type, now),
+                (world_id, ranking_type, now, day),
             )
             row = connection.execute(
                 """SELECT next_index FROM representative_scan_state
@@ -1258,21 +1282,51 @@ class RankingStore:
         with self._connect() as connection:
             for character in characters:
                 values = (character[keys[0]], character[keys[1]])
+                if not values[0] or values[0] < 0 or not values[1] or values[1] < 0:
+                    continue
                 name_key = character["characterName"].casefold()
                 cursor = connection.execute(
                     f"UPDATE characters SET {columns[0]} = ?, {columns[1]} = ? "
-                    "WHERE name_key = ?",
-                    (*values, name_key),
-                )
-                if not cursor.rowcount:
-                    continue
-                connection.execute(
-                    f"UPDATE ranking_snapshots SET {columns[0]} = ?, {columns[1]} = ? "
-                    "WHERE name_key = ? AND snapshot_date = ?",
+                    "WHERE name_key = ? AND updated_date <= ?",
                     (*values, name_key, day),
                 )
-                updated += 1
+                updated += cursor.rowcount
+                # 당일 경험치가 아직 없으면 가짜 스냅샷 대신 원래 대표 값만 보관합니다.
+                connection.execute(
+                    "INSERT INTO ranking_pending_representatives VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(snapshot_date, name_key, ranking_type) DO UPDATE SET "
+                    "value=excluded.value, ranking=excluded.ranking",
+                    (name_key, day, ranking_type, *values),
+                )
+            self._merge_pending_representatives(connection, day)
         return updated
+
+    @staticmethod
+    def _merge_pending_representatives(connection, day):
+        # 실제 경험치 기록이 생긴 항목만 처리하며 날짜가 다른 값은 섞지 않습니다.
+        rows = connection.execute(
+            "SELECT p.* FROM ranking_pending_representatives p "
+            "JOIN ranking_snapshots s ON s.name_key=p.name_key AND s.snapshot_date=p.snapshot_date "
+            "WHERE p.snapshot_date=?", (day,),
+        ).fetchall()
+        for row in rows:
+            columns = {"legion": ("legion_level", "legion_rank"),
+                       "achievement": ("achievement_score", "achievement_rank")}[row["ranking_type"]]
+            values = (row["value"], row["ranking"], row["name_key"], day)
+            connection.execute(
+                f"UPDATE ranking_snapshots SET {columns[0]}=?, {columns[1]}=? "
+                "WHERE name_key=? AND snapshot_date=?", values,
+            )
+            connection.execute(
+                f"UPDATE characters SET {columns[0]}=?, {columns[1]}=? "
+                "WHERE name_key=? AND updated_date<=?", values,
+            )
+            # 두 저장 위치에 반영한 대기 항목만 같은 트랜잭션에서 해제합니다.
+            connection.execute(
+                "DELETE FROM ranking_pending_representatives "
+                "WHERE snapshot_date=? AND name_key=? AND ranking_type=?",
+                (day, row["name_key"], row["ranking_type"]),
+            )
 
     def save_snapshot(
         self, character: dict, scan_date: date, *, only_missing: bool = False

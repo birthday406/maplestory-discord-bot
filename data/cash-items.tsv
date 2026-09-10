@@ -16,6 +16,8 @@ id	category	gms_name	kms_name	icon
 1010014	Accessory	White-Eyed Constantly Curious Face Accessory	백안 한결같은 신비 얼굴장식	1010014.png
 1010015	Accessory	White-Eyed Dear Face Accessory	백안 디어 얼굴장식	1010015.png
 1010016	Accessory	White-Eyed Lucid Face Accessory	백안 루시드 얼굴장식	1010016.png
+1010017	Accessory	White-Eyed Peaceful Damien Face Accessory	백안 평화의 데미안 얼굴장식	1010017.png
+1010018	Accessory	White-Eyed Languid Face Accessory	백안 랑드 얼굴장식	1010018.png
 1011000	Accessory	Ninja Mask for Women	여자닌자 마스크	1011000.png
 1011001	Accessory	SF Ninja Mask	SF닌자 마스크	1011001.png
 1011002	Accessory	Heart	하트마크	1011002.png
@@ -30,6 +32,8 @@ id	category	gms_name	kms_name	icon
 1011015	Accessory	White-Eyed Sullen Face Accessory	백안 차차 얼굴장식	1011015.png
 1011016	Accessory	White-Eyed Dear Face Accessory	백안 디어 얼굴장식	1011016.png
 1011017	Accessory	White-Eyed Sleepy Time Face Accessory	백안 졸린 조용한 얼굴장식	1011017.png
+1011018	Accessory	White-Eyed Calm Eileen Face Accessory	백안 차분한 아일린 얼굴장식	1011018.png
+1011019	Accessory	White-Eyed Clear Day Face Accessory	백안 맑은날 얼굴장식	1011019.png
 1012000	Accessory	Battle Scar	바람의 흉터	1012000.png
 1012001	Accessory	Bindi	빈디	1012001.png
 1012002	Accessory	Leather Mask	가죽 마스크	1012002.png
@@ -404,6 +408,8 @@ id	category	gms_name	kms_name	icon
 1012870	Accessory	Spirit Dark Circle	영혼 다크서클	1012870.png
 1012872	Accessory	Gentle Smile Oceanleli Face Accessory		1012872.png
 1012873	Accessory	Bright Smile Oceanleli Face Accessory		1012873.png
+1012874	Accessory	Odd Expression (Frieren)	미묘한 표정 (프리렌)	1012874.png
+1012875	Accessory	Pouting Expression (Fern)	볼 부풀리기 표정 (페른)	1012875.png
 1012876	Accessory	Desert Sun		1012876.png
 1012877	Accessory	Smiling Expression Face Accessory	웃음 표정 얼굴장식	1012877.png
 1012878	Accessory	Embarrassed Expression Face Accessory	난처 표정 얼굴장식	1012878.png
@@ -447,7 +453,12 @@ id	category	gms_name	kms_name	icon
 1012921	Accessory	Devious Rascal		1012921.png
 1012922	Accessory	Cheeky Rascal		1012922.png
 1012924	Accessory	Demonization Emblem		1012924.png
+1012926	Accessory	Twinkle Star Face Painting	팝핑 스타 페이스 페인팅	1012926.png
 1012928	Accessory	Persimmon-Stained Smirk		1012928.png
+1012929	Accessory	White-Eyed A Child's Dream Face Accessory	백안 꼬맹이 얼굴장식	1012929.png
+1012930	Accessory	White-Eyed Cattertons Face Accessory	백안 아잉 얼굴장식	1012930.png
+1012932	Accessory	Strawberry Jam Blush		1012932.png
+1012933	Accessory	Apple Jam Blush		1012933.png
 1020000	Accessory	Aqua Toy Shades	아쿠아 장난감 선글라스	1020000.png
 1021000	Accessory	Pink Toy Shades	핑크 장난감 선글라스	1021000.png
 1022000	Accessory	Orange Shades	주황색 안경	1022000.png
@@ -566,7 +577,7 @@ id	category	gms_name	kms_name	icon
 1022258	Accessory	Bat Wing Monocle		1022258.png
 1022259	Accessory	Bandage Blindfold	붕대 눈가리개	1022259.png
 1022262	Accessory	Scouter	스카우터	1022262.png
-1022263	Accessory	 Sleepy Eye Patch	코야코야 안대	1022263.png
+1022263	Accessory	Sleepy Eye Patch	코야코야 안대	1022263.png
 1022265	Accessory	Black Diamond	블랙 다이아	1022265.png
 1022266	Accessory	Strange Uncle Glasses		1022266.png
 1022267	Accessory	Personal Info Protection Stick	개인정보 보호막대	1022267.png
@@ -639,6 +650,8 @@ id	category	gms_name	kms_name	icon
 1022365	Accessory	Legendary Master Glasses		1022365.png
 1022366	Accessory	Cutie Young Fighter Glasses		1022366.png
 1022367	Accessory	Hyper Nova Goggles		1022367.png
+1022371	Accessory	Omega Sector Festival Intruder		1022371.png
+1022372	Accessory	Quirky Intruder		1022372.png
 1022373	Accessory	Tiny Glasses	콩눈이 안경	1022373.png
 1022374	Accessory	Tiny Sunglasses	콩눈이 선글라스	1022374.png
 1022376	Accessory	King Scars	킹 흉터	1022376.png
@@ -650,6 +663,7 @@ id	category	gms_name	kms_name	icon
 1022384	Accessory	Round Cat-Eared Glasses	캣 포인트 동글이 안경	1022384.png
 1022385	Accessory	Round Rabbit-Eared Glasses	래빗 포인트 동글이 안경	1022385.png
 1022386	Accessory	Golden Monocle		1022386.png
+1022387	Accessory	Vintage Frameless Glasses	빈티지 프레임리스 안경	1022387.png
 1022390	Accessory	Round Brown Bear Glasses		1022390.png
 1022391	Accessory	Round Polar Bear Glasses		1022391.png
 1022392	Accessory	Crybaby's Black Glasses		1022392.png
@@ -707,6 +721,7 @@ id	category	gms_name	kms_name	icon
 1032351	Accessory	Honey Bee Sunflower Ear Accessory		1032351.png
 1032355	Accessory	Gold Maple Earrings	골드 메이플 이어링	1032355.png
 1032356	Accessory	Pink & Black Beans	분홍까망 콩콩	1032356.png
+1032360	Accessory	Frieren's Earrings	프리렌의 귀걸이	1032360.png
 1032362	Accessory	Genos Ear Piercings	제노스 피어싱	1032362.png
 1032363	Accessory	Time-Lashed Earrings	시간의 방랑자 이어링	1032363.png
 1032364	Accessory	Skystone Earrings		1032364.png
@@ -714,6 +729,8 @@ id	category	gms_name	kms_name	icon
 1032368	Accessory	Jupiter Earrings	유피테르 귀고리	1032368.png
 1032369	Accessory	Golden Drip Earrings		1032369.png
 1032370	Accessory	Half-Hoop Earrings		1032370.png
+1032372	Accessory	Mellow Whisper	멜로우 위스퍼	1032372.png
+1032373	Accessory	Hip-Hop Cross Earring		1032373.png
 1033000	Accessory	Lucid's Earrings		1033000.png
 1122121	Accessory	Aura Pendant		1122121.png
 1122210	Accessory	Hellia Necklace		1122210.png
@@ -845,6 +862,14 @@ id	category	gms_name	kms_name	icon
 1000160	Cap	Metropolitan Hat	모던시티 모자	1000160.png
 1000161	Cap	Lilac Ballcap	라일락 야구모자	1000161.png
 1000162	Cap	Jaunty Denim Cap	청청나들이 진청캡	1000162.png
+1000163	Cap	Night Eunyul	밤의 은율	1000163.png
+1000164	Cap	Olive and Beige Fedora	베이지 올리브 페도라	1000164.png
+1000165	Cap	Lucid Dreaming Forevermore	엔들리스 루시드 드림	1000165.png
+1000166	Cap	Pink Bunny Hat	핑크토끼 모자	1000166.png
+1000167	Cap	Black Feathered Bed Head Wig	흑발 포숑 가발	1000167.png
+1000168	Cap	Black Forte Wig	흑발 포르테 가발	1000168.png
+1000169	Cap	Black Parted Boyish Wig	흑발 채운 가발	1000169.png
+1000170	Cap	Black Soft Pearl Wig	흑발 소프트펄 가발	1000170.png
 1000174	Cap	Young Erel Wig (M)		1000174.png
 1001000	Cap	Orange Beanie	주황색 털모자	1001000.png
 1001001	Cap	Hanbok Jobawi	조바위	1001001.png
@@ -1000,6 +1025,14 @@ id	category	gms_name	kms_name	icon
 1001188	Cap	Metropolitan Ribbon	모던시티 리본	1001188.png
 1001189	Cap	Lilac Headband	라일락 머리띠	1001189.png
 1001190	Cap	Jaunty Denim Hat	청청나들이 연청캡	1001190.png
+1001191	Cap	Night Arin	밤의 아린	1001191.png
+1001192	Cap	Olive and Beige Ribbon	베이지 올리브 리본	1001192.png
+1001193	Cap	Lucid Dreaming Eternally	이터널 루시드 드림	1001193.png
+1001194	Cap	Pink Bunny Hairband	핑크토끼 머리띠	1001194.png
+1001195	Cap	Black Mysterie Wig	흑발 신비 가발	1001195.png
+1001196	Cap	Black Bubbly Wig	흑발 버블리 가발	1001196.png
+1001197	Cap	Black Long Hair with Blunt Bangs Wig	흑발 하리화 가발	1001197.png
+1001198	Cap	Black Cherry Pop Wig	흑발 체리팝 가발	1001198.png
 1001202	Cap	Young Erel Wig (F)		1001202.png
 1002000	Cap	Brown Flight Headgear	갈색 항공 모자	1002000.png
 1002015	Cap	Red Swimming Goggle	빨간색 물안경	1002015.png
@@ -3446,7 +3479,7 @@ id	category	gms_name	kms_name	icon
 1006308	Cap	Baby Sea Otter Hat	아기 해달 모자	1006308.png
 1006309	Cap	Mischievous Kitty Pumpkin Hat		1006309.png
 1006310	Cap	Mischievous Kitty Ribbon Hat		1006310.png
-1006311	Cap	Abyssal Shrine Hat		1006311.png
+1006311	Cap	Dapper Abyss Hat		1006311.png
 1006312	Cap	Maple Circus Mono-Cone Hat		1006312.png
 1006313	Cap	Maple Circus Color Cone Hat		1006313.png
 1006314	Cap	Midsummer Night Clip	한여름밤 기억	1006314.png
@@ -3932,8 +3965,8 @@ id	category	gms_name	kms_name	icon
 1006888	Cap	Dark Rabbit Pin	어둠 토끼 핀	1006888.png
 1006889	Cap	Proof of Purification	정화의 증표	1006889.png
 1006890	Cap	Gluttonous Otter Hood	찹쌀 해달 인형탈	1006890.png
-1006892	Cap	Dancing Puppet Hat		1006892.png
-1006893	Cap	Mad Puppeteer Tiara		1006893.png
+1006892	Cap	Mad Puppeteer Hat		1006892.png
+1006893	Cap	Dancing Puppet Tiara		1006893.png
 1006894	Cap	Playful Heart Ribbon		1006894.png
 1006895	Cap	Oceanleli Yellow Hat		1006895.png
 1006896	Cap	Oceanleli Purple Hat		1006896.png
@@ -3947,8 +3980,12 @@ id	category	gms_name	kms_name	icon
 1006904	Cap	Fluffy Kitty Ribbon		1006904.png
 1006908	Cap	Chaos Commander	혼돈의 명령	1006908.png
 1006909	Cap	Abyssal Aristocrat	심연의 계율	1006909.png
+1006910	Cap	Aura Hair (Hat)	아우라 헤어 가발	1006910.png
+1006911	Cap	Linie Hair (Hat)	리니에 헤어 가발	1006911.png
+1006912	Cap	Lügner Hair (Hat)	류그너 헤어 가발	1006912.png
 1006913	Cap	Adversary's Head Decoration	대적자의 머리장식	1006913.png
 1006914	Cap	Legendary Flower Crown	전설이 엮인 화관	1006914.png
+1006915	Cap	Strange Mateon Hat		1006915.png
 1006917	Cap	Starshine Hairpin	별이 담긴 헤어핀	1006917.png
 1006918	Cap	Starshine Headband	별이 담긴 머리띠	1006918.png
 1006919	Cap	Zooming Tangerine Helmet	붕붕 탠저린 헬멧	1006919.png
@@ -3962,6 +3999,7 @@ id	category	gms_name	kms_name	icon
 1006927	Cap	Gloomy Grin Hat		1006927.png
 1006928	Cap	Eternal Greeting Hat		1006928.png
 1006929	Cap	Eternal Farewell Hat		1006929.png
+1006930	Cap	Night Troupe Festival Hat		1006930.png
 1006931	Cap	Maple Leaf Samo	보더리스 단풍 사모	1006931.png
 1006932	Cap	New Leaf Mall Cap	메이플 아지트 캡	1006932.png
 1006933	Cap	Big Head Red M-Forcer Helmet	빅헤드 메소레인저 레드	1006933.png
@@ -4133,6 +4171,43 @@ id	category	gms_name	kms_name	icon
 1007118	Cap	Holy Diadem		1007118.png
 1007119	Cap	Holy Crest		1007119.png
 1007120	Cap	K23-A Type Kitty Ears		1007120.png
+1007122	Cap	Blue Night Rimmed Hat	청야립	1007122.png
+1007123	Cap	Blue Dream Pin	청몽잠	1007123.png
+1007124	Cap	Vintage Twinkle	트윙클 빈티지	1007124.png
+1007125	Cap	Pink Wish	핑크 위시	1007125.png
+1007126	Cap	Red Moon Circus Boater	레드 문 매지션 페도라	1007126.png
+1007127	Cap	Red Moon Circus Hat	레드 문 매지션 햇	1007127.png
+1007136	Cap	Perky Rabbit Snapback	쫑긋 래빗 스냅백	1007136.png
+1007137	Cap	Puppy Ribbon Hairband	멍뭉이 리본 헤어밴드	1007137.png
+1007138	Cap	Rabbit Ear Hairpins	래빗 이어 헤어핀	1007138.png
+1007139	Cap	Bunny Sailor Cap	바니 항해사 베레모	1007139.png
+1007140	Cap	Snoozing Kitty Beret	쿨쿨 냥이 베레모	1007140.png
+1007141	Cap	Panda Hairpin	판다 헤어핀	1007141.png
+1007142	Cap	Meow Beans Hairpin	냥젤리 헤어핀	1007142.png
+1007143	Cap	Teddy Trim Cap	곰돌이 레이스 캡	1007143.png
+1007144	Cap	Fetching Fox Beret	발랄 여우 햇	1007144.png
+1007145	Cap	Purple Cow Bucket Hat	보라색 얼룩소 모자	1007145.png
+1007146	Cap	Hammy on Head	머리 위 햄찌	1007146.png
+1007147	Cap	Dino Operator Cutie Wig	디노 조종사 깜찍이 가발	1007147.png
+1007148	Cap	Chicken Operator Toben Wig	꼬꼬 조종사 토벤 가발	1007148.png
+1007149	Cap	Big Pretty Red Ribbon	프리티 왕리본 빨강	1007149.png
+1007150	Cap	Big Pretty Pink Ribbon	프리티 왕리본 핑크	1007150.png
+1007151	Cap	Big Pretty White Ribbon	프리티 왕리본 하양	1007151.png
+1007154	Cap	Tailor Bear Ears	테일러 베어 귀	1007154.png
+1007155	Cap	Antique Bear Bonnet	앤티크 베어 보닛	1007155.png
+1007156	Cap	Sweet Bite Hairband	달콤 한입 머리띠	1007156.png
+1007157	Cap	Fluffy Cat Head	폭신냥냥 햇	1007157.png
+1007158	Cap	Pink Ribbon Red Panda Head	수줍은 핑크 리본	1007158.png
+1007159	Cap	Lop-Eared Bunny Head	몽글 롭이어 버니 모자	1007159.png
+1007160	Cap	Maple Invasion Hairband (Orange Mushroom)	메이플 어택 머리띠 (주황버섯)	1007160.png
+1007161	Cap	Maple Invasion Hairband (Green Mushroom)	메이플 어택 머리띠 (초록버섯)	1007161.png
+1007162	Cap	Maple Invasion Hairband (Blue Mushroom)	메이플 어택 머리띠 (파란버섯)	1007162.png
+1007163	Cap	Sol Coronet	솔 코로넷	1007163.png
+1007164	Cap	Sol Garland	솔 가랜드	1007164.png
+1007165	Cap	Sol Aureole	솔 샤인	1007165.png
+1007166	Cap	Graceful Jockey Helmet	그레이스 캐발리에 캡	1007166.png
+1007167	Cap	Elegant Jockey Helmet	엘레강스 캐발리에 캡	1007167.png
+1007168	Cap	Pepe Crown	페페 왕관	1007168.png
 1007169	Cap	Prismatic Shooting Star		1007169.png
 1007170	Cap	Musical Shooting Star		1007170.png
 1007172	Cap	Brilliant Halo of Revelation		1007172.png
@@ -4142,6 +4217,24 @@ id	category	gms_name	kms_name	icon
 1007176	Cap	Fang Headband		1007176.png
 1007177	Cap	Chess Crown		1007177.png
 1007178	Cap	Checkmate Ribbon		1007178.png
+1007190	Cap	Ribbon Pig Headband	말랑 리본돼지 모자	1007190.png
+1007191	Cap	Pink Bean Snapback	핑크빈 스냅백	1007191.png
+1007192	Cap	Teddy Duo Hairband	테니 머리띠	1007192.png
+1007193	Cap	Pepe Explorer's Hat	페페 탐사 모자	1007193.png
+1007194	Cap	Three-Mushroom Stack	머리 위에 버섯 셋	1007194.png
+1007195	Cap	Hero's Helm	기사단의 투구	1007195.png
+1007196	Cap	Iconic Moment	아이코닉 모멘트	1007196.png
+1007197	Cap	Iridescent Visor	비비드 클라이맥스	1007197.png
+1007198	Cap	Bold Beetle Mask	대담 풍뎅이 인형탈	1007198.png
+1007199	Cap	Persistent Roly Poly Mask	성실 공벌레 인형탈	1007199.png
+1007200	Cap	Street Performer Beanie	스트리트댄서 비니	1007200.png
+1007201	Cap	Golden Solar Crown		1007201.png
+1007202	Cap	Solar Ribbon Tiara		1007202.png
+1007203	Cap	Heart Guardian Headset		1007203.png
+1007204	Cap	Magical Ribbon Witch Hat		1007204.png
+1007205	Cap	Nightblood Crown		1007205.png
+1007206	Cap	Fashionista Goggles		1007206.png
+1007207	Cap	Street Star Goggles		1007207.png
 1007208	Cap	Guardian Knight's Faith		1007208.png
 1007209	Cap	Researcher's Starlight		1007209.png
 1007210	Cap	Starlight Helmet		1007210.png
@@ -4149,12 +4242,23 @@ id	category	gms_name	kms_name	icon
 1007212	Cap	Luna Rabbit Hood		1007212.png
 1007213	Cap	Luna Rabbit Frill		1007213.png
 1007214	Cap	Seeker's Starlight		1007214.png
+1007240	Cap	Golden Dragon Crown		1007240.png
+1007241	Cap	Golden Dragon Hairpin		1007241.png
+1007242	Cap	Mechanic Fox Headset		1007242.png
+1007243	Cap	Puppy Toast Hat		1007243.png
+1007244	Cap	Kitty Toast Hat		1007244.png
+1007245	Cap	Perked-Up Otter Bucket Hat		1007245.png
+1007246	Cap	Floppy Otter Bucket Hat		1007246.png
+1007247	Cap	Summer Fruits Hat		1007247.png
+1007248	Cap	Burbling Monster Bubble Hat		1007248.png
 1007249	Cap	Orange Beat Cap		1007249.png
 1007250	Cap	Orange Beat Beanie		1007250.png
 1007251	Cap	Margaret Cloud Hat		1007251.png
 1007252	Cap	Margaret Dew Headband		1007252.png
 1007253	Cap	Heartthrob Ribbon Pin		1007253.png
 1007254	Cap	Sweet Apple Fox Mask		1007254.png
+1007320	Cap	Full-Cheeked Hammy		1007320.png
+1007321	Cap	Sunflower Investigator Hat		1007321.png
 1100000	Cape	Napoleon Cape		1100000.png
 1100001	Cape	Napoleon Cape	나폴레옹 망토	1100001.png
 1100004	Cape	Mad Doctor Stethoscope	매드 닥터 청진기	1100004.png
@@ -4304,7 +4408,7 @@ id	category	gms_name	kms_name	icon
 1102325	Cape	Harmony Wings	오로라 하모니	1102325.png
 1102326	Cape	Angelic Feathers	천사의 속삭임	1102326.png
 1102336	Cape	Alchemist Cape		1102336.png
-1102338	Cape	Honeybee Wings 	꿀벌 요정 날개	1102338.png
+1102338	Cape	Honeybee Wings	꿀벌 요정 날개	1102338.png
 1102343	Cape	Dark Force Cape 		1102343.png
 1102344	Cape	Elven Spirit Cape		1102344.png
 1102349	Cape	Fairy Wing Cape	나빌레라	1102349.png
@@ -5156,7 +5260,7 @@ id	category	gms_name	kms_name	icon
 1103612	Cape	Round-We-Go Mirror Ball	빙글빙글 미러볼	1103612.png
 1103613	Cape	Sleepy CAPOO Cape		1103613.png
 1103614	Cape	Mischievous Kitty Cape		1103614.png
-1103615	Cape	Abyssal Shrine Shadow Cape		1103615.png
+1103615	Cape	Dapper Abyss Shadow Cape		1103615.png
 1103616	Cape	Black Pack	깜이 가방	1103616.png
 1103617	Cape	Midsummer Night Flutterings	한여름밤 나비	1103617.png
 1103618	Cape	Dream Voyager	꿈의 항해사	1103618.png
@@ -5409,6 +5513,7 @@ id	category	gms_name	kms_name	icon
 1103912	Cape	Fluffy Kitty Effect Cape		1103912.png
 1103916	Cape	Chaos Binding	혼돈의 결속	1103916.png
 1103917	Cape	Chaos Barrier	혼돈의 결계	1103917.png
+1103918	Cape	Himmel's Blessing	힘멜의 가호	1103918.png
 1103920	Cape	Cosmic Rings	천궁의 고리	1103920.png
 1103921	Cape	Tangerine Kickboard	탠저린 킥보드	1103921.png
 1103922	Cape	Doom-Calling Wings		1103922.png
@@ -5418,6 +5523,7 @@ id	category	gms_name	kms_name	icon
 1103926	Cape	Festive Grin Cape		1103926.png
 1103927	Cape	Gloomy Grin Cape		1103927.png
 1103928	Cape	Eternal Goodbye Cape		1103928.png
+1103929	Cape	Night Troupe Festival Balloon		1103929.png
 1103930	Cape	New Leaf Mall Logo	메이플 아지트 로고	1103930.png
 1103931	Cape	Colorful Scrapbook	컬러링 다이어리	1103931.png
 1103932	Cape	Rolling Green Apples	데굴데굴 풋사과	1103932.png
@@ -5507,15 +5613,49 @@ id	category	gms_name	kms_name	icon
 1104025	Cape	K23-A		1104025.png
 1104026	Cape	Brown Bear Balloon		1104026.png
 1104027	Cape	Polar Bear Balloon		1104027.png
+1104029	Cape	Phantom Paper Flowers	환영지화	1104029.png
+1104030	Cape	Neo-retro Galaxy	네오 레트로 갤럭시	1104030.png
+1104031	Cape	Magical Fantasia	매지컬 판타지아	1104031.png
+1104032	Cape	Cassette Player Cross Bag	레트로 카세트 크로스백	1104032.png
+1104035	Cape	Silken Mirage	실키 미라지	1104035.png
+1104036	Cape	Twin Cub Arc	트윈 베이비 베어	1104036.png
+1104037	Cape	Sweet Wind-Up Crank	달콤한 태엽	1104037.png
+1104038	Cape	Purrfect Passenger	언제나 함께다냥!	1104038.png
+1104039	Cape	Love in the Air	냥만 하트 구름	1104039.png
+1104040	Cape	Kiddie Piggy	꼬꼬마 꿀꿀이	1104040.png
+1104041	Cape	Pepe Backpack	페페 백팩	1104041.png
+1104042	Cape	Trim Heart Frame	몽글 하트 프레임	1104042.png
+1104043	Cape	Maple Invasion Fireworks	메이플 어택 불꽃놀이	1104043.png
+1104044	Cape	Sol Shoulder Cape	오드 솔 케이프	1104044.png
+1104045	Cape	Sol Cape	솔 케이프	1104045.png
+1104046	Cape	Sol Carriage	솔 캐리지	1104046.png
+1104047	Cape	Pony Écarlate	에카를라트 포니	1104047.png
+1104048	Cape	Flower Quokka Friends	웃음꽃 쿼카 프렌즈	1104048.png
 1104049	Cape	Rock Star Jam Session		1104049.png
 1104050	Cape	Brilliant Halo of the Host		1104050.png
 1104051	Cape	Vortex Loop		1104051.png
 1104052	Cape	Wild Tail		1104052.png
 1104053	Cape	King's Mate		1104053.png
+1104059	Cape	Mini-Monster Parade	와글와글 미니 몬스터 어택	1104059.png
+1104060	Cape	Hug-Me Pink Bean	안아줘요 핑크빈	1104060.png
+1104062	Cape	Hero's Cape	기사단의 망토	1104062.png
+1104063	Cape	Lovely Close-Up	러블리 클로즈업	1104063.png
+1104064	Cape	Bold Beetle Legs	대담 풍뎅이 다리	1104064.png
+1104065	Cape	Ready to Roll	우린 굴러다닐 거예요!	1104065.png
+1104066	Cape	Golden Sunflower Cape		1104066.png
+1104067	Cape	Angelic Wing Cape		1104067.png
+1104068	Cape	Velvet Wing Cape		1104068.png
+1104069	Cape	Summer Aqua Cape		1104069.png
 1104070	Cape	Heavenly Blessing		1104070.png
 1104071	Cape	Luna Rabbit Starcatcher		1104071.png
+1104080	Cape	Marine Layer Cape		1104080.png
+1104081	Cape	Purple Flame Fox Tail		1104081.png
+1104082	Cape	Puppy Jam Tail		1104082.png
+1104083	Cape	Kitty Jam Tail		1104083.png
+1104084	Cape	Inklight Wings Cape		1104084.png
 1104085	Cape	Pom Pom Margaret		1104085.png
 1104086	Cape	Midsummer Wind Chimes		1104086.png
+1104123	Cape	Relaxed Golden Hamster		1104123.png
 1040001	Coat	Black Blazer	검은 정장	1040001.png
 1040005	Coat	Orange Baseball Jacket	주황색 야구점퍼	1040005.png
 1040027	Coat	Old School Blazer	복고교복 상의	1040027.png
@@ -5904,7 +6044,7 @@ id	category	gms_name	kms_name	icon
 1042360	Coat	Cherry Rabbit Hood	체리 래빗 후드	1042360.png
 1042361	Coat	Red Cloud Top		1042361.png
 1042362	Coat	Emerald V Tee	셀러브리티 티셔츠 : 패숑	1042362.png
-1042363	Coat	Fuchsia V Tee 	셀러브리티 티셔츠 : 아무어	1042363.png
+1042363	Coat	Fuchsia V Tee	셀러브리티 티셔츠 : 아무어	1042363.png
 1042364	Coat	Marigold V Tee	셀러브리티 티셔츠 : 데피	1042364.png
 1042367	Coat	Devil Bear T-Shirt		1042367.png
 1042375	Coat	Strawberry Training Shirt		1042375.png
@@ -7696,6 +7836,14 @@ id	category	gms_name	kms_name	icon
 22031	Face	White-Eyed Dear Face	백안 디어 얼굴	
 22033	Face	Sad Kitty Face	우잉 얼굴	
 22034	Face	Zombie Face	좀비 얼굴	
+22035	Face	Frieren Face	프리렌 얼굴	
+22036	Face	Fern Face	페른 얼굴	
+22037	Face	Stark Face	슈타르크 얼굴	
+22038	Face	Himmel Face	힘멜 얼굴	
+22039	Face	Übel Face	위벨 얼굴	
+22040	Face	Aura Face	아우라 얼굴	
+22041	Face	Linie Face	리니에 얼굴	
+22042	Face	Lügner Face	류그너 얼굴	
 22043	Face	Saitama Face	사이타마 얼굴	
 22044	Face	Job Seeker Saitama Face	사이타마 (취업 준비 중) 얼굴	
 22045	Face	Genos Face	제노스 얼굴	
@@ -7710,6 +7858,9 @@ id	category	gms_name	kms_name	icon
 22054	Face	Malefic Star Face	찬란한 흉성 얼굴	
 22055	Face	Pupper Face	뭉뭉 얼굴	
 22056	Face	Jupiter Face	유피테르 얼굴	
+22057	Face	Onyx Face	흑수정 얼굴	
+22058	Face	White-Eyed A Child's Dream	백안 꼬맹이 얼굴	
+22059	Face	White-Eyed Cattertons Face	백안 아잉 얼굴	
 22061	Face	Basic Melin Face		
 22062	Face	Dark Melin Face		
 22100	Face	Pink Bean Monster Face	몬스터 핑크빈 얼굴	
@@ -7746,6 +7897,14 @@ id	category	gms_name	kms_name	icon
 22131	Face	White-Eyed Dear Face	백안 디어 얼굴	
 22133	Face	Sad Kitty Face	우잉 얼굴	
 22134	Face	Zombie Face	좀비 얼굴	
+22135	Face	Frieren Face	프리렌 얼굴	
+22136	Face	Fern Face	페른 얼굴	
+22137	Face	Stark Face	슈타르크 얼굴	
+22138	Face	Himmel Face	힘멜 얼굴	
+22139	Face	Übel Face	위벨 얼굴	
+22140	Face	Aura Face	아우라 얼굴	
+22141	Face	Linie Face	리니에 얼굴	
+22142	Face	Lügner Face	류그너 얼굴	
 22143	Face	Saitama Face	사이타마 얼굴	
 22144	Face	Job Seeker Saitama Face	사이타마 (취업 준비 중) 얼굴	
 22145	Face	Genos Face	제노스 얼굴	
@@ -7760,6 +7919,9 @@ id	category	gms_name	kms_name	icon
 22154	Face	Malefic Star Face	찬란한 흉성 얼굴	
 22155	Face	Pupper Face	뭉뭉 얼굴	
 22156	Face	Jupiter Face	유피테르 얼굴	
+22157	Face	Onyx Face	흑수정 얼굴	
+22158	Face	White-Eyed A Child's Dream	백안 꼬맹이 얼굴	
+22159	Face	White-Eyed Cattertons Face	백안 아잉 얼굴	
 22161	Face	Basic Melin Face		
 22162	Face	Dark Melin Face		
 22200	Face	Pink Bean Monster Face	몬스터 핑크빈 얼굴	
@@ -7796,6 +7958,14 @@ id	category	gms_name	kms_name	icon
 22231	Face	White-Eyed Dear Face	백안 디어 얼굴	
 22233	Face	Sad Kitty Face	우잉 얼굴	
 22234	Face	Zombie Face	좀비 얼굴	
+22235	Face	Frieren Face	프리렌 얼굴	
+22236	Face	Fern Face	페른 얼굴	
+22237	Face	Stark Face	슈타르크 얼굴	
+22238	Face	Himmel Face	힘멜 얼굴	
+22239	Face	Übel Face	위벨 얼굴	
+22240	Face	Aura Face	아우라 얼굴	
+22241	Face	Linie Face	리니에 얼굴	
+22242	Face	Lügner Face	류그너 얼굴	
 22243	Face	Saitama Face	사이타마 얼굴	
 22244	Face	Job Seeker Saitama Face	사이타마 (취업 준비 중) 얼굴	
 22245	Face	Genos Face	제노스 얼굴	
@@ -7810,6 +7980,9 @@ id	category	gms_name	kms_name	icon
 22254	Face	Malefic Star Face	찬란한 흉성 얼굴	
 22255	Face	Pupper Face	뭉뭉 얼굴	
 22256	Face	Jupiter Face	유피테르 얼굴	
+22257	Face	Onyx Face	흑수정 얼굴	
+22258	Face	White-Eyed A Child's Dream	백안 꼬맹이 얼굴	
+22259	Face	White-Eyed Cattertons Face	백안 아잉 얼굴	
 22261	Face	Basic Melin Face		
 22262	Face	Dark Melin Face		
 22300	Face	Pink Bean Monster Face	몬스터 핑크빈 얼굴	
@@ -7846,6 +8019,14 @@ id	category	gms_name	kms_name	icon
 22331	Face	White-Eyed Dear Face	백안 디어 얼굴	
 22333	Face	Sad Kitty Face	우잉 얼굴	
 22334	Face	Zombie Face	좀비 얼굴	
+22335	Face	Frieren Face	프리렌 얼굴	
+22336	Face	Fern Face	페른 얼굴	
+22337	Face	Stark Face	슈타르크 얼굴	
+22338	Face	Himmel Face	힘멜 얼굴	
+22339	Face	Übel Face	위벨 얼굴	
+22340	Face	Aura Face	아우라 얼굴	
+22341	Face	Linie Face	리니에 얼굴	
+22342	Face	Lügner Face	류그너 얼굴	
 22343	Face	Saitama Face	사이타마 얼굴	
 22344	Face	Job Seeker Saitama Face	사이타마 (취업 준비 중) 얼굴	
 22345	Face	Genos Face	제노스 얼굴	
@@ -7860,6 +8041,9 @@ id	category	gms_name	kms_name	icon
 22354	Face	Malefic Star Face	찬란한 흉성 얼굴	
 22355	Face	Pupper Face	뭉뭉 얼굴	
 22356	Face	Jupiter Face	유피테르 얼굴	
+22357	Face	Onyx Face	흑수정 얼굴	
+22358	Face	White-Eyed A Child's Dream	백안 꼬맹이 얼굴	
+22359	Face	White-Eyed Cattertons Face	백안 아잉 얼굴	
 22361	Face	Basic Melin Face		
 22362	Face	Dark Melin Face		
 22400	Face	Pink Bean Monster Face	몬스터 핑크빈 얼굴	
@@ -7896,6 +8080,14 @@ id	category	gms_name	kms_name	icon
 22431	Face	White-Eyed Dear Face	백안 디어 얼굴	
 22433	Face	Sad Kitty Face	우잉 얼굴	
 22434	Face	Zombie Face	좀비 얼굴	
+22435	Face	Frieren Face	프리렌 얼굴	
+22436	Face	Fern Face	페른 얼굴	
+22437	Face	Stark Face	슈타르크 얼굴	
+22438	Face	Himmel Face	힘멜 얼굴	
+22439	Face	Übel Face	위벨 얼굴	
+22440	Face	Aura Face	아우라 얼굴	
+22441	Face	Linie Face	리니에 얼굴	
+22442	Face	Lügner Face	류그너 얼굴	
 22443	Face	Saitama Face	사이타마 얼굴	
 22444	Face	Job Seeker Saitama Face	사이타마 (취업 준비 중) 얼굴	
 22445	Face	Genos Face	제노스 얼굴	
@@ -7910,6 +8102,9 @@ id	category	gms_name	kms_name	icon
 22454	Face	Malefic Star Face	찬란한 흉성 얼굴	
 22455	Face	Pupper Face	뭉뭉 얼굴	
 22456	Face	Jupiter Face	유피테르 얼굴	
+22457	Face	Onyx Face	흑수정 얼굴	
+22458	Face	White-Eyed A Child's Dream	백안 꼬맹이 얼굴	
+22459	Face	White-Eyed Cattertons Face	백안 아잉 얼굴	
 22461	Face	Basic Melin Face		
 22462	Face	Dark Melin Face		
 22500	Face	Pink Bean Monster Face	몬스터 핑크빈 얼굴	
@@ -7946,6 +8141,14 @@ id	category	gms_name	kms_name	icon
 22531	Face	White-Eyed Dear Face	백안 디어 얼굴	
 22533	Face	Sad Kitty Face	우잉 얼굴	
 22534	Face	Zombie Face	좀비 얼굴	
+22535	Face	Frieren Face	프리렌 얼굴	
+22536	Face	Fern Face	페른 얼굴	
+22537	Face	Stark Face	슈타르크 얼굴	
+22538	Face	Himmel Face	힘멜 얼굴	
+22539	Face	Übel Face	위벨 얼굴	
+22540	Face	Aura Face	아우라 얼굴	
+22541	Face	Linie Face	리니에 얼굴	
+22542	Face	Lügner Face	류그너 얼굴	
 22543	Face	Saitama Face	사이타마 얼굴	
 22544	Face	Job Seeker Saitama Face	사이타마 (취업 준비 중) 얼굴	
 22545	Face	Genos Face	제노스 얼굴	
@@ -7960,6 +8163,9 @@ id	category	gms_name	kms_name	icon
 22554	Face	Malefic Star Face	찬란한 흉성 얼굴	
 22555	Face	Pupper Face	뭉뭉 얼굴	
 22556	Face	Jupiter Face	유피테르 얼굴	
+22557	Face	Onyx Face	흑수정 얼굴	
+22558	Face	White-Eyed A Child's Dream	백안 꼬맹이 얼굴	
+22559	Face	White-Eyed Cattertons Face	백안 아잉 얼굴	
 22561	Face	Basic Melin Face		
 22562	Face	Dark Melin Face		
 22600	Face	Pink Bean Monster Face	몬스터 핑크빈 얼굴	
@@ -7996,6 +8202,14 @@ id	category	gms_name	kms_name	icon
 22631	Face	White-Eyed Dear Face	백안 디어 얼굴	
 22633	Face	Sad Kitty Face	우잉 얼굴	
 22634	Face	Zombie Face	좀비 얼굴	
+22635	Face	Frieren Face	프리렌 얼굴	
+22636	Face	Fern Face	페른 얼굴	
+22637	Face	Stark Face	슈타르크 얼굴	
+22638	Face	Himmel Face	힘멜 얼굴	
+22639	Face	Übel Face	위벨 얼굴	
+22640	Face	Aura Face	아우라 얼굴	
+22641	Face	Linie Face	리니에 얼굴	
+22642	Face	Lügner Face	류그너 얼굴	
 22643	Face	Saitama Face	사이타마 얼굴	
 22644	Face	Job Seeker Saitama Face	사이타마 (취업 준비 중) 얼굴	
 22645	Face	Genos Face	제노스 얼굴	
@@ -8010,6 +8224,9 @@ id	category	gms_name	kms_name	icon
 22654	Face	Malefic Star Face	찬란한 흉성 얼굴	
 22655	Face	Pupper Face	뭉뭉 얼굴	
 22656	Face	Jupiter Face	유피테르 얼굴	
+22657	Face	Onyx Face	흑수정 얼굴	
+22658	Face	White-Eyed A Child's Dream	백안 꼬맹이 얼굴	
+22659	Face	White-Eyed Cattertons Face	백안 아잉 얼굴	
 22661	Face	Basic Melin Face		
 22662	Face	Dark Melin Face		
 22700	Face	Pink Bean Monster Face	몬스터 핑크빈 얼굴	
@@ -8046,6 +8263,14 @@ id	category	gms_name	kms_name	icon
 22731	Face	White-Eyed Dear Face	백안 디어 얼굴	
 22733	Face	Sad Kitty Face	우잉 얼굴	
 22734	Face	Zombie Face	좀비 얼굴	
+22735	Face	Frieren Face	프리렌 얼굴	
+22736	Face	Fern Face	페른 얼굴	
+22737	Face	Stark Face	슈타르크 얼굴	
+22738	Face	Himmel Face	힘멜 얼굴	
+22739	Face	Übel Face	위벨 얼굴	
+22740	Face	Aura Face	아우라 얼굴	
+22741	Face	Linie Face	리니에 얼굴	
+22742	Face	Lügner Face	류그너 얼굴	
 22743	Face	Saitama Face	사이타마 얼굴	
 22744	Face	Job Seeker Saitama Face	사이타마 (취업 준비 중) 얼굴	
 22745	Face	Genos Face	제노스 얼굴	
@@ -8060,6 +8285,9 @@ id	category	gms_name	kms_name	icon
 22754	Face	Malefic Star Face	찬란한 흉성 얼굴	
 22755	Face	Pupper Face	뭉뭉 얼굴	
 22756	Face	Jupiter Face	유피테르 얼굴	
+22757	Face	Onyx Face	흑수정 얼굴	
+22758	Face	White-Eyed A Child's Dream	백안 꼬맹이 얼굴	
+22759	Face	White-Eyed Cattertons Face	백안 아잉 얼굴	
 22761	Face	Basic Melin Face		
 22762	Face	Dark Melin Face		
 22800	Face	Pink Bean Monster Face		
@@ -8085,6 +8313,14 @@ id	category	gms_name	kms_name	icon
 22829	Face	Innocent Apathy Face		
 22830	Face	Panda Face		
 22834	Face	Zombie Face		
+22835	Face	Frieren Face		
+22836	Face	Fern Face		
+22837	Face	Stark Face		
+22838	Face	Himmel Face		
+22839	Face	Übel Face		
+22840	Face	Aura Face		
+22841	Face	Linie Face		
+22842	Face	Lügner Face		
 22843	Face	Saitama Face		
 22844	Face	Job Seeker Saitama Face		
 22845	Face	Genos Face		
@@ -12422,7 +12658,7 @@ id	category	gms_name	kms_name	icon
 50041	Face	Green Grape Face		
 50042	Face	Impressive Face		
 50043	Face	Judgment Face		
-50044	Face	Brainy Face	개나리 얼굴	
+50044	Face	Forsythia Face	개나리 얼굴	
 50045	Face	Pastel Dreams Face		
 50046	Face	Mo Xuan Face		
 50047	Face	Kain Face	카인 얼굴	
@@ -12520,7 +12756,7 @@ id	category	gms_name	kms_name	icon
 50141	Face	Green Grape Face		
 50142	Face	Impressive Face		
 50143	Face	Judgment Face		
-50144	Face	Brainy Face	개나리 얼굴	
+50144	Face	Forsythia Face	개나리 얼굴	
 50145	Face	Pastel Dreams Face		
 50146	Face	Old_Mo Xuan Face		
 50147	Face	Kain Face	카인 얼굴	
@@ -12618,7 +12854,7 @@ id	category	gms_name	kms_name	icon
 50241	Face	Green Grape Face		
 50242	Face	Impressive Face		
 50243	Face	Judgment Face		
-50244	Face	Brainy Face	개나리 얼굴	
+50244	Face	Forsythia Face	개나리 얼굴	
 50245	Face	Pastel Dreams Face		
 50246	Face	Old_Mo Xuan Face		
 50247	Face	Kain Face	카인 얼굴	
@@ -12716,7 +12952,7 @@ id	category	gms_name	kms_name	icon
 50341	Face	Green Grape Face		
 50342	Face	Impressive Face		
 50343	Face	Judgment Face		
-50344	Face	Brainy Face	개나리 얼굴	
+50344	Face	Forsythia Face	개나리 얼굴	
 50345	Face	Pastel Dreams Face		
 50346	Face	Old_Mo Xuan Face		
 50347	Face	Kain Face	카인 얼굴	
@@ -12814,7 +13050,7 @@ id	category	gms_name	kms_name	icon
 50441	Face	Green Grape Face		
 50442	Face	Impressive Face		
 50443	Face	Judgment Face		
-50444	Face	Brainy Face	개나리 얼굴	
+50444	Face	Forsythia Face	개나리 얼굴	
 50445	Face	Pastel Dreams Face		
 50446	Face	Old_Mo Xuan Face		
 50447	Face	Kain Face	카인 얼굴	
@@ -12912,7 +13148,7 @@ id	category	gms_name	kms_name	icon
 50541	Face	Green Grape Face		
 50542	Face	Impressive Face		
 50543	Face	Judgment Face		
-50544	Face	Brainy Face	개나리 얼굴	
+50544	Face	Forsythia Face	개나리 얼굴	
 50545	Face	Pastel Dreams Face		
 50546	Face	Old_Mo Xuan Face		
 50547	Face	Kain Face	카인 얼굴	
@@ -13010,7 +13246,7 @@ id	category	gms_name	kms_name	icon
 50641	Face	Green Grape Face		
 50642	Face	Impressive Face		
 50643	Face	Judgment Face		
-50644	Face	Brainy Face	개나리 얼굴	
+50644	Face	Forsythia Face	개나리 얼굴	
 50645	Face	Pastel Dreams Face		
 50646	Face	Old_Mo Xuan Face		
 50647	Face	Kain Face	카인 얼굴	
@@ -13108,7 +13344,7 @@ id	category	gms_name	kms_name	icon
 50741	Face	Green Grape Face		
 50742	Face	Impressive Face		
 50743	Face	Judgment Face		
-50744	Face	Brainy Face	개나리 얼굴	
+50744	Face	Forsythia Face	개나리 얼굴	
 50745	Face	Pastel Dreams Face		
 50746	Face	Old_Mo Xuan Face		
 50747	Face	Kain Face	카인 얼굴	
@@ -13304,7 +13540,7 @@ id	category	gms_name	kms_name	icon
 51054	Face	Green Grape Face		
 51055	Face	Impressive Face		
 51056	Face	Judgment Face		
-51057	Face	Brainy Face	개나리 얼굴	
+51057	Face	Forsythia Face	개나리 얼굴	
 51058	Face	Pastel Dreams Face		
 51059	Face	Old_Mo Xuan Face		
 51060	Face	Kain Face	카인 얼굴	
@@ -13400,7 +13636,7 @@ id	category	gms_name	kms_name	icon
 51154	Face	Green Grape Face		
 51155	Face	Impressive Face		
 51156	Face	Judgment Face		
-51157	Face	Brainy Face	개나리 얼굴	
+51157	Face	Forsythia Face	개나리 얼굴	
 51158	Face	Pastel Dreams Face		
 51159	Face	Old_Mo Xuan Face		
 51160	Face	Kain Face	카인 얼굴	
@@ -13496,7 +13732,7 @@ id	category	gms_name	kms_name	icon
 51254	Face	Green Grape Face		
 51255	Face	Impressive Face		
 51256	Face	Judgment Face		
-51257	Face	Brainy Face	개나리 얼굴	
+51257	Face	Forsythia Face	개나리 얼굴	
 51258	Face	Pastel Dreams Face		
 51259	Face	Old_Mo Xuan Face		
 51260	Face	Kain Face	카인 얼굴	
@@ -13592,7 +13828,7 @@ id	category	gms_name	kms_name	icon
 51354	Face	Green Grape Face		
 51355	Face	Impressive Face		
 51356	Face	Judgment Face		
-51357	Face	Brainy Face	개나리 얼굴	
+51357	Face	Forsythia Face	개나리 얼굴	
 51358	Face	Pastel Dreams Face		
 51359	Face	Old_Mo Xuan Face		
 51360	Face	Kain Face	카인 얼굴	
@@ -13688,7 +13924,7 @@ id	category	gms_name	kms_name	icon
 51454	Face	Green Grape Face		
 51455	Face	Impressive Face		
 51456	Face	Judgment Face		
-51457	Face	Brainy Face	개나리 얼굴	
+51457	Face	Forsythia Face	개나리 얼굴	
 51458	Face	Pastel Dreams Face		
 51459	Face	Old_Mo Xuan Face		
 51460	Face	Kain Face	카인 얼굴	
@@ -13784,7 +14020,7 @@ id	category	gms_name	kms_name	icon
 51554	Face	Green Grape Face		
 51555	Face	Impressive Face		
 51556	Face	Judgment Face		
-51557	Face	Brainy Face	개나리 얼굴	
+51557	Face	Forsythia Face	개나리 얼굴	
 51558	Face	Pastel Dreams Face		
 51559	Face	Old_Mo Xuan Face		
 51560	Face	Kain Face	카인 얼굴	
@@ -13880,7 +14116,7 @@ id	category	gms_name	kms_name	icon
 51654	Face	Green Grape Face		
 51655	Face	Impressive Face		
 51656	Face	Judgment Face		
-51657	Face	Brainy Face	개나리 얼굴	
+51657	Face	Forsythia Face	개나리 얼굴	
 51658	Face	Pastel Dreams Face		
 51659	Face	Old_Mo Xuan Face		
 51660	Face	Kain Face	카인 얼굴	
@@ -13976,7 +14212,7 @@ id	category	gms_name	kms_name	icon
 51754	Face	Green Grape Face		
 51755	Face	Impressive Face		
 51756	Face	Judgment Face		
-51757	Face	Brainy Face	개나리 얼굴	
+51757	Face	Forsythia Face	개나리 얼굴	
 51758	Face	Pastel Dreams Face		
 51759	Face	Old_Mo Xuan Face		
 51760	Face	Kain Face	카인 얼굴	
@@ -14178,7 +14414,7 @@ id	category	gms_name	kms_name	icon
 53073	Face	Clear Day Face	맑은날 얼굴	
 53074	Face	Hmph! Face		
 53075	Face	Munching Face	오물오물 얼굴	
-53076	Face	Miss You A Little Face	새벽비 얼굴	
+53076	Face	Dawn Rain Face	새벽비 얼굴	
 53077	Face	Winter Blush Face		
 53078	Face	Alluring Face	루어 얼굴	
 53079	Face	Sleepy Time Face	졸린 조용한 얼굴	
@@ -14268,7 +14504,7 @@ id	category	gms_name	kms_name	icon
 53173	Face	Clear Day Face	맑은날 얼굴	
 53174	Face	Hmph! Face		
 53175	Face	Munching Face	오물오물 얼굴	
-53176	Face	Miss You A Little Face	새벽비 얼굴	
+53176	Face	Dawn Rain Face	새벽비 얼굴	
 53177	Face	Winter Blush Face		
 53178	Face	Alluring Face	루어 얼굴	
 53179	Face	Sleepy Time Face	졸린 조용한 얼굴	
@@ -14358,7 +14594,7 @@ id	category	gms_name	kms_name	icon
 53273	Face	Clear Day Face	맑은날 얼굴	
 53274	Face	Hmph! Face		
 53275	Face	Munching Face	오물오물 얼굴	
-53276	Face	Miss You A Little Face	새벽비 얼굴	
+53276	Face	Dawn Rain Face	새벽비 얼굴	
 53277	Face	Winter Blush Face		
 53278	Face	Alluring Face	루어 얼굴	
 53279	Face	Sleepy Time Face	졸린 조용한 얼굴	
@@ -14448,7 +14684,7 @@ id	category	gms_name	kms_name	icon
 53373	Face	Clear Day Face	맑은날 얼굴	
 53374	Face	Hmph! Face		
 53375	Face	Munching Face	오물오물 얼굴	
-53376	Face	Miss You A Little Face	새벽비 얼굴	
+53376	Face	Dawn Rain Face	새벽비 얼굴	
 53377	Face	Winter Blush Face		
 53378	Face	Alluring Face	루어 얼굴	
 53379	Face	Sleepy Time Face	졸린 조용한 얼굴	
@@ -14537,7 +14773,7 @@ id	category	gms_name	kms_name	icon
 53473	Face	Clear Day Face	맑은날 얼굴	
 53474	Face	Hmph! Face		
 53475	Face	Munching Face	오물오물 얼굴	
-53476	Face	Miss You A Little Face	새벽비 얼굴	
+53476	Face	Dawn Rain Face	새벽비 얼굴	
 53477	Face	Winter Blush Face		
 53478	Face	Alluring Face	루어 얼굴	
 53479	Face	Sleepy Time Face	졸린 조용한 얼굴	
@@ -14627,7 +14863,7 @@ id	category	gms_name	kms_name	icon
 53573	Face	Clear Day Face	맑은날 얼굴	
 53574	Face	Hmph! Face		
 53575	Face	Munching Face	오물오물 얼굴	
-53576	Face	Miss You A Little Face	새벽비 얼굴	
+53576	Face	Dawn Rain Face	새벽비 얼굴	
 53577	Face	Winter Blush Face		
 53578	Face	Alluring Face	루어 얼굴	
 53579	Face	Sleepy Time Face	졸린 조용한 얼굴	
@@ -14717,7 +14953,7 @@ id	category	gms_name	kms_name	icon
 53673	Face	Clear Day Face	맑은날 얼굴	
 53674	Face	Hmph! Face		
 53675	Face	Munching Face	오물오물 얼굴	
-53676	Face	Miss You A Little Face	새벽비 얼굴	
+53676	Face	Dawn Rain Face	새벽비 얼굴	
 53677	Face	Winter Blush Face		
 53678	Face	Alluring Face	루어 얼굴	
 53679	Face	Sleepy Time Face	졸린 조용한 얼굴	
@@ -14807,7 +15043,7 @@ id	category	gms_name	kms_name	icon
 53773	Face	Clear Day Face	맑은날 얼굴	
 53774	Face	Hmph! Face		
 53775	Face	Munching Face	오물오물 얼굴	
-53776	Face	Miss You A Little Face	새벽비 얼굴	
+53776	Face	Dawn Rain Face	새벽비 얼굴	
 53777	Face	Winter Blush Face		
 53778	Face	Alluring Face	루어 얼굴	
 53779	Face	Sleepy Time Face	졸린 조용한 얼굴	
@@ -14993,7 +15229,7 @@ id	category	gms_name	kms_name	icon
 54093	Face	Clear Day Face	맑은날 얼굴	
 54094	Face	Hmph! Face		
 54095	Face	Munching Face	오물오물 얼굴	
-54096	Face	Miss You A Little Face	새벽비 얼굴	
+54096	Face	Dawn Rain Face	새벽비 얼굴	
 54097	Face	Winter Blush Face		
 54098	Face	Pure Face	정결한 얼굴	
 54099	Face	Alluring Face	루어 얼굴	
@@ -15085,7 +15321,7 @@ id	category	gms_name	kms_name	icon
 54193	Face	Clear Day Face	맑은날 얼굴	
 54194	Face	Hmph! Face		
 54195	Face	Munching Face	오물오물 얼굴	
-54196	Face	Miss You A Little Face	새벽비 얼굴	
+54196	Face	Dawn Rain Face	새벽비 얼굴	
 54197	Face	Winter Blush Face		
 54198	Face	Pure Face	정결한 얼굴	
 54199	Face	Alluring Face	루어 얼굴	
@@ -15177,7 +15413,7 @@ id	category	gms_name	kms_name	icon
 54293	Face	Clear Day Face	맑은날 얼굴	
 54294	Face	Hmph! Face		
 54295	Face	Munching Face	오물오물 얼굴	
-54296	Face	Miss You A Little Face	새벽비 얼굴	
+54296	Face	Dawn Rain Face	새벽비 얼굴	
 54297	Face	Winter Blush Face		
 54298	Face	Pure Face	정결한 얼굴	
 54299	Face	Alluring Face	루어 얼굴	
@@ -15269,7 +15505,7 @@ id	category	gms_name	kms_name	icon
 54393	Face	Clear Day Face	맑은날 얼굴	
 54394	Face	Hmph! Face		
 54395	Face	Munching Face	오물오물 얼굴	
-54396	Face	Miss You A Little Face	새벽비 얼굴	
+54396	Face	Dawn Rain Face	새벽비 얼굴	
 54397	Face	Winter Blush Face		
 54398	Face	Pure Face	정결한 얼굴	
 54399	Face	Alluring Face	루어 얼굴	
@@ -15361,7 +15597,7 @@ id	category	gms_name	kms_name	icon
 54493	Face	Clear Day Face	맑은날 얼굴	
 54494	Face	Hmph! Face		
 54495	Face	Munching Face	오물오물 얼굴	
-54496	Face	Miss You A Little Face	새벽비 얼굴	
+54496	Face	Dawn Rain Face	새벽비 얼굴	
 54497	Face	Winter Blush Face		
 54498	Face	Pure Face	정결한 얼굴	
 54499	Face	Alluring Face	루어 얼굴	
@@ -15453,7 +15689,7 @@ id	category	gms_name	kms_name	icon
 54593	Face	Clear Day Face	맑은날 얼굴	
 54594	Face	Hmph! Face		
 54595	Face	Munching Face	오물오물 얼굴	
-54596	Face	Miss You A Little Face	새벽비 얼굴	
+54596	Face	Dawn Rain Face	새벽비 얼굴	
 54597	Face	Winter Blush Face		
 54598	Face	Pure Face	정결한 얼굴	
 54599	Face	Alluring Face	루어 얼굴	
@@ -15545,7 +15781,7 @@ id	category	gms_name	kms_name	icon
 54693	Face	Clear Day Face	맑은날 얼굴	
 54694	Face	Hmph! Face		
 54695	Face	Munching Face	오물오물 얼굴	
-54696	Face	Miss You A Little Face	새벽비 얼굴	
+54696	Face	Dawn Rain Face	새벽비 얼굴	
 54697	Face	Winter Blush Face		
 54698	Face	Pure Face	정결한 얼굴	
 54699	Face	Alluring Face	루어 얼굴	
@@ -15637,7 +15873,7 @@ id	category	gms_name	kms_name	icon
 54793	Face	Clear Day Face	맑은날 얼굴	
 54794	Face	Hmph! Face		
 54795	Face	Munching Face	오물오물 얼굴	
-54796	Face	Miss You A Little Face	새벽비 얼굴	
+54796	Face	Dawn Rain Face	새벽비 얼굴	
 54797	Face	Winter Blush Face		
 54798	Face	Pure Face	정결한 얼굴	
 54799	Face	Alluring Face	루어 얼굴	
@@ -16437,6 +16673,7 @@ id	category	gms_name	kms_name	icon
 55842	Face	Star Face		
 55843	Face	Why? Face		
 55844	Face	Eye Rim Face		
+55845	Face	Soft Alluring Face		
 55846	Face	Serious Face		
 55847	Face	Squish Face		
 55848	Face	In My Feelings Face		
@@ -16451,6 +16688,7 @@ id	category	gms_name	kms_name	icon
 55857	Face	Mischievous Smirk Face (White Eyes)		
 55858	Face	Sharp Gaze Face (White Eyes)		
 55859	Face	Just One Bite Face		
+55860	Face	Sleepy Smile Face		
 55861	Face	Mo Xuan Face		
 55862	Face	Handsome Maple Face		
 55863	Face	Ugh Face		
@@ -17210,6 +17448,7 @@ id	category	gms_name	kms_name	icon
 56863	Face	Star Face		
 56865	Face	Why? Face		
 56866	Face	Eye Rim Face		
+56867	Face	Soft Alluring Face		
 56868	Face	Serious Face		
 56869	Face	Squish Face		
 56870	Face	In My Feelings Face		
@@ -17224,6 +17463,7 @@ id	category	gms_name	kms_name	icon
 56879	Face	Mischievous Smirk Face (White Eyes)		
 56880	Face	Sharp Gaze Face (White Eyes)		
 56881	Face	Just One Bite Face		
+56882	Face	Dazed Smile Face		
 56883	Face	Mo Xuan Face		
 56884	Face	Gorgeous Maple Face		
 56885	Face	Ugh Face		
@@ -17297,9 +17537,17 @@ id	category	gms_name	kms_name	icon
 57077	Face	Mystic Cat Face		
 57078	Face	Smiling Goat Face		
 57079	Face	Teensy Apocalypse Face		
+57080	Face	Guardian Spirit Face	수호령 얼굴	
+57082	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+57083	Face	White-Eyed Peaceful Damien Face	백안 평화의 데미안 얼굴	
+57084	Face	White-Eyed Languid Face	백안 랑드 얼굴	
 57085	Face	Argent Knight Face		
 57086	Face	Fine Jewel Face		
 57087	Face	Midday Smile Face		
+57088	Face	Blood Moon Face		
+57089	Face	Fresh Sour Face		
+57093	Face	You're Approaching Me? Face		
+57094	Face	Poppet Face		
 57109	Face	Snake Eyes Face	나이프 얼굴	
 57110	Face	Heart Eyes Face		
 57111	Face	Elegance Face	엘레강스 얼굴	
@@ -17357,9 +17605,17 @@ id	category	gms_name	kms_name	icon
 57177	Face	Mystic Cat Face		
 57178	Face	Smiling Goat Face		
 57179	Face	Teensy Apocalypse Face		
+57180	Face	Guardian Spirit Face	수호령 얼굴	
+57182	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+57183	Face	White-Eyed Peaceful Damien Face	백안 평화의 데미안 얼굴	
+57184	Face	White-Eyed Languid Face	백안 랑드 얼굴	
 57185	Face	Argent Knight Face		
 57186	Face	Fine Jewel Face		
 57187	Face	Midday Smile Face		
+57188	Face	Blood Moon Face		
+57189	Face	Fresh Sour Face		
+57193	Face	You're Approaching Me? Face		
+57194	Face	Poppet Face		
 57209	Face	Snake Eyes Face	나이프 얼굴	
 57210	Face	Heart Eyes Face		
 57211	Face	Elegance Face	엘레강스 얼굴	
@@ -17417,9 +17673,17 @@ id	category	gms_name	kms_name	icon
 57277	Face	Mystic Cat Face		
 57278	Face	Smiling Goat Face		
 57279	Face	Teensy Apocalypse Face		
+57280	Face	Guardian Spirit Face	수호령 얼굴	
+57282	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+57283	Face	White-Eyed Peaceful Damien Face	백안 평화의 데미안 얼굴	
+57284	Face	White-Eyed Languid Face	백안 랑드 얼굴	
 57285	Face	Argent Knight Face		
 57286	Face	Fine Jewel Face		
 57287	Face	Midday Smile Face		
+57288	Face	Blood Moon Face		
+57289	Face	Fresh Sour Face		
+57293	Face	You're Approaching Me? Face		
+57294	Face	Poppet Face		
 57309	Face	Snake Eyes Face	나이프 얼굴	
 57310	Face	Heart Eyes Face		
 57311	Face	Elegance Face	엘레강스 얼굴	
@@ -17477,9 +17741,17 @@ id	category	gms_name	kms_name	icon
 57377	Face	Mystic Cat Face		
 57378	Face	Smiling Goat Face		
 57379	Face	Teensy Apocalypse Face		
+57380	Face	Guardian Spirit Face	수호령 얼굴	
+57382	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+57383	Face	White-Eyed Peaceful Damien Face	백안 평화의 데미안 얼굴	
+57384	Face	White-Eyed Languid Face	백안 랑드 얼굴	
 57385	Face	Argent Knight Face		
 57386	Face	Fine Jewel Face		
 57387	Face	Midday Smile Face		
+57388	Face	Blood Moon Face		
+57389	Face	Fresh Sour Face		
+57393	Face	You're Approaching Me? Face		
+57394	Face	Poppet Face		
 57409	Face	Snake Eyes Face	나이프 얼굴	
 57410	Face	Heart Eyes Face		
 57411	Face	Elegance Face	엘레강스 얼굴	
@@ -17537,9 +17809,17 @@ id	category	gms_name	kms_name	icon
 57477	Face	Mystic Cat Face		
 57478	Face	Smiling Goat Face		
 57479	Face	Teensy Apocalypse Face		
+57480	Face	Guardian Spirit Face	수호령 얼굴	
+57482	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+57483	Face	White-Eyed Peaceful Damien Face	백안 평화의 데미안 얼굴	
+57484	Face	White-Eyed Languid Face	백안 랑드 얼굴	
 57485	Face	Argent Knight Face		
 57486	Face	Fine Jewel Face		
 57487	Face	Midday Smile Face		
+57488	Face	Blood Moon Face		
+57489	Face	Fresh Sour Face		
+57493	Face	You're Approaching Me? Face		
+57494	Face	Poppet Face		
 57509	Face	Snake Eyes Face	나이프 얼굴	
 57510	Face	Heart Eyes Face		
 57511	Face	Elegance Face	엘레강스 얼굴	
@@ -17597,9 +17877,17 @@ id	category	gms_name	kms_name	icon
 57577	Face	Mystic Cat Face		
 57578	Face	Smiling Goat Face		
 57579	Face	Teensy Apocalypse Face		
+57580	Face	Guardian Spirit Face	수호령 얼굴	
+57582	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+57583	Face	White-Eyed Peaceful Damien Face	백안 평화의 데미안 얼굴	
+57584	Face	White-Eyed Languid Face	백안 랑드 얼굴	
 57585	Face	Argent Knight Face		
 57586	Face	Fine Jewel Face		
 57587	Face	Midday Smile Face		
+57588	Face	Blood Moon Face		
+57589	Face	Fresh Sour Face		
+57593	Face	You're Approaching Me? Face		
+57594	Face	Poppet Face		
 57609	Face	Snake Eyes Face	나이프 얼굴	
 57610	Face	Heart Eyes Face		
 57611	Face	Elegance Face	엘레강스 얼굴	
@@ -17657,9 +17945,17 @@ id	category	gms_name	kms_name	icon
 57677	Face	Mystic Cat Face		
 57678	Face	Smiling Goat Face		
 57679	Face	Teensy Apocalypse Face		
+57680	Face	Guardian Spirit Face	수호령 얼굴	
+57682	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+57683	Face	White-Eyed Peaceful Damien Face	백안 평화의 데미안 얼굴	
+57684	Face	White-Eyed Languid Face	백안 랑드 얼굴	
 57685	Face	Argent Knight Face		
 57686	Face	Fine Jewel Face		
 57687	Face	Midday Smile Face		
+57688	Face	Blood Moon Face		
+57689	Face	Fresh Sour Face		
+57693	Face	You're Approaching Me? Face		
+57694	Face	Poppet Face		
 57709	Face	Snake Eyes Face	나이프 얼굴	
 57710	Face	Heart Eyes Face		
 57711	Face	Elegance Face	엘레강스 얼굴	
@@ -17717,9 +18013,17 @@ id	category	gms_name	kms_name	icon
 57777	Face	Mystic Cat Face		
 57778	Face	Smiling Goat Face		
 57779	Face	Teensy Apocalypse Face		
+57780	Face	Guardian Spirit Face	수호령 얼굴	
+57782	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+57783	Face	White-Eyed Peaceful Damien Face	백안 평화의 데미안 얼굴	
+57784	Face	White-Eyed Languid Face	백안 랑드 얼굴	
 57785	Face	Argent Knight Face		
 57786	Face	Fine Jewel Face		
 57787	Face	Midday Smile Face		
+57788	Face	Blood Moon Face		
+57789	Face	Fresh Sour Face		
+57793	Face	You're Approaching Me? Face		
+57794	Face	Poppet Face		
 57809	Face	Snake Eyes Face		
 57810	Face	Heart Eyes Face		
 57813	Face	Saintly Face		
@@ -17767,6 +18071,10 @@ id	category	gms_name	kms_name	icon
 57885	Face	Argent Knight Face		
 57886	Face	Fine Jewel Face		
 57887	Face	Midday Smile Face		
+57888	Face	Blood Moon Face		
+57889	Face	Fresh Sour Face		
+57893	Face	You're Approaching Me? Face		
+57894	Face	Poppet Face		
 58000	Face	True Treasure Face		
 58001	Face	Tanjiro Face	탄지로 얼굴	
 58002	Face	Zenitsu Face	젠이츠 얼굴	
@@ -17845,6 +18153,9 @@ id	category	gms_name	kms_name	icon
 58093	Face	Mystic Cat Face		
 58094	Face	Smiling Goat Face		
 58095	Face	Teensy Apocalypse Face		
+58096	Face	Guardian Spirit Face	수호령 얼굴	
+58098	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+58099	Face	White-Eyed Calm Eileen Face	백안 차분한 아일린 얼굴	
 58100	Face	True Treasure Face		
 58101	Face	Tanjiro Face	탄지로 얼굴	
 58102	Face	Zenitsu Face	젠이츠 얼굴	
@@ -17923,6 +18234,9 @@ id	category	gms_name	kms_name	icon
 58193	Face	Mystic Cat Face		
 58194	Face	Smiling Goat Face		
 58195	Face	Teensy Apocalypse Face		
+58196	Face	Guardian Spirit Face	수호령 얼굴	
+58198	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+58199	Face	White-Eyed Calm Eileen Face	백안 차분한 아일린 얼굴	
 58200	Face	True Treasure Face		
 58201	Face	Tanjiro Face	탄지로 얼굴	
 58202	Face	Zenitsu Face	젠이츠 얼굴	
@@ -18001,6 +18315,9 @@ id	category	gms_name	kms_name	icon
 58293	Face	Mystic Cat Face		
 58294	Face	Smiling Goat Face		
 58295	Face	Teensy Apocalypse Face		
+58296	Face	Guardian Spirit Face	수호령 얼굴	
+58298	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+58299	Face	White-Eyed Calm Eileen Face	백안 차분한 아일린 얼굴	
 58300	Face	True Treasure Face		
 58301	Face	Tanjiro Face	탄지로 얼굴	
 58302	Face	Zenitsu Face	젠이츠 얼굴	
@@ -18079,6 +18396,9 @@ id	category	gms_name	kms_name	icon
 58393	Face	Mystic Cat Face		
 58394	Face	Smiling Goat Face		
 58395	Face	Teensy Apocalypse Face		
+58396	Face	Guardian Spirit Face	수호령 얼굴	
+58398	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+58399	Face	White-Eyed Calm Eileen Face	백안 차분한 아일린 얼굴	
 58400	Face	True Treasure Face		
 58401	Face	Tanjiro Face	탄지로 얼굴	
 58402	Face	Zenitsu Face	젠이츠 얼굴	
@@ -18157,6 +18477,9 @@ id	category	gms_name	kms_name	icon
 58493	Face	Mystic Cat Face		
 58494	Face	Smiling Goat Face		
 58495	Face	Teensy Apocalypse Face		
+58496	Face	Guardian Spirit Face	수호령 얼굴	
+58498	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+58499	Face	White-Eyed Calm Eileen Face	백안 차분한 아일린 얼굴	
 58500	Face	True Treasure Face		
 58501	Face	Tanjiro Face	탄지로 얼굴	
 58502	Face	Zenitsu Face	젠이츠 얼굴	
@@ -18235,6 +18558,9 @@ id	category	gms_name	kms_name	icon
 58593	Face	Mystic Cat Face		
 58594	Face	Smiling Goat Face		
 58595	Face	Teensy Apocalypse Face		
+58596	Face	Guardian Spirit Face	수호령 얼굴	
+58598	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+58599	Face	White-Eyed Calm Eileen Face	백안 차분한 아일린 얼굴	
 58600	Face	True Treasure Face		
 58601	Face	Tanjiro Face	탄지로 얼굴	
 58602	Face	Zenitsu Face	젠이츠 얼굴	
@@ -18313,6 +18639,9 @@ id	category	gms_name	kms_name	icon
 58693	Face	Mystic Cat Face		
 58694	Face	Smiling Goat Face		
 58695	Face	Teensy Apocalypse Face		
+58696	Face	Guardian Spirit Face	수호령 얼굴	
+58698	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+58699	Face	White-Eyed Calm Eileen Face	백안 차분한 아일린 얼굴	
 58700	Face	True Treasure Face		
 58701	Face	Tanjiro Face	탄지로 얼굴	
 58702	Face	Zenitsu Face	젠이츠 얼굴	
@@ -18391,6 +18720,9 @@ id	category	gms_name	kms_name	icon
 58793	Face	Mystic Cat Face		
 58794	Face	Smiling Goat Face		
 58795	Face	Teensy Apocalypse Face		
+58796	Face	Guardian Spirit Face	수호령 얼굴	
+58798	Face	Dreamy Lucid Face	꿈꾸는 루시드 얼굴	
+58799	Face	White-Eyed Calm Eileen Face	백안 차분한 아일린 얼굴	
 58800	Face	True Treasure Face		
 58801	Face	Tanjiro Face		
 58802	Face	Zenitsu Face		
@@ -18457,33 +18789,77 @@ id	category	gms_name	kms_name	icon
 58893	Face	Mystic Cat Face		
 58894	Face	Smiling Goat Face		
 58895	Face	Teensy Apocalypse Face		
+81000	Face	White-Eyed Clear Day Face	백안 맑은날 얼굴	
 81001	Face	Argent Knight Face		
 81002	Face	Fine Jewel Face		
 81003	Face	Twilight Smile Face		
+81004	Face	Blood Moon Face		
+81005	Face	Fresh Sour Face		
+81009	Face	You're Approaching Me? Face		
+81010	Face	Poppet Face		
+81100	Face	White-Eyed Clear Day Face	백안 맑은날 얼굴	
 81101	Face	Argent Knight Face		
 81102	Face	Fine Jewel Face		
 81103	Face	Twilight Smile Face		
+81104	Face	Blood Moon Face		
+81105	Face	Fresh Sour Face		
+81109	Face	You're Approaching Me? Face		
+81110	Face	Poppet Face		
+81200	Face	White-Eyed Clear Day Face	백안 맑은날 얼굴	
 81201	Face	Argent Knight Face		
 81202	Face	Fine Jewel Face		
 81203	Face	Twilight Smile Face		
+81204	Face	Blood Moon Face		
+81205	Face	Fresh Sour Face		
+81209	Face	You're Approaching Me? Face		
+81210	Face	Poppet Face		
+81300	Face	White-Eyed Clear Day Face	백안 맑은날 얼굴	
 81301	Face	Argent Knight Face		
 81302	Face	Fine Jewel Face		
 81303	Face	Twilight Smile Face		
+81304	Face	Blood Moon Face		
+81305	Face	Fresh Sour Face		
+81309	Face	You're Approaching Me? Face		
+81310	Face	Poppet Face		
+81400	Face	White-Eyed Clear Day Face	백안 맑은날 얼굴	
 81401	Face	Argent Knight Face		
 81402	Face	Fine Jewel Face		
 81403	Face	Twilight Smile Face		
+81404	Face	Blood Moon Face		
+81405	Face	Fresh Sour Face		
+81409	Face	You're Approaching Me? Face		
+81410	Face	Poppet Face		
+81500	Face	White-Eyed Clear Day Face	백안 맑은날 얼굴	
 81501	Face	Argent Knight Face		
 81502	Face	Fine Jewel Face		
 81503	Face	Twilight Smile Face		
+81504	Face	Blood Moon Face		
+81505	Face	Fresh Sour Face		
+81509	Face	You're Approaching Me? Face		
+81510	Face	Poppet Face		
+81600	Face	White-Eyed Clear Day Face	백안 맑은날 얼굴	
 81601	Face	Argent Knight Face		
 81602	Face	Fine Jewel Face		
 81603	Face	Twilight Smile Face		
+81604	Face	Blood Moon Face		
+81605	Face	Fresh Sour Face		
+81609	Face	You're Approaching Me? Face		
+81610	Face	Poppet Face		
+81700	Face	White-Eyed Clear Day Face	백안 맑은날 얼굴	
 81701	Face	Argent Knight Face		
 81702	Face	Fine Jewel Face		
 81703	Face	Twilight Smile Face		
+81704	Face	Blood Moon Face		
+81705	Face	Fresh Sour Face		
+81709	Face	You're Approaching Me? Face		
+81710	Face	Poppet Face		
 81801	Face	Argent Knight Face		
 81802	Face	Fine Jewel Face		
 81803	Face	Twilight Smile Face		
+81804	Face	Blood Moon Face		
+81805	Face	Fresh Sour Face		
+81809	Face	You're Approaching Me? Face		
+81810	Face	Poppet Face		
 1080000	Glove	White Ninja Gloves	스피드 글러브	1080000.png
 1080001	Glove	Wedding Gloves	웨딩 장갑	1080001.png
 1080007	Glove	크리스토프 장갑	크리스토프 장갑	1080007.png
@@ -18738,8 +19114,12 @@ id	category	gms_name	kms_name	icon
 1082874	Glove	Lumiere Chronometer	Lumiere Chronometer	1082874.png
 1082875	Glove	Lumiere Chronometer	Lumiere Chronometer	1082875.png
 1082876	Glove	Lumiere Chronometer	Lumiere Chronometer	1082876.png
+1082877	Glove	Stark's Gloves	슈타르크의 장갑	1082877.png
+1082878	Glove	Übel's Gloves	위벨의 장갑	1082878.png
+1082879	Glove	Aura's Gloves	아우라의 장갑	1082879.png
 1082880	Glove	Hands United		1082880.png
 1082881	Glove	Present Owl's Wings		1082881.png
+1082882	Glove	Stark's Winter Gloves	슈타르크의 겨울용 장갑	1082882.png
 1082883	Glove	White Ursus Gloves	화이트 우르스 글러브	1082883.png
 1082884	Glove	Brown Ursus Gloves	브라운 우르스 글러브	1082884.png
 1082885	Glove	Black Ursus Gloves	블랙 우르스 글러브	1082885.png
@@ -18748,6 +19128,9 @@ id	category	gms_name	kms_name	icon
 1082888	Glove	Resistance Wild Hunter Gloves	레지스탕스 와일드헌터 글러브	1082888.png
 1082890	Glove	Baldrix Gloves	발드릭스 장갑	1082890.png
 1082891	Glove	Shackles of Restraint		1082891.png
+1082893	Glove	Dreamlight Bangle	드림 라이트 뱅글	1082893.png
+1082972	Glove	Hero's Gloves	기사단의 장갑	1082972.png
+1082973	Glove	Heart Lace Gloves		1082973.png
 30000	Hair	Toben Hair	검은색 토벤 머리	
 30001	Hair	Toben Hair	빨간색 토벤 머리	
 30002	Hair	Toben Hair	주황색 토벤 머리	
@@ -19084,14 +19467,14 @@ id	category	gms_name	kms_name	icon
 30535	Hair	Blue Baldie	파란색 하찮은 헤어	
 30536	Hair	Purple Baldie	보라색 하찮은 헤어	
 30537	Hair	Brown Baldie	갈색 하찮은 헤어	
-30540	Hair	Black Robot	검은색 카리스마 헤어	
-30541	Hair	Red Robot	빨간색 카리스마 헤어	
-30542	Hair	Orange Robot	주황색 카리스마 헤어	
-30543	Hair	Blonde Robot	노란색 카리스마 헤어	
-30544	Hair	Green Robot	초록색 카리스마 헤어	
-30545	Hair	Blue Robot	파란색 카리스마 헤어	
-30546	Hair	Purple Robot	보라색 카리스마 헤어	
-30547	Hair	Brown Robot	갈색 카리스마 헤어	
+30540	Hair	Charisma Hair	검은색 카리스마 헤어	
+30541	Hair	Charisma Hair	빨간색 카리스마 헤어	
+30542	Hair	Charisma Hair	주황색 카리스마 헤어	
+30543	Hair	Charisma Hair	노란색 카리스마 헤어	
+30544	Hair	Charisma Hair	초록색 카리스마 헤어	
+30545	Hair	Charisma Hair	파란색 카리스마 헤어	
+30546	Hair	Charisma Hair	보라색 카리스마 헤어	
+30547	Hair	Charisma Hair	갈색 카리스마 헤어	
 30550	Hair	Black Kongfu Braids		
 30551	Hair	Red Kongfu Braids		
 30552	Hair	Orange Kongfu Braids		
@@ -20516,14 +20899,14 @@ id	category	gms_name	kms_name	icon
 33255	Hair	Bed Head Hair	파란색 요정윙 헤어	
 33256	Hair	Bed Head Hair	보라색 요정윙 헤어	
 33257	Hair	Bed Head Hair	갈색 요정윙 헤어	
-33260	Hair	Black Neinheart Hair 	검은색 나인하트 헤어	
-33261	Hair	Red Neinheart Hair 	빨간색 나인하트 헤어	
-33262	Hair	Orange Neinheart Hair 	주황색 나인하트 헤어	
-33263	Hair	Blonde Neinheart Hair 	노란색 나인하트 헤어	
-33264	Hair	Green Neinheart Hair 	초록색 나인하트 헤어	
-33265	Hair	Blue Neinheart Hair 	파란색 나인하트 헤어	
-33266	Hair	Purple Neinheart Hair 	보라색 나인하트 헤어	
-33267	Hair	Brown Neinheart Hair 	갈색 나인하트 헤어	
+33260	Hair	Neinheart Hair	검은색 나인하트 헤어	
+33261	Hair	Neinheart Hair	빨간색 나인하트 헤어	
+33262	Hair	Neinheart Hair	주황색 나인하트 헤어	
+33263	Hair	Neinheart Hair	노란색 나인하트 헤어	
+33264	Hair	Neinheart Hair	초록색 나인하트 헤어	
+33265	Hair	Neinheart Hair	파란색 나인하트 헤어	
+33266	Hair	Neinheart Hair	보라색 나인하트 헤어	
+33267	Hair	Neinheart Hair	갈색 나인하트 헤어	
 33270	Hair	Spiky Bangs Hair	검은색 파워드라이 헤어	
 33271	Hair	Spiky Bangs Hair	빨간색 파워드라이 헤어	
 33272	Hair	Spiky Bangs Hair	주황색 파워드라이 헤어	
@@ -20588,14 +20971,14 @@ id	category	gms_name	kms_name	icon
 33345	Hair	Blue Windblown Wave Hair		
 33346	Hair	Purple Windblown Wave Hair		
 33347	Hair	Brown Windblown Wave Hair		
-33350	Hair	Black Short Flip Cut 	검은색 숏 리젠트 컷	
-33351	Hair	Red Short Regent Cut 	빨간색 숏 리젠트 컷	
-33352	Hair	Orange Short Regent Cut 	주황색 숏 리젠트 컷	
-33353	Hair	Blonde Short Regent Cut 	노란색 숏 리젠트 컷	
-33354	Hair	Green Short Regent Cut 	초록색 숏 리젠트 컷	
-33355	Hair	Blue Short Regent Cut 	파란색 숏 리젠트 컷	
-33356	Hair	Purple Short Regent Cut 	보라색 숏 리젠트 컷	
-33357	Hair	Brown Short Regent Cut 	갈색 숏 리젠트 컷	
+33350	Hair	Short Regent Cut	검은색 숏 리젠트 컷	
+33351	Hair	Short Regent Cut	빨간색 숏 리젠트 컷	
+33352	Hair	Short Regent Cut	주황색 숏 리젠트 컷	
+33353	Hair	Short Regent Cut	노란색 숏 리젠트 컷	
+33354	Hair	Short Regent Cut	초록색 숏 리젠트 컷	
+33355	Hair	Short Regent Cut	파란색 숏 리젠트 컷	
+33356	Hair	Short Regent Cut	보라색 숏 리젠트 컷	
+33357	Hair	Short Regent Cut	갈색 숏 리젠트 컷	
 33360	Hair	Black Scoop Hair	검은색 아이스크림 헤어	
 33361	Hair	Red Scoop Hair	빨간색 아이스크림 헤어	
 33362	Hair	Orange Scoop Hair	주황색 아이스크림 헤어	
@@ -20692,14 +21075,14 @@ id	category	gms_name	kms_name	icon
 33475	Hair	Blue Neat Shaggy Hair		
 33476	Hair	Purple Neat Shaggy Hair		
 33477	Hair	Brown Neat Shaggy Hair		
-33480	Hair	Black Hooligan Hair  	검은색 불량 소년 헤어	
-33481	Hair	Red Hooligan Hair  	빨간색 불량 소년 헤어	
-33482	Hair	Orange Hooligan Hair  	주황색 불량 소년 헤어	
-33483	Hair	Blonde Hooligan Hair  	노란색 불량 소년 헤어	
-33484	Hair	Green Hooligan Hair  	초록색 불량 소년 헤어	
-33485	Hair	Blue Hooligan Hair  	파란색 불량 소년 헤어	
-33486	Hair	Purple Hooligan Hair  	보라색 불량 소년 헤어	
-33487	Hair	Brown Hooligan Hair  	갈색 불량 소년 헤어	
+33480	Hair	Hooligan Hair	검은색 불량 소년 헤어	
+33481	Hair	Hooligan Hair	빨간색 불량 소년 헤어	
+33482	Hair	Hooligan Hair	주황색 불량 소년 헤어	
+33483	Hair	Hooligan Hair	노란색 불량 소년 헤어	
+33484	Hair	Hooligan Hair	초록색 불량 소년 헤어	
+33485	Hair	Hooligan Hair	파란색 불량 소년 헤어	
+33486	Hair	Hooligan Hair	보라색 불량 소년 헤어	
+33487	Hair	Hooligan Hair	갈색 불량 소년 헤어	
 33500	Hair	Mega Flip Hair	탈색 검정 패셔니스타 헤어	
 33501	Hair	Mega Flip Hair	빨간색 패셔니스타 헤어	
 33502	Hair	Mega Flip Hair	주황색 패셔니스타 헤어	
@@ -21180,14 +21563,14 @@ id	category	gms_name	kms_name	icon
 34235	Hair	Blue Tender Bowl-cut Hair	파란색 동그라미 송이 헤어	
 34236	Hair	Purple Tender Bowl-cut Hair	보라색 동그라미 송이 헤어	
 34237	Hair	Brown Tender Bowl-cut Hair	갈색 동그라미 송이 헤어	
-34240	Hair	Black Long Tied Hair 	검은색 사과롱롱 헤어	
-34241	Hair	Red Long Tied Hair 	빨간색 사과롱롱 헤어	
-34242	Hair	Orange Long Tied Hair 	주황색 사과롱롱 헤어	
-34243	Hair	Blonde Long Tied Hair 	노란색 사과롱롱 헤어	
-34244	Hair	Green Long Tied Hair 	초록색 사과롱롱 헤어	
-34245	Hair	Blue Long Tied Hair 	파란색 사과롱롱 헤어	
-34246	Hair	Purple Long Tied Hair 	보라색 사과롱롱 헤어	
-34247	Hair	Brown Long Tied Hair 	갈색 사과롱롱 헤어	
+34240	Hair	Long Tied Hair	검은색 사과롱롱 헤어	
+34241	Hair	Long Tied Hair	빨간색 사과롱롱 헤어	
+34242	Hair	Long Tied Hair	주황색 사과롱롱 헤어	
+34243	Hair	Long Tied Hair	노란색 사과롱롱 헤어	
+34244	Hair	Long Tied Hair	초록색 사과롱롱 헤어	
+34245	Hair	Long Tied Hair	파란색 사과롱롱 헤어	
+34246	Hair	Long Tied Hair	보라색 사과롱롱 헤어	
+34247	Hair	Long Tied Hair	갈색 사과롱롱 헤어	
 34250	Hair	Black Long with Bangs	검은색 부풀린 뱅 헤어	
 34251	Hair	Red Long with Bangs	빨간색 부풀린 뱅 헤어	
 34252	Hair	Orange Long with Bangs	주황색 부풀린 뱅 헤어	
@@ -21332,22 +21715,22 @@ id	category	gms_name	kms_name	icon
 34425	Hair	Sky Blue Highlights	파란색 그라데이션 스카이블루	
 34426	Hair	Violet Highlights	보라색 그라데이션 바이올렛	
 34427	Hair	Golden Brown Highlights	갈색 그라데이션 골드브라운	
-34430	Hair	Black Spring Flower Hair 	검은색 스프링 플라워 헤어	
-34431	Hair	Red Spring Flower Hair 	빨간색 스프링 플라워 헤어	
-34432	Hair	Orange Spring Flower Hair 	주황색 스프링 플라워 헤어	
-34433	Hair	Blonde Spring Flower Hair 	노란색 스프링 플라워 헤어	
-34434	Hair	Green Spring Flower Hair 	초록색 스프링 플라워 헤어	
-34435	Hair	Blue Spring Flower Hair 	파란색 스프링 플라워 헤어	
-34436	Hair	Purple Spring Flower Hair 	보라색 스프링 플라워 헤어	
-34437	Hair	Brown Spring Flower Hair 	갈색 스프링 플라워 헤어	
-34440	Hair	Black Romantic Perm	검은색 베이비 펌 헤어	
-34441	Hair	Red Romantic Perm	빨간색 베이비 펌 헤어	
-34442	Hair	Orange Romantic Perm	주황색 베이비 펌 헤어	
-34443	Hair	Blonde Romantic Perm	노란색 베이비 펌 헤어	
-34444	Hair	Green Romantic Perm	초록색 베이비 펌 헤어	
-34445	Hair	Blue Romantic Perm	파란색 베이비 펌 헤어	
-34446	Hair	Purple Romantic Perm	보라색 베이비 펌 헤어	
-34447	Hair	Brown Romantic Perm 	갈색 베이비 펌 헤어	
+34430	Hair	Spring Flower Hair	검은색 스프링 플라워 헤어	
+34431	Hair	Spring Flower Hair	빨간색 스프링 플라워 헤어	
+34432	Hair	Spring Flower Hair	주황색 스프링 플라워 헤어	
+34433	Hair	Spring Flower Hair	노란색 스프링 플라워 헤어	
+34434	Hair	Spring Flower Hair	초록색 스프링 플라워 헤어	
+34435	Hair	Spring Flower Hair	파란색 스프링 플라워 헤어	
+34436	Hair	Spring Flower Hair	보라색 스프링 플라워 헤어	
+34437	Hair	Spring Flower Hair	갈색 스프링 플라워 헤어	
+34440	Hair	Romantic Perm Hair	검은색 베이비 펌 헤어	
+34441	Hair	Romantic Perm Hair	빨간색 베이비 펌 헤어	
+34442	Hair	Romantic Perm Hair	주황색 베이비 펌 헤어	
+34443	Hair	Romantic Perm Hair	노란색 베이비 펌 헤어	
+34444	Hair	Romantic Perm Hair	초록색 베이비 펌 헤어	
+34445	Hair	Romantic Perm Hair	파란색 베이비 펌 헤어	
+34446	Hair	Romantic Perm Hair	보라색 베이비 펌 헤어	
+34447	Hair	Romantic Perm Hair	갈색 베이비 펌 헤어	
 34450	Hair	Black Kitty Hair	검은색 러블리 키티 헤어	
 34451	Hair	Red Kitty Hair	빨간색 러블리 키티 헤어	
 34452	Hair	Orange Kitty Hair	주황색 러블리 키티 헤어	
@@ -21412,14 +21795,14 @@ id	category	gms_name	kms_name	icon
 34585	Hair	Blue Cinnamon Buns		
 34586	Hair	Purple Cinnamon Buns		
 34587	Hair	Brown Cinnamon Buns		
-34590	Hair	Short Double Ponytail Hair 	검은색 상큼발랄 양갈래 헤어	
-34591	Hair	Short Double Ponytail Hair 	빨간색 상큼발랄 양갈래 헤어	
-34592	Hair	Short Double Ponytail Hair 	주황색 상큼발랄 양갈래 헤어	
-34593	Hair	Short Double Ponytail Hair 	노란색 상큼발랄 양갈래 헤어	
-34594	Hair	Short Double Ponytail Hair 	초록색 상큼발랄 양갈래 헤어	
-34595	Hair	Short Double Ponytail Hair 	파란색 상큼발랄 양갈래 헤어	
-34596	Hair	Short Double Ponytail Hair 	보라색 상큼발랄 양갈래 헤어	
-34597	Hair	Short Double Ponytail Hair 	갈색 상큼발랄 양갈래 헤어	
+34590	Hair	Short Double Ponytail Hair	검은색 상큼발랄 양갈래 헤어	
+34591	Hair	Short Double Ponytail Hair	빨간색 상큼발랄 양갈래 헤어	
+34592	Hair	Short Double Ponytail Hair	주황색 상큼발랄 양갈래 헤어	
+34593	Hair	Short Double Ponytail Hair	노란색 상큼발랄 양갈래 헤어	
+34594	Hair	Short Double Ponytail Hair	초록색 상큼발랄 양갈래 헤어	
+34595	Hair	Short Double Ponytail Hair	파란색 상큼발랄 양갈래 헤어	
+34596	Hair	Short Double Ponytail Hair	보라색 상큼발랄 양갈래 헤어	
+34597	Hair	Short Double Ponytail Hair	갈색 상큼발랄 양갈래 헤어	
 34600	Hair	Black Starling Hair	검은색 셰릴 헤어	
 34601	Hair	Red Starling Hair	빨간색 셰릴 헤어	
 34602	Hair	Orange Starling Hair	주황색 셰릴 헤어	
@@ -21452,14 +21835,14 @@ id	category	gms_name	kms_name	icon
 34635	Hair	Blue Gorgeous Queen Hair	파란색 고저스 퀸 헤어	
 34636	Hair	Purple Gorgeous Queen Hair	보라색 고저스 퀸 헤어	
 34637	Hair	Brown Gorgeous Queen Hair	갈색 고저스 퀸 헤어	
-34640	Hair	Black Cute Tied Bun Hair	검은색 봉실 꽃잎 헤어	
-34641	Hair	Red Cute Tied Bun Hair	빨간색 봉실 꽃잎 헤어	
-34642	Hair	Orange Cute Tied Bun Hair	주황색 봉실 꽃잎 헤어	
-34643	Hair	Yellow Cute Tied Bun Hair	노란색 봉실 꽃잎 헤어	
-34644	Hair	Green Cute Tied Bun Hair	초록색 봉실 꽃잎 헤어	
-34645	Hair	Blue Cute Tied Bun Hair	파란색 봉실 꽃잎 헤어	
-34646	Hair	Purple Cute Tied Bun Hair	보라색 봉실 꽃잎 헤어	
-34647	Hair	Brown Cute Tied Bun Hair	갈색 봉실 꽃잎 헤어	
+34640	Hair	Cute Tied Bun Hair	검은색 봉실 꽃잎 헤어	
+34641	Hair	Cute Tied Bun Hair	빨간색 봉실 꽃잎 헤어	
+34642	Hair	Cute Tied Bun Hair	주황색 봉실 꽃잎 헤어	
+34643	Hair	Cute Tied Bun Hair	노란색 봉실 꽃잎 헤어	
+34644	Hair	Cute Tied Bun Hair	초록색 봉실 꽃잎 헤어	
+34645	Hair	Cute Tied Bun Hair	파란색 봉실 꽃잎 헤어	
+34646	Hair	Cute Tied Bun Hair	보라색 봉실 꽃잎 헤어	
+34647	Hair	Cute Tied Bun Hair	갈색 봉실 꽃잎 헤어	
 34650	Hair	Black Charming Chinese Hair		
 34651	Hair	Red Charming Chinese Hair		
 34652	Hair	Orange Charming Chinese Hair		
@@ -21468,14 +21851,14 @@ id	category	gms_name	kms_name	icon
 34655	Hair	Blue Charming Chinese Hair		
 34656	Hair	Purple Charming Chinese Hair		
 34657	Hair	Brown Charming Chinese Hair		
-34660	Hair	Black Bunny Buns 	검은색 앙증 리본 헤어	
-34661	Hair	Red Bunny Buns 	빨간색 앙증 리본 헤어	
-34662	Hair	Orange Bunny Buns 	주황색 앙증 리본 헤어	
-34663	Hair	Blonde Bunny Buns 	노란색 앙증 리본 헤어	
-34664	Hair	Green Bunny Buns 	초록색 앙증 리본 헤어	
-34665	Hair	Blue Bunny Buns 	파란색 앙증 리본 헤어	
-34666	Hair	Purple Bunny Buns 	보라색 앙증 리본 헤어	
-34667	Hair	Brown Bunny Buns 	갈색 앙증 리본 헤어	
+34660	Hair	Bunny Buns	검은색 앙증 리본 헤어	
+34661	Hair	Bunny Buns	빨간색 앙증 리본 헤어	
+34662	Hair	Bunny Buns	주황색 앙증 리본 헤어	
+34663	Hair	Bunny Buns	노란색 앙증 리본 헤어	
+34664	Hair	Bunny Buns	초록색 앙증 리본 헤어	
+34665	Hair	Bunny Buns	파란색 앙증 리본 헤어	
+34666	Hair	Bunny Buns	보라색 앙증 리본 헤어	
+34667	Hair	Bunny Buns	갈색 앙증 리본 헤어	
 34670	Hair	Side Ponytail	검은색 미스티로즈 헤어	
 34671	Hair	Side Ponytail	빨간색 미스티로즈 헤어	
 34672	Hair	Side Ponytail	주황색 미스티로즈 헤어	
@@ -22484,14 +22867,14 @@ id	category	gms_name	kms_name	icon
 36225	Hair	Blue Runt Hair	파란색 막둥이 헤어	
 36226	Hair	Purple Runt Hair	보라색 막둥이 헤어	
 36227	Hair	Brown Runt Hair	갈색 막둥이 헤어	
-36230	Hair	Black Layered Hair 	검은색 층층 헤어	
-36231	Hair	Red Layered Hair 	빨간색 층층 헤어	
-36232	Hair	Orange Layered Hair 	주황색 층층 헤어	
-36233	Hair	Blonde Layered Hair 	노란색 층층 헤어	
-36234	Hair	Green Layered Hair 	초록색 층층 헤어	
-36235	Hair	Blue Layered Hair 	파란색 층층 헤어	
-36236	Hair	Purple Layered Hair 	보라색 층층 헤어	
-36237	Hair	Brown Layered Hair 	갈색 층층 헤어	
+36230	Hair	Layered Hair	검은색 층층 헤어	
+36231	Hair	Layered Hair	빨간색 층층 헤어	
+36232	Hair	Layered Hair	주황색 층층 헤어	
+36233	Hair	Layered Hair	노란색 층층 헤어	
+36234	Hair	Layered Hair	초록색 층층 헤어	
+36235	Hair	Layered Hair	파란색 층층 헤어	
+36236	Hair	Layered Hair	보라색 층층 헤어	
+36237	Hair	Layered Hair	갈색 층층 헤어	
 36240	Hair	Boy Warrior Hair	검은색 소년 용사 헤어	
 36241	Hair	Boy Warrior Hair	빨간색 소년 용사 헤어	
 36242	Hair	Boy Warrior Hair	주황색 소년 용사 헤어	
@@ -23117,13 +23500,13 @@ id	category	gms_name	kms_name	icon
 37126	Hair	Neat Boyish Hair	보라색 단정한 보이쉬 헤어	
 37127	Hair	Neat Boyish Hair	갈색 단정한 보이쉬 헤어	
 37130	Hair	Pure Bouncy Hair	검은색 청순한 탱글 헤어	
-37131	Hair	Pure Bouncy Hair 	빨간색 청순한 탱글 헤어	
+37131	Hair	Pure Bouncy Hair	빨간색 청순한 탱글 헤어	
 37132	Hair	Pure Bouncy Hair	주황색 청순한 탱글 헤어	
 37133	Hair	Pure Bouncy Hair	노란색 청순한 탱글 헤어	
 37134	Hair	Pure Bouncy Hair	초록색 청순한 탱글 헤어	
 37135	Hair	Pure Bouncy Hair	파란색 청순한 탱글 헤어	
 37136	Hair	Pure Bouncy Hair	보라색 청순한 탱글 헤어	
-37137	Hair	Pure Bouncy Hair 	갈색 청순한 탱글 헤어	
+37137	Hair	Pure Bouncy Hair	갈색 청순한 탱글 헤어	
 37140	Hair	Black Angelic Buster Hair	검은색 엔젤릭버스터 헤어	
 37141	Hair	Red Angelic Buster Hair	빨간색 엔젤릭버스터 헤어	
 37142	Hair	Orange Angelic Buster Hair	주황색 엔젤릭버스터 헤어	
@@ -24005,12 +24388,12 @@ id	category	gms_name	kms_name	icon
 38546	Hair	Purple Twenty Hair	보라색 트웬티 헤어	
 38547	Hair	Brown Twenty Hair	갈색 트웬티 헤어	
 38550	Hair	Black Bittersweet Hair	검은색 새콤달달 헤어	
-38551	Hair	Red Bittersweet Hair	빨간색 새콤달달 헤어	
-38552	Hair	Orange Bittersweet Hair	주황색 새콤달달 헤어	
-38553	Hair	Yellow Bittersweet Hair	노란색 새콤달달 헤어	
-38554	Hair	Green Bittersweet Hair	초록색 새콤달달 헤어	
+38551	Hair	Bittersweet Hair	빨간색 새콤달달 헤어	
+38552	Hair	Bittersweet Hair	주황색 새콤달달 헤어	
+38553	Hair	Bittersweet Hair	노란색 새콤달달 헤어	
+38554	Hair	Bittersweet Hair	초록색 새콤달달 헤어	
 38555	Hair	Blue Bittersweet Hair	파란색 새콤달달 헤어	
-38556	Hair	Purple Bittersweet Hair	보라색 새콤달달 헤어	
+38556	Hair	Bittersweet Hair	보라색 새콤달달 헤어	
 38557	Hair	Brown Bittersweet Hair	갈색 새콤달달 헤어	
 38560	Hair	Black Glowy Butterfly Hair	검은색 초롱나비 헤어	
 38561	Hair	Red Glowy Butterfly Hair	빨간색 초롱나비 헤어	
@@ -26111,6 +26494,62 @@ id	category	gms_name	kms_name	icon
 42535	Hair	Over the Hill Hair	파란색 중후한 헤어	
 42536	Hair	Over the Hill Hair	보라색 중후한 헤어	
 42537	Hair	Over the Hill Hair	갈색 중후한 헤어	
+42540	Hair	Frieren Hair	프리렌 헤어	
+42541	Hair	Frieren Hair	프리렌 헤어	
+42542	Hair	Frieren Hair	프리렌 헤어	
+42543	Hair	Frieren Hair	프리렌 헤어	
+42544	Hair	Frieren Hair	프리렌 헤어	
+42545	Hair	Frieren Hair	프리렌 헤어	
+42546	Hair	Frieren Hair	프리렌 헤어	
+42547	Hair	Frieren Hair	프리렌 헤어	
+42550	Hair	Frieren Hair (Sleep)	프리렌 헤어 (잠옷)	
+42551	Hair	Frieren Hair (Sleep)	프리렌 헤어 (잠옷)	
+42552	Hair	Frieren Hair (Sleep)	프리렌 헤어 (잠옷)	
+42553	Hair	Frieren Hair (Sleep)	프리렌 헤어 (잠옷)	
+42554	Hair	Frieren Hair (Sleep)	프리렌 헤어 (잠옷)	
+42555	Hair	Frieren Hair (Sleep)	프리렌 헤어 (잠옷)	
+42556	Hair	Frieren Hair (Sleep)	프리렌 헤어 (잠옷)	
+42557	Hair	Frieren Hair (Sleep)	프리렌 헤어 (잠옷)	
+42560	Hair	Frieren Hair (Ringlets)	프리렌 롤빵 헤어	
+42561	Hair	Frieren Hair (Ringlets)	프리렌 롤빵 헤어	
+42562	Hair	Frieren Hair (Ringlets)	프리렌 롤빵 헤어	
+42563	Hair	Frieren Hair (Ringlets)	프리렌 롤빵 헤어	
+42564	Hair	Frieren Hair (Ringlets)	프리렌 롤빵 헤어	
+42565	Hair	Frieren Hair (Ringlets)	프리렌 롤빵 헤어	
+42566	Hair	Frieren Hair (Ringlets)	프리렌 롤빵 헤어	
+42567	Hair	Frieren Hair (Ringlets)	프리렌 롤빵 헤어	
+42570	Hair	Fern Hair	페른 헤어	
+42571	Hair	Fern Hair	페른 헤어	
+42572	Hair	Fern Hair	페른 헤어	
+42573	Hair	Fern Hair	페른 헤어	
+42574	Hair	Fern Hair	페른 헤어	
+42575	Hair	Fern Hair	페른 헤어	
+42576	Hair	Fern Hair	페른 헤어	
+42577	Hair	Fern Hair	페른 헤어	
+42580	Hair	Stark Hair	슈타르크 헤어	
+42581	Hair	Stark Hair	슈타르크 헤어	
+42582	Hair	Stark Hair	슈타르크 헤어	
+42583	Hair	Stark Hair	슈타르크 헤어	
+42584	Hair	Stark Hair	슈타르크 헤어	
+42585	Hair	Stark Hair	슈타르크 헤어	
+42586	Hair	Stark Hair	슈타르크 헤어	
+42587	Hair	Stark Hair	슈타르크 헤어	
+42590	Hair	Himmel Hair	힘멜 헤어	
+42591	Hair	Himmel Hair	힘멜 헤어	
+42592	Hair	Himmel Hair	힘멜 헤어	
+42593	Hair	Himmel Hair	힘멜 헤어	
+42594	Hair	Himmel Hair	힘멜 헤어	
+42595	Hair	Himmel Hair	힘멜 헤어	
+42596	Hair	Himmel Hair	힘멜 헤어	
+42597	Hair	Himmel Hair	힘멜 헤어	
+42600	Hair	Übel Hair	위벨 헤어	
+42601	Hair	Übel Hair	위벨 헤어	
+42602	Hair	Übel Hair	위벨 헤어	
+42603	Hair	Übel Hair	위벨 헤어	
+42604	Hair	Übel Hair	위벨 헤어	
+42605	Hair	Übel Hair	위벨 헤어	
+42606	Hair	Übel Hair	위벨 헤어	
+42607	Hair	Übel Hair	위벨 헤어	
 42610	Hair	Saitama Hair	사이타마 헤어	
 42611	Hair	Saitama Hair	사이타마 헤어	
 42612	Hair	Saitama Hair	사이타마 헤어	
@@ -27695,14 +28134,14 @@ id	category	gms_name	kms_name	icon
 45515	Hair	Darcy Hair	파란색 달시 헤어	
 45516	Hair	Darcy Hair	보라색 달시 헤어	
 45517	Hair	Darcy Hair	갈색 달시 헤어	
-45520	Hair	Troubadour Hair	검은색 산뜻 펌 헤어	
-45521	Hair	Troubadour Hair	빨간색 산뜻 펌 헤어	
-45522	Hair	Troubadour Hair	주황색 산뜻 펌 헤어	
-45523	Hair	Troubadour Hair	노란색 산뜻 펌 헤어	
-45524	Hair	Troubadour Hair	초록색 산뜻 펌 헤어	
-45525	Hair	Troubadour Hair	파란색 산뜻 펌 헤어	
-45526	Hair	Troubadour Hair	보라색 산뜻 펌 헤어	
-45527	Hair	Troubadour Hair	갈색 산뜻 펌 헤어	
+45520	Hair	Fresh Perm Hair	검은색 산뜻 펌 헤어	
+45521	Hair	Fresh Perm Hair	빨간색 산뜻 펌 헤어	
+45522	Hair	Fresh Perm Hair	주황색 산뜻 펌 헤어	
+45523	Hair	Fresh Perm Hair	노란색 산뜻 펌 헤어	
+45524	Hair	Fresh Perm Hair	초록색 산뜻 펌 헤어	
+45525	Hair	Fresh Perm Hair	파란색 산뜻 펌 헤어	
+45526	Hair	Fresh Perm Hair	보라색 산뜻 펌 헤어	
+45527	Hair	Fresh Perm Hair	갈색 산뜻 펌 헤어	
 45550	Hair	Pinch of Salt Hair		
 45551	Hair	Pinch of Salt Hair		
 45552	Hair	Pinch of Salt Hair		
@@ -27903,14 +28342,14 @@ id	category	gms_name	kms_name	icon
 45805	Hair	Droopy Cat Ears Hair		
 45806	Hair	Droopy Cat Ears Hair		
 45807	Hair	Droopy Cat Ears Hair		
-45810	Hair	Cherry Blossom Hair	검은색 심야 헤어	
-45811	Hair	Cherry Blossom Hair	빨간색 심야 헤어	
-45812	Hair	Cherry Blossom Hair	주황색 심야 헤어	
-45813	Hair	Cherry Blossom Hair	노란색 심야 헤어	
-45814	Hair	Cherry Blossom Hair	초록색 심야 헤어	
-45815	Hair	Cherry Blossom Hair	파란색 심야 헤어	
-45816	Hair	Cherry Blossom Hair	보라색 심야 헤어	
-45817	Hair	Cherry Blossom Hair	갈색 심야 헤어	
+45810	Hair	Late Night Hair	검은색 심야 헤어	
+45811	Hair	Late Night Hair	빨간색 심야 헤어	
+45812	Hair	Late Night Hair	주황색 심야 헤어	
+45813	Hair	Late Night Hair	노란색 심야 헤어	
+45814	Hair	Late Night Hair	초록색 심야 헤어	
+45815	Hair	Late Night Hair	파란색 심야 헤어	
+45816	Hair	Late Night Hair	보라색 심야 헤어	
+45817	Hair	Late Night Hair	갈색 심야 헤어	
 45820	Hair	Uneven Hair		
 45821	Hair	Uneven Hair		
 45822	Hair	Uneven Hair		
@@ -34087,6 +34526,86 @@ id	category	gms_name	kms_name	icon
 66605	Hair	Temporal Rampage Hair		
 66606	Hair	Temporal Rampage Hair		
 66607	Hair	Temporal Rampage Hair		
+66610	Hair	Marlon Hair	검은색 말론 헤어	
+66611	Hair	Marlon Hair	빨간색 말론 헤어	
+66612	Hair	Marlon Hair	주황색 말론 헤어	
+66613	Hair	Marlon Hair	노란색 말론 헤어	
+66614	Hair	Marlon Hair	초록색 말론 헤어	
+66615	Hair	Marlon Hair	파란색 말론 헤어	
+66616	Hair	Marlon Hair	보라색 말론 헤어	
+66617	Hair	Marlon Hair	갈색 말론 헤어	
+66620	Hair	Night Eunyul Hair	검은색 밤의 은율 헤어	
+66621	Hair	Night Eunyul Hair	빨간색 밤의 은율 헤어	
+66622	Hair	Night Eunyul Hair	주황색 밤의 은율 헤어	
+66623	Hair	Night Eunyul Hair	노란색 밤의 은율 헤어	
+66624	Hair	Night Eunyul Hair	초록색 밤의 은율 헤어	
+66625	Hair	Night Eunyul Hair	파란색 밤의 은율 헤어	
+66626	Hair	Night Eunyul Hair	보라색 밤의 은율 헤어	
+66627	Hair	Night Eunyul Hair	갈색 밤의 은율 헤어	
+66630	Hair	Eunyul Hair	검은색 은율 헤어	
+66631	Hair	Eunyul Hair	빨간색 은율 헤어	
+66632	Hair	Eunyul Hair	주황색 은율 헤어	
+66633	Hair	Eunyul Hair	노란색 은율 헤어	
+66634	Hair	Eunyul Hair	초록색 은율 헤어	
+66635	Hair	Eunyul Hair	파란색 은율 헤어	
+66636	Hair	Eunyul Hair	보라색 은율 헤어	
+66637	Hair	Eunyul Hair	갈색 은율 헤어	
+66640	Hair	Foggy Eunyul Hair	검은색 안개 은율 헤어	
+66641	Hair	Foggy Eunyul Hair	빨간색 안개 은율 헤어	
+66642	Hair	Foggy Eunyul Hair	주황색 안개 은율 헤어	
+66643	Hair	Foggy Eunyul Hair	노란색 안개 은율 헤어	
+66644	Hair	Foggy Eunyul Hair	초록색 안개 은율 헤어	
+66645	Hair	Foggy Eunyul Hair	파란색 안개 은율 헤어	
+66646	Hair	Foggy Eunyul Hair	보라색 안개 은율 헤어	
+66647	Hair	Foggy Eunyul Hair	갈색 안개 은율 헤어	
+66660	Hair	Sylvian Hair	검은색 실비안 헤어	
+66661	Hair	Sylvian Hair	빨간색 실비안 헤어	
+66662	Hair	Sylvian Hair	주황색 실비안 헤어	
+66663	Hair	Sylvian Hair	노란색 실비안 헤어	
+66664	Hair	Sylvian Hair	초록색 실비안 헤어	
+66665	Hair	Sylvian Hair	파란색 실비안 헤어	
+66666	Hair	Sylvian Hair	보라색 실비안 헤어	
+66667	Hair	Sylvian Hair	갈색 실비안 헤어	
+66670	Hair	Dreamy Lucid Hair	검은색 꿈꾸는 루시드 헤어	
+66671	Hair	Dreamy Lucid Hair	빨간색 꿈꾸는 루시드 헤어	
+66672	Hair	Dreamy Lucid Hair	주황색 꿈꾸는 루시드 헤어	
+66673	Hair	Dreamy Lucid Hair	노란색 꿈꾸는 루시드 헤어	
+66674	Hair	Dreamy Lucid Hair	초록색 꿈꾸는 루시드 헤어	
+66675	Hair	Dreamy Lucid Hair	파란색 꿈꾸는 루시드 헤어	
+66676	Hair	Dreamy Lucid Hair	보라색 꿈꾸는 루시드 헤어	
+66677	Hair	Dreamy Lucid Hair	갈색 꿈꾸는 루시드 헤어	
+66680	Hair	Black Feathered Bed Head	검은색 흑발 포숑 헤어	
+66681	Hair	Black Feathered Bed Head	빨간색 흑발 포숑 헤어	
+66682	Hair	Black Feathered Bed Head	주황색 흑발 포숑 헤어	
+66683	Hair	Black Feathered Bed Head	노란색 흑발 포숑 헤어	
+66684	Hair	Black Feathered Bed Head	초록색 흑발 포숑 헤어	
+66685	Hair	Black Feathered Bed Head	파란색 흑발 포숑 헤어	
+66686	Hair	Black Feathered Bed Head	보라색 흑발 포숑 헤어	
+66687	Hair	Black Feathered Bed Head	갈색 흑발 포숑 헤어	
+66690	Hair	Black Forte Hair	검은색 흑발 포르테 헤어	
+66691	Hair	Black Forte Hair	빨간색 흑발 포르테 헤어	
+66692	Hair	Black Forte Hair	주황색 흑발 포르테 헤어	
+66693	Hair	Black Forte Hair	노란색 흑발 포르테 헤어	
+66694	Hair	Black Forte Hair	초록색 흑발 포르테 헤어	
+66695	Hair	Black Forte Hair	파란색 흑발 포르테 헤어	
+66696	Hair	Black Forte Hair	보라색 흑발 포르테 헤어	
+66697	Hair	Black Forte Hair	갈색 흑발 포르테 헤어	
+66700	Hair	Black Parted Boyish Hair	검은색 흑발 채운 헤어	
+66701	Hair	Black Parted Boyish Hair	빨간색 흑발 채운 헤어	
+66702	Hair	Black Parted Boyish Hair	주황색 흑발 채운 헤어	
+66703	Hair	Black Parted Boyish Hair	노란색 흑발 채운 헤어	
+66704	Hair	Black Parted Boyish Hair	초록색 흑발 채운 헤어	
+66705	Hair	Black Parted Boyish Hair	파란색 흑발 채운 헤어	
+66706	Hair	Black Parted Boyish Hair	보라색 흑발 채운 헤어	
+66707	Hair	Black Parted Boyish Hair	갈색 흑발 채운 헤어	
+66710	Hair	Black Soft Pearl Hair	검은색 흑발 소프트펄 헤어	
+66711	Hair	Black Soft Pearl Hair	빨간색 흑발 소프트펄 헤어	
+66712	Hair	Black Soft Pearl Hair	주황색 흑발 소프트펄 헤어	
+66713	Hair	Black Soft Pearl Hair	노란색 흑발 소프트펄 헤어	
+66714	Hair	Black Soft Pearl Hair	초록색 흑발 소프트펄 헤어	
+66715	Hair	Black Soft Pearl Hair	파란색 흑발 소프트펄 헤어	
+66716	Hair	Black Soft Pearl Hair	보라색 흑발 소프트펄 헤어	
+66717	Hair	Black Soft Pearl Hair	갈색 흑발 소프트펄 헤어	
 66720	Hair	Argent Knight Ponytail		
 66721	Hair	Argent Knight Ponytail		
 66722	Hair	Argent Knight Ponytail		
@@ -34111,6 +34630,38 @@ id	category	gms_name	kms_name	icon
 66745	Hair	Gentle Teddy Hair		
 66746	Hair	Gentle Teddy Hair		
 66747	Hair	Gentle Teddy Hair		
+66790	Hair	Lingering Hair		
+66791	Hair	Lingering Hair		
+66792	Hair	Lingering Hair		
+66793	Hair	Lingering Hair		
+66794	Hair	Lingering Hair		
+66795	Hair	Lingering Hair		
+66796	Hair	Lingering Hair		
+66797	Hair	Lingering Hair		
+66800	Hair	Silent Texture Hair		
+66801	Hair	Silent Texture Hair		
+66802	Hair	Silent Texture Hair		
+66803	Hair	Silent Texture Hair		
+66804	Hair	Silent Texture Hair		
+66805	Hair	Silent Texture Hair		
+66806	Hair	Silent Texture Hair		
+66807	Hair	Silent Texture Hair		
+66840	Hair	Naturally Set Perm		
+66841	Hair	Naturally Set Perm		
+66842	Hair	Naturally Set Perm		
+66843	Hair	Naturally Set Perm		
+66844	Hair	Naturally Set Perm		
+66845	Hair	Naturally Set Perm		
+66846	Hair	Naturally Set Perm		
+66847	Hair	Naturally Set Perm		
+66850	Hair	Sugar-Tipped Hair		
+66851	Hair	Sugar-Tipped Hair		
+66852	Hair	Sugar-Tipped Hair		
+66853	Hair	Sugar-Tipped Hair		
+66854	Hair	Sugar-Tipped Hair		
+66855	Hair	Sugar-Tipped Hair		
+66856	Hair	Sugar-Tipped Hair		
+66857	Hair	Sugar-Tipped Hair		
 67000	Hair	Explorer Hero Hair	검은색 모험가 히어로 헤어	
 67001	Hair	Explorer Hero Hair	빨간색 모험가 히어로 헤어	
 67002	Hair	Explorer Hero Hair	주황색 모험가 히어로 헤어	
@@ -35663,6 +36214,94 @@ id	category	gms_name	kms_name	icon
 71155	Hair	Silky Twin Ribbons Hair		
 71156	Hair	Silky Twin Ribbons Hair		
 71157	Hair	Silky Twin Ribbons Hair		
+71160	Hair	Cotton Fluff Hair	검은색 목화 헤어	
+71161	Hair	Cotton Fluff Hair	빨간색 목화 헤어	
+71162	Hair	Cotton Fluff Hair	주황색 목화 헤어	
+71163	Hair	Cotton Fluff Hair	노란색 목화 헤어	
+71164	Hair	Cotton Fluff Hair	초록색 목화 헤어	
+71165	Hair	Cotton Fluff Hair	파란색 목화 헤어	
+71166	Hair	Cotton Fluff Hair	보라색 목화 헤어	
+71167	Hair	Cotton Fluff Hair	갈색 목화 헤어	
+71170	Hair	Arin Hair	검은색 아린 헤어	
+71171	Hair	Arin Hair	빨간색 아린 헤어	
+71172	Hair	Arin Hair	주황색 아린 헤어	
+71173	Hair	Arin Hair	노란색 아린 헤어	
+71174	Hair	Arin Hair	초록색 아린 헤어	
+71175	Hair	Arin Hair	파란색 아린 헤어	
+71176	Hair	Arin Hair	보라색 아린 헤어	
+71177	Hair	Arin Hair	갈색 아린 헤어	
+71180	Hair	Foggy Arin Hair	검은색 안개 아린 헤어	
+71181	Hair	Foggy Arin Hair	빨간색 안개 아린 헤어	
+71182	Hair	Foggy Arin Hair	주황색 안개 아린 헤어	
+71183	Hair	Foggy Arin Hair	노란색 안개 아린 헤어	
+71184	Hair	Foggy Arin Hair	초록색 안개 아린 헤어	
+71185	Hair	Foggy Arin Hair	파란색 안개 아린 헤어	
+71186	Hair	Foggy Arin Hair	보라색 안개 아린 헤어	
+71187	Hair	Foggy Arin Hair	갈색 안개 아린 헤어	
+71190	Hair	Night Arin Hair	검은색 밤의 아린 헤어	
+71191	Hair	Night Arin Hair	빨간색 밤의 아린 헤어	
+71192	Hair	Night Arin Hair	주황색 밤의 아린 헤어	
+71193	Hair	Night Arin Hair	노란색 밤의 아린 헤어	
+71194	Hair	Night Arin Hair	초록색 밤의 아린 헤어	
+71195	Hair	Night Arin Hair	파란색 밤의 아린 헤어	
+71196	Hair	Night Arin Hair	보라색 밤의 아린 헤어	
+71197	Hair	Night Arin Hair	갈색 밤의 아린 헤어	
+71210	Hair	Light Drizzle Hair	검은색 이슬비 헤어	
+71211	Hair	Light Drizzle Hair	빨간색 이슬비 헤어	
+71212	Hair	Light Drizzle Hair	주황색 이슬비 헤어	
+71213	Hair	Light Drizzle Hair	노란색 이슬비 헤어	
+71214	Hair	Light Drizzle Hair	초록색 이슬비 헤어	
+71215	Hair	Light Drizzle Hair	파란색 이슬비 헤어	
+71216	Hair	Light Drizzle Hair	보라색 이슬비 헤어	
+71217	Hair	Light Drizzle Hair	갈색 이슬비 헤어	
+71220	Hair	Dreamy Lucid Hair	검은색 꿈꾸는 루시드 헤어	
+71221	Hair	Dreamy Lucid Hair	빨간색 꿈꾸는 루시드 헤어	
+71222	Hair	Dreamy Lucid Hair	주황색 꿈꾸는 루시드 헤어	
+71223	Hair	Dreamy Lucid Hair	노란색 꿈꾸는 루시드 헤어	
+71224	Hair	Dreamy Lucid Hair	초록색 꿈꾸는 루시드 헤어	
+71225	Hair	Dreamy Lucid Hair	파란색 꿈꾸는 루시드 헤어	
+71226	Hair	Dreamy Lucid Hair	보라색 꿈꾸는 루시드 헤어	
+71227	Hair	Dreamy Lucid Hair	갈색 꿈꾸는 루시드 헤어	
+71230	Hair	Fresh Short Hair	검은색 상큼 단발 헤어	
+71231	Hair	Fresh Short Hair	빨간색 상큼 단발 헤어	
+71232	Hair	Fresh Short Hair	주황색 상큼 단발 헤어	
+71233	Hair	Fresh Short Hair	노란색 상큼 단발 헤어	
+71234	Hair	Fresh Short Hair	초록색 상큼 단발 헤어	
+71235	Hair	Fresh Short Hair	파란색 상큼 단발 헤어	
+71236	Hair	Fresh Short Hair	보라색 상큼 단발 헤어	
+71237	Hair	Fresh Short Hair	갈색 상큼 단발 헤어	
+71240	Hair	Black Mysterie Hair	검은색 흑발 신비 헤어	
+71241	Hair	Black Mysterie Hair	빨간색 흑발 신비 헤어	
+71242	Hair	Black Mysterie Hair	주황색 흑발 신비 헤어	
+71243	Hair	Black Mysterie Hair	노란색 흑발 신비 헤어	
+71244	Hair	Black Mysterie Hair	초록색 흑발 신비 헤어	
+71245	Hair	Black Mysterie Hair	파란색 흑발 신비 헤어	
+71246	Hair	Black Mysterie Hair	보라색 흑발 신비 헤어	
+71247	Hair	Black Mysterie Hair	갈색 흑발 신비 헤어	
+71250	Hair	Black Bubbly Hair	검은색 흑발 버블리 헤어	
+71251	Hair	Black Bubbly Hair	빨간색 흑발 버블리 헤어	
+71252	Hair	Black Bubbly Hair	주황색 흑발 버블리 헤어	
+71253	Hair	Black Bubbly Hair	노란색 흑발 버블리 헤어	
+71254	Hair	Black Bubbly Hair	초록색 흑발 버블리 헤어	
+71255	Hair	Black Bubbly Hair	파란색 흑발 버블리 헤어	
+71256	Hair	Black Bubbly Hair	보라색 흑발 버블리 헤어	
+71257	Hair	Black Bubbly Hair	갈색 흑발 버블리 헤어	
+71260	Hair	Black Long Hair with Blunt Bangs	검은색 흑발 하리화 헤어	
+71261	Hair	Black Long Hair with Blunt Bangs	빨간색 흑발 하리화 헤어	
+71262	Hair	Black Long Hair with Blunt Bangs	주황색 흑발 하리화 헤어	
+71263	Hair	Black Long Hair with Blunt Bangs	노란색 흑발 하리화 헤어	
+71264	Hair	Black Long Hair with Blunt Bangs	초록색 흑발 하리화 헤어	
+71265	Hair	Black Long Hair with Blunt Bangs	파란색 흑발 하리화 헤어	
+71266	Hair	Black Long Hair with Blunt Bangs	보라색 흑발 하리화 헤어	
+71267	Hair	Black Long Hair with Blunt Bangs	갈색 흑발 하리화 헤어	
+71270	Hair	Black Cherry Pop Hair	검은색 흑발 체리팝 헤어	
+71271	Hair	Black Cherry Pop Hair	빨간색 흑발 체리팝 헤어	
+71272	Hair	Black Cherry Pop Hair	주황색 흑발 체리팝 헤어	
+71273	Hair	Black Cherry Pop Hair	노란색 흑발 체리팝 헤어	
+71274	Hair	Black Cherry Pop Hair	초록색 흑발 체리팝 헤어	
+71275	Hair	Black Cherry Pop Hair	파란색 흑발 체리팝 헤어	
+71276	Hair	Black Cherry Pop Hair	보라색 흑발 체리팝 헤어	
+71277	Hair	Black Cherry Pop Hair	갈색 흑발 체리팝 헤어	
 71280	Hair	Argent Knight Ponytail		
 71281	Hair	Argent Knight Ponytail		
 71282	Hair	Argent Knight Ponytail		
@@ -35687,6 +36326,46 @@ id	category	gms_name	kms_name	icon
 71305	Hair	Lovely Side Curl Hair		
 71306	Hair	Lovely Side Curl Hair		
 71307	Hair	Lovely Side Curl Hair		
+71370	Hair	Nana Hair	검은색 나나 헤어	
+71371	Hair	Nana Hair	빨간색 나나 헤어	
+71372	Hair	Nana Hair	주황색 나나 헤어	
+71373	Hair	Nana Hair	노란색 나나 헤어	
+71374	Hair	Nana Hair	초록색 나나 헤어	
+71375	Hair	Nana Hair	파란색 나나 헤어	
+71376	Hair	Nana Hair	보라색 나나 헤어	
+71377	Hair	Nana Hair	갈색 나나 헤어	
+71380	Hair	Slightly Combed Hair		
+71381	Hair	Slightly Combed Hair		
+71382	Hair	Slightly Combed Hair		
+71383	Hair	Slightly Combed Hair		
+71384	Hair	Slightly Combed Hair		
+71385	Hair	Slightly Combed Hair		
+71386	Hair	Slightly Combed Hair		
+71387	Hair	Slightly Combed Hair		
+71390	Hair	Dyed Dango Hair		
+71391	Hair	Dyed Dango Hair		
+71392	Hair	Dyed Dango Hair		
+71393	Hair	Dyed Dango Hair		
+71394	Hair	Dyed Dango Hair		
+71395	Hair	Dyed Dango Hair		
+71396	Hair	Dyed Dango Hair		
+71397	Hair	Dyed Dango Hair		
+71430	Hair	Short-Cut Broomstick Hair		
+71431	Hair	Short-Cut Broomstick Hair		
+71432	Hair	Short-Cut Broomstick Hair		
+71433	Hair	Short-Cut Broomstick Hair		
+71434	Hair	Short-Cut Broomstick Hair		
+71435	Hair	Short-Cut Broomstick Hair		
+71436	Hair	Short-Cut Broomstick Hair		
+71437	Hair	Short-Cut Broomstick Hair		
+71440	Hair	First Love in Summer Hair		
+71441	Hair	First Love in Summer Hair		
+71442	Hair	First Love in Summer Hair		
+71443	Hair	First Love in Summer Hair		
+71444	Hair	First Love in Summer Hair		
+71445	Hair	First Love in Summer Hair		
+71446	Hair	First Love in Summer Hair		
+71447	Hair	First Love in Summer Hair		
 1050004	Longcoat	Blue Officer Uniform	푸른 패션제복	1050004.png
 1050012	Longcoat	Grey Skull Overall	회색 뼈다귀 옷	1050012.png
 1050013	Longcoat	Red Skull Overall	빨간색 뼈다귀 옷	1050013.png
@@ -36256,6 +36935,7 @@ id	category	gms_name	kms_name	icon
 1050837	Longcoat	Ruinous Binding	파멸의 계약	1050837.png
 1050839	Longcoat	Observer's Cape	관측자의 예복	1050839.png
 1050840	Longcoat	Zooming Tangerine Outfit	붕붕 탠저린 한벌옷	1050840.png
+1050841	Longcoat	Night Troupe Festival Outfit (M)		1050841.png
 1050842	Longcoat	Sweet Sky Overalls	스카이 캔디 오버롤	1050842.png
 1050843	Longcoat	Fresh Green Apple Outfit	상큼 풋사과	1050843.png
 1050844	Longcoat	Dream Crasher Uniform	드림 크래시	1050844.png
@@ -36299,6 +36979,18 @@ id	category	gms_name	kms_name	icon
 1050886	Longcoat	Steampunk Ensemble	스팀 펑크 앙상블	1050886.png
 1050887	Longcoat	Matcha Cocoa Outfit	달콤 말차 초코	1050887.png
 1050888	Longcoat	Jupiter's Robes	유피테르 슈트	1050888.png
+1050889	Longcoat	Blue Night Cloud	청야운율	1050889.png
+1050890	Longcoat	Vintage Layers	레이어드 메모리즈	1050890.png
+1050891	Longcoat	Red Moon Circus Maestro	레드 문 매지션 로브	1050891.png
+1050893	Longcoat	Olive and Beige Cardigan	베이지 올리브 가디건	1050893.png
+1050894	Longcoat	Illusive Dream	드리밍 일루전	1050894.png
+1050895	Longcoat	Dear Tailor	디어 테일러	1050895.png
+1050896	Longcoat	Saccharine Memories	행복한 기억	1050896.png
+1050897	Longcoat	Sol Magnate	솔 스티드 제복	1050897.png
+1050898	Longcoat	Elegant Jockey Uniform	엘레강스 캐발리에	1050898.png
+1050899	Longcoat	Pink Bunny Blazer	핑크토끼 가디건	1050899.png
+1050901	Longcoat	Precise Mise-en-Scène	엘레강스 미장센	1050901.png
+1050906	Longcoat	Street Performer Fit	스트리트댄서 한벌옷	1050906.png
 1051002	Longcoat	Cat Suit	고양이 옷	1051002.png
 1051018	Longcoat	Purple Skull Overall	보라색 뼈다귀 옷	1051018.png
 1051019	Longcoat	Orange Skull Overall	주황색 뼈다귀 옷	1051019.png
@@ -36941,6 +37633,7 @@ id	category	gms_name	kms_name	icon
 1051917	Longcoat	Forbidden Pact	금단의 계약	1051917.png
 1051919	Longcoat	Observer's Dress	관측자의 드레스	1051919.png
 1051920	Longcoat	Sunny Tangerine Outfit	써니 탠저린 한벌옷	1051920.png
+1051921	Longcoat	Night Troupe Festival Outfit (F)		1051921.png
 1051922	Longcoat	Sweet Strawberry Jumper	스트로베리 캔디 아웃핏	1051922.png
 1051923	Longcoat	Crisp Green Apple Outfit	발랄 풋사과	1051923.png
 1051924	Longcoat	Moon Crasher Uniform	루나 플래시	1051924.png
@@ -36985,6 +37678,18 @@ id	category	gms_name	kms_name	icon
 1051967	Longcoat	Steampunk Harmony	스팀 펑크 하모니	1051967.png
 1051968	Longcoat	Cocoa Matcha Outfit	달달 초코 말차	1051968.png
 1051969	Longcoat	Jupiter's Robes	유피테르 슈트	1051969.png
+1051970	Longcoat	Blue Dream Melody	청몽선율	1051970.png
+1051971	Longcoat	Bubble Gum Blouse	블루밍 버블검	1051971.png
+1051972	Longcoat	Red Moon Circus Ringmaster	레드 문 매지션 원피스	1051972.png
+1051974	Longcoat	Olive and Beige Cardigan	베이지 올리브 가디건	1051974.png
+1051975	Longcoat	Fantastical Dream	드리밍 판타지	1051975.png
+1051976	Longcoat	Pink Bunny Frills	핑크토끼 스커트	1051976.png
+1051977	Longcoat	Sweet Tailor	스윗 테일러	1051977.png
+1051979	Longcoat	Saccharine Wishes	행복한 소망	1051979.png
+1051980	Longcoat	Sol Maverick	솔 스티드 드레스	1051980.png
+1051981	Longcoat	Graceful Jockey Uniform	그레이스 캐발리에	1051981.png
+1051982	Longcoat	Pristine Mise-en-Scène	프리스틴 미장센	1051982.png
+1051987	Longcoat	Street Performer Fit	스트리트댄서 한벌옷	1051987.png
 1052000	Longcoat	Recycled Box	재생지 박스	1052000.png
 1052001	Longcoat	Paper Box	종이 박스	1052001.png
 1052002	Longcoat	Cardboard Box	골판지 박스	1052002.png
@@ -38112,8 +38817,8 @@ id	category	gms_name	kms_name	icon
 1054032	Longcoat	Tisk Sea Otter Suit	티스크 해달 슈트	1054032.png
 1054034	Longcoat	Mischievous Kitty Pumpkin Outfit		1054034.png
 1054035	Longcoat	Mischievous Kitty Ribbon Outfit		1054035.png
-1054036	Longcoat	Abyssal Shrine Suit		1054036.png
-1054037	Longcoat	Abyssal Shrine Dress		1054037.png
+1054036	Longcoat	Dapper Abyss Suit		1054036.png
+1054037	Longcoat	Dapper Abyss Dress		1054037.png
 1054038	Longcoat	Maple Circus Monochrome Uniform		1054038.png
 1054039	Longcoat	Maple Circus Color Uniform		1054039.png
 1054040	Longcoat	Aqua Outfit		1054040.png
@@ -38447,8 +39152,8 @@ id	category	gms_name	kms_name	icon
 1054524	Longcoat	Neon Punk Fab Outfit		1054524.png
 1054527	Longcoat	Sleepy Puppy Outfit	검정콩 멍뭉이 한벌옷	1054527.png
 1054531	Longcoat	Gluttonous Otter Suit	찹쌀 해달 인형옷	1054531.png
-1054533	Longcoat	Dancing Puppet Uniform		1054533.png
-1054534	Longcoat	Mad Puppeteer Dress		1054534.png
+1054533	Longcoat	Mad Puppeteer Uniform		1054533.png
+1054534	Longcoat	Dancing Puppet Dress		1054534.png
 1054535	Longcoat	Playful Affection Outfit		1054535.png
 1054536	Longcoat	Playful Love Outfit		1054536.png
 1054537	Longcoat	Black Cyborg 07 Outfit		1054537.png
@@ -38462,6 +39167,17 @@ id	category	gms_name	kms_name	icon
 1054545	Longcoat	Halloween Magic Mischief Outfit		1054545.png
 1054548	Longcoat	Smitten Kitty Outfit		1054548.png
 1054549	Longcoat	Flutter Kitty Skirt		1054549.png
+1054555	Longcoat	Frieren's Clothes	프리렌의 옷	1054555.png
+1054556	Longcoat	Frieren's Winter Clothes	프리렌의 겨울옷	1054556.png
+1054557	Longcoat	Frieren's Sleep Clothes	프리렌의 잠옷	1054557.png
+1054558	Longcoat	Fern's Clothes	페른의 옷	1054558.png
+1054559	Longcoat	Fern's Winter Clothes	페른의 겨울옷	1054559.png
+1054560	Longcoat	Stark's Clothes	슈타르크의 옷	1054560.png
+1054561	Longcoat	Himmel's Clothes	힘멜의 옷	1054561.png
+1054562	Longcoat	Übel's Clothes	위벨의 옷	1054562.png
+1054563	Longcoat	Aura's Clothes	아우라의 옷	1054563.png
+1054564	Longcoat	Linie's Clothes	리니에의 옷	1054564.png
+1054565	Longcoat	Lügner's Clothes	류그너의 옷	1054565.png
 1054566	Longcoat	Red Night Banquet Garb		1054566.png
 1054567	Longcoat	Red Night Gluttony Gown		1054567.png
 1054568	Longcoat	Dreamkeeper Suit		1054568.png
@@ -38484,6 +39200,7 @@ id	category	gms_name	kms_name	icon
 1054591	Longcoat	Present Owl's Dress		1054591.png
 1054592	Longcoat	Arcade Racer Outfit		1054592.png
 1054593	Longcoat	Sweet Library Trip Outfit		1054593.png
+1054595	Longcoat	Stark's Winter Clothes	슈타르크의 겨울옷	1054595.png
 1054596	Longcoat	Green Tyranno Outfit	그린 티라노 아웃핏	1054596.png
 1054597	Longcoat	Purple Stego Outfit	퍼플 스테고 아웃핏	1054597.png
 1054598	Longcoat	Shadow Mummy Wrap	섀도우 머미	1054598.png
@@ -38576,6 +39293,10 @@ id	category	gms_name	kms_name	icon
 1054714	Longcoat	Robo-Kitty Hoodie		1054714.png
 1054715	Longcoat	Nerdy Brown Bear Knit		1054715.png
 1054716	Longcoat	Nerdy Polar Bear Knit		1054716.png
+1054722	Longcoat	Calico Overalls	삼색냥냥 멜빵	1054722.png
+1054723	Longcoat	Fluffy Red Panda Costume	폭신 레서판다 인형 옷	1054723.png
+1054724	Longcoat	Lop-Eared Bunny Costume	몽글 롭이어 한벌옷	1054724.png
+1054725	Longcoat	Maple Invasion Hoodie and Tie	메이플 어택 후드넥타이	1054725.png
 1054727	Longcoat	Passionate Rock Star		1054727.png
 1054728	Longcoat	Explosive Rock Star		1054728.png
 1054729	Longcoat	Brilliant Archangel's Judgement		1054729.png
@@ -38588,6 +39309,16 @@ id	category	gms_name	kms_name	icon
 1054736	Longcoat	Swift Gambit		1054736.png
 1054737	Longcoat	Soft Black Knit		1054737.png
 1054738	Longcoat	Soft White Knit		1054738.png
+1054748	Longcoat	Bold Beetle Overalls	대담 풍뎅이 멜빵	1054748.png
+1054749	Longcoat	Persistent Roly Poly Overalls	성실 공벌레 멜빵 다리	1054749.png
+1054750	Longcoat	Sunflower Noble Suit		1054750.png
+1054751	Longcoat	Sunflower Goddess Dress		1054751.png
+1054752	Longcoat	Rosy Angelic Mage Dress		1054752.png
+1054753	Longcoat	Pure Angelic Mage Robe		1054753.png
+1054754	Longcoat	Mosquito Night Robe		1054754.png
+1054755	Longcoat	Mosquito Night Dress		1054755.png
+1054756	Longcoat	Fashionista Suspenders		1054756.png
+1054757	Longcoat	Street Star Suspenders		1054757.png
 1054758	Longcoat	Stellar Guardian Uniform		1054758.png
 1054759	Longcoat	Researcher's Allure		1054759.png
 1054760	Longcoat	Heavenly Armor		1054760.png
@@ -38596,12 +39327,22 @@ id	category	gms_name	kms_name	icon
 1054763	Longcoat	Luna Rabbit Lady		1054763.png
 1054764	Longcoat	Seeker's Allure		1054764.png
 1054765	Longcoat	Young Erel Outfit		1054765.png
+1054778	Longcoat	Golden Dragon Silk Robe		1054778.png
+1054779	Longcoat	Black Dragon Dress		1054779.png
+1054780	Longcoat	Mechanic Low Suit		1054780.png
+1054781	Longcoat	Mechanic Arm Suit		1054781.png
+1054782	Longcoat	Puppy Apron		1054782.png
+1054783	Longcoat	Kitty Apron		1054783.png
+1054784	Longcoat	White Otter Suspenders		1054784.png
+1054785	Longcoat	Black Otter Suspenders		1054785.png
 1054786	Longcoat	Orange Beat Jogger		1054786.png
 1054787	Longcoat	Orange Beat Runner		1054787.png
 1054788	Longcoat	Margaret Petal Suit		1054788.png
 1054789	Longcoat	Margaret Petal Dress		1054789.png
 1054790	Longcoat	Heartthrob Eye Candy		1054790.png
 1054791	Longcoat	Sweet Fox Look		1054791.png
+1054832	Longcoat	Grain Storage Investigator Boy		1054832.png
+1054833	Longcoat	Grain Storage Investigator Girl		1054833.png
 1060001	Pants	Black Suit Pants	검은 정장 바지	1060001.png
 1060003	Pants	Military Shorts	밀리터리 숏팬츠	1060003.png
 1060034	Pants	Blue Rider Pants	블루 라이더 바지	1060034.png
@@ -39572,8 +40313,8 @@ id	category	gms_name	kms_name	icon
 1802966	PetEquip	Lil Ribbon Yellow	쁘띠 리본 옐로	1802966.png
 1802967	PetEquip	Blue Crab Flower	꽃게꽃	1802967.png
 1802968	PetEquip	Pudding Spoon	푸딩 스푼	1802968.png
-1802969	PetEquip	Eternal Timemaster	영원 타임	1802969.png
-1802970	PetEquip	Illusion Timemaster	환상 타임	1802970.png
+1802969	PetEquip	Eternal Time	영원 타임	1802969.png
+1802970	PetEquip	Fantasy Time	환상 타임	1802970.png
 1802971	PetEquip	Mystery Time	미스터리 타임	1802971.png
 1802972	PetEquip	Cute Evil Eye Heart		1802972.png
 1802973	PetEquip	Cute Curse Eye Heart		1802973.png
@@ -39739,6 +40480,10 @@ id	category	gms_name	kms_name	icon
 1803144	PetEquip	Captain Chocolate Milk Straw		1803144.png
 1803145	PetEquip	Captain Banana Milk Straw		1803145.png
 1803146	PetEquip	Subversive Sewing Scissors		1803146.png
+1803148	PetEquip	Lil Frieren's Staff	쁘띠 프리렌의 지팡이	1803148.png
+1803149	PetEquip	Lil Fern's Staff	쁘띠 페른의 지팡이	1803149.png
+1803150	PetEquip	Lil Stark's Axe	쁘띠 슈타르크의 도끼	1803150.png
+1803151	PetEquip	Lil Übel's Staff	쁘띠 위벨의 지팡이	1803151.png
 1803152	PetEquip	Heroparrot's Sword		1803152.png
 1803153	PetEquip	Marksparrot's Crossbow		1803153.png
 1803154	PetEquip	Bishoparrot's Staff		1803154.png
@@ -39771,9 +40516,18 @@ id	category	gms_name	kms_name	icon
 1803183	PetEquip	Teddy Dream Bubbles	곰돌이 꿈방울	1803183.png
 1803184	PetEquip	Squirrel Dream Bubbles	다람쥐 꿈방울	1803184.png
 1803185	PetEquip	Raccoon Dream Bubbles	너구리 꿈방울	1803185.png
-1803199	PetEquip	쁘띠 사이타마의 망토		1803199.png
-1803200	PetEquip	쁘띠 제노스의 소각포		1803200.png
-1803201	PetEquip	쁘띠 타츠마키의 초능력		1803201.png
+1803190	PetEquip	Fling's Powdered Sugar	프링의 설탕	1803190.png
+1803191	PetEquip	Leon's Bubble	레옹의 방울	1803191.png
+1803192	PetEquip	Junie's Petal	주니의 꽃잎	1803192.png
+1803193	PetEquip	Lil Orange Mushroom's Snack	쁘띠 주황버섯의 간식	1803193.png
+1803194	PetEquip	Lil Green Mushroom's Hat	쁘띠 초록버섯의 모자	1803194.png
+1803195	PetEquip	Lil Blue Mushroom's Bunny Ears	쁘띠 파란버섯의 머리띠	1803195.png
+1803196	PetEquip	Lil Orange Mushroom's Snack	쁘띠 주황버섯의 간식	1803196.png
+1803197	PetEquip	Lil Green Mushroom's Hat	쁘띠 초록버섯의 모자	1803197.png
+1803198	PetEquip	Lil Blue Mushroom's Bunny Ears	쁘띠 파란버섯의 머리띠	1803198.png
+1803199	PetEquip	Lil Saitama's Cape		1803199.png
+1803200	PetEquip	Lil Genos's Incineration Cannon		1803200.png
+1803201	PetEquip	Lil Tornado's Psychic Powers		1803201.png
 1803202	PetEquip	Clumsy Uniform		1803202.png
 1803203	PetEquip	Klutzy Uniform		1803203.png
 1803204	PetEquip	Gawky Uniform		1803204.png
@@ -39782,15 +40536,23 @@ id	category	gms_name	kms_name	icon
 1803210	PetEquip	Stylish Yellow Glasses		1803210.png
 1803211	PetEquip	Lovely Pink Glasses		1803211.png
 1803212	PetEquip	Chic Black Glasses		1803212.png
+1803213	PetEquip	Graceful Nature Patch		1803213.png
+1803214	PetEquip	Blooming Flower Patch		1803214.png
+1803215	PetEquip	Mini Tree Patch		1803215.png
 1803217	PetEquip	Niniel's Radiant Faith		1803217.png
 1803218	PetEquip	Niniel's Radiant Wishes		1803218.png
 1803219	PetEquip	Niniel's Radiant Hope		1803219.png
 1803220	PetEquip	Sparkle-Nya's Sparkly Purple Fur		1803220.png
 1803221	PetEquip	Sparkle-Nya's Sparkly Blue Fur		1803221.png
 1803222	PetEquip	Sparkle-Nya's Sparkly Green Fur		1803222.png
+1803232	PetEquip	Shining Dust		1803232.png
 1803233	PetEquip	Kroma's Important Glasses		1803233.png
 1803234	PetEquip	Lil Hacker Jay's Cat Mask		1803234.png
 1803238	PetEquip	Lil Hacker Jay's Cat Mask		1803238.png
+1803247	PetEquip	Lil Frieren's Staff		1803247.png
+1803248	PetEquip	Lil Fern's Staff		1803248.png
+1803249	PetEquip	Lil Stark's Axe		1803249.png
+1803250	PetEquip	Lil Übel's Staff		1803250.png
 1812000	PetEquip	Meso Magnet		1812000.png
 1812001	PetEquip	Item Pouch		1812001.png
 1812002	PetEquip	Auto HP Potion Pouch		1812002.png
@@ -40087,9 +40849,10 @@ id	category	gms_name	kms_name	icon
 1113289	Ring	Busy Penguin Ring		1113289.png
 1113298	Ring	Spirit Ring		1113298.png
 1113299	Ring	Determination Ring		1113299.png
+1113371	Ring	Fleeting Dream Ring		1113371.png
 1114000	Ring	Kinship Ring	혈맹의 반지	1114000.png
 1114005	Ring	Kinship Ring	혈맹의 반지	1114005.png
-1114317	Ring	EXP Boost Ring (10%) 	EXP 부스트 링 10%	1114317.png
+1114317	Ring	EXP Boost Ring (10%)	EXP 부스트 링 10%	1114317.png
 1114326	Ring	EXP Boost Ring (15%)	경험치 부스트 링(15%)	1114326.png
 1114330	Ring	EXP Boost Ring (15%)	경험치 부스트 링(15%)	1114330.png
 1114400	Ring	Firestarter Ring		1114400.png
@@ -40673,9 +41436,12 @@ id	category	gms_name	kms_name	icon
 1115647	Ring	Hailey Chat Ring	하링 말풍선 반지	1115647.png
 1115648	Ring	Mad Puppet Chat Ring		1115648.png
 1115649	Ring	Maple Con LA 2025 Chat Ring		1115649.png
+1115650	Ring	Frieren Chat Ring	프리렌 말풍선 반지	1115650.png
+1115651	Ring	Mirrored Lotus Chat Ring	경련화 말풍선 반지	1115651.png
 1115652	Ring	First Adversary Chat Ring	최초의 대적자 말풍선 반지	1115652.png
 1115653	Ring	Chaos Chat Ring	카오스 말풍선 반지	1115653.png
 1115654	Ring	Abyss Cat Chat Ring		1115654.png
+1115655	Ring	Omega Sector Night Chat Ring		1115655.png
 1115656	Ring	Colorful Stationery Chat Ring	컬러링 데코 말풍선 반지	1115656.png
 1115657	Ring	Legion Sync Chat Ring	유니온 싱크 말풍선 반지	1115657.png
 1115658	Ring	Orange Minishroom Chat Ring		1115658.png
@@ -40712,8 +41478,10 @@ id	category	gms_name	kms_name	icon
 1115692	Ring	Malefic Chat Ring	미혹의 말풍선 반지	1115692.png
 1115693	Ring	Balanced Chat Ring	균형의 말풍선 반지	1115693.png
 1115694	Ring	Matcha Chocolate Chat Ring	말차 초코 말풍선 반지	1115694.png
+1115695	Ring	Doppel: Lucid Chat Ring	체인지 루시드 말풍선 반지	1115695.png
 1115696	Ring	Stamp Chat Ring		1115696.png
 1115697	Ring	Cat Video Chat Ring		1115697.png
+1115698	Ring	Neon Star Chat Ring	펑키 스타 러버 말풍선 반지	1115698.png
 1115705	Ring	Magic Label Ring	마력이 깃든 명찰 반지	1115705.png
 1115706	Ring	My Dino Doodle Label Ring		1115706.png
 1115707	Ring	Jazz Bar Label Ring		1115707.png
@@ -40761,9 +41529,12 @@ id	category	gms_name	kms_name	icon
 1115750	Ring	Hailey Label Ring	하링 명찰 반지	1115750.png
 1115751	Ring	Mad Puppet Label Ring		1115751.png
 1115752	Ring	Maple Con LA 2025 Label Ring		1115752.png
+1115753	Ring	Frieren Label Ring	프리렌 명찰 반지	1115753.png
+1115754	Ring	Mirrored Lotus Label Ring	경련화 명찰 반지	1115754.png
 1115755	Ring	First Adversary Label Ring	최초의 대적자 명찰 반지	1115755.png
 1115756	Ring	Chaos Label Ring	카오스 명찰 반지	1115756.png
 1115757	Ring	Abyss Cat Label Ring		1115757.png
+1115758	Ring	Omega Sector Night Label Ring		1115758.png
 1115759	Ring	Colorful Stationery Label Ring	컬러링 데코 명찰 반지	1115759.png
 1115760	Ring	Legion Sync Label Ring	유니온 싱크 명찰 반지	1115760.png
 1115761	Ring	Orange Minishroom Label Ring		1115761.png
@@ -40801,17 +41572,23 @@ id	category	gms_name	kms_name	icon
 1115796	Ring	Balanced Label Ring	균형의 명찰 반지	1115796.png
 1115797	Ring	Matcha Chocolate Label Ring	말차 초코 명찰 반지	1115797.png
 1115798	Ring	Stamp Label Ring		1115798.png
+1115799	Ring	Doppel: Lucid Label Ring	체인지 루시드 명찰 반지	1115799.png
+1115802	Ring	Equestrian Chat Ring	캐발리에 말풍선 반지	1115802.png
 1115803	Ring	Primal Warrior Chat Ring		1115803.png
 1115804	Ring	Chief Bear Chat Ring		1115804.png
 1115805	Ring	Helia Chat Ring		1115805.png
+1115806	Ring	Forester Chat Ring	숲의 일꾼 말풍선 반지	1115806.png
 1115814	Ring	Magatia Chat Ring		1115814.png
+1115901	Ring	Neon Star Label Ring	펑키 스타 러버 명찰 반지	1115901.png
 1115903	Ring	Team Desert Rabbit Label Ring		1115903.png
 1115904	Ring	Team Pepe Label Ring		1115904.png
 1115905	Ring	Team Lunar Pixie Label Ring		1115905.png
 1115906	Ring	Cat Video Label Ring		1115906.png
+1115908	Ring	Equestrian Label Ring	캐발리에 명찰 반지	1115908.png
 1115909	Ring	Primal Warrior Label Ring		1115909.png
 1115910	Ring	Chief Bear Label Ring		1115910.png
 1115911	Ring	Helia Label Ring		1115911.png
+1115912	Ring	Forester Label Ring	숲의 일꾼 명찰 반지	1115912.png
 1115920	Ring	Magatia Label Ring		1115920.png
 1116000	Ring	Illusion Ring: Brown Kitty	일루전 링 : 갈색고양이	1116000.png
 1116001	Ring	Illusion Ring: Black Kitty	일루전 링 : 검은색고양이	1116001.png
@@ -40958,6 +41735,7 @@ id	category	gms_name	kms_name	icon
 1092116	Shield	Knight of Light Shield	빛의 기사 방패	1092116.png
 1092117	Shield	Chief Knight Mihile's Shield	기사단장 미하일 방패	1092117.png
 1092118	Shield	Mushking Empire Head Security Officer's Shield		1092118.png
+1092122	Shield	Pan Lid		1092122.png
 1070000	Shoes	Blue Gomushin	꽃 고무신	1070000.png
 1070001	Shoes	Black Santa Boots	산타부츠	1070001.png
 1070002	Shoes	Kimono Shoes	나막신	1070002.png
@@ -41130,6 +41908,14 @@ id	category	gms_name	kms_name	icon
 1070218	Shoes	Lilac Sneakers	라일락 운동화	1070218.png
 1070219	Shoes	Sonata Ensemble	소나타 앙상블	1070219.png
 1070220	Shoes	Cocoa Socks	초코 스프레드	1070220.png
+1070221	Shoes	Blue Night Earth	청야운	1070221.png
+1070222	Shoes	Pristine White Slip-Ons	퓨어 화이트 슬립온	1070222.png
+1070223	Shoes	Circus Steps	환상의 발자취	1070223.png
+1070224	Shoes	Olive and Beige Shoes	베이지 올리브 슈즈	1070224.png
+1070225	Shoes	Minuet in a Dream	미뉴에트 인 드림	1070225.png
+1070227	Shoes	Sweet Strawberry Shoes	달콤 딸기 슈즈	1070227.png
+1070228	Shoes	Sol Stride	솔 스텝	1070228.png
+1070229	Shoes	Pink Bunny Shoes	핑크토끼 신발	1070229.png
 1071000	Shoes	Blue Loose Sox	파란색 루즈삭스	1071000.png
 1071001	Shoes	Red Loose Sox	빨간색 루즈삭스	1071001.png
 1071002	Shoes	Blue Gomushin	꽃 고무신	1071002.png
@@ -41316,6 +42102,14 @@ id	category	gms_name	kms_name	icon
 1071234	Shoes	Lilac Pumps	라일락 프릴슈즈	1071234.png
 1071235	Shoes	Sonata Harmony	소나타 하모니	1071235.png
 1071236	Shoes	Matcha Socks	말차 스프레드	1071236.png
+1071237	Shoes	Blue Dream Earth	청몽운	1071237.png
+1071238	Shoes	Coral Leg Warmers	코랄 레그 워머 부츠	1071238.png
+1071239	Shoes	Circus Shoes	환영의 발자취	1071239.png
+1071240	Shoes	Olive and Beige Shoes	베이지 올리브 슈즈	1071240.png
+1071241	Shoes	Waltz in a Dream	왈츠 인 드림	1071241.png
+1071242	Shoes	Sol Step	선 스텝	1071242.png
+1071244	Shoes	Pink Bunny Shoes	핑크토끼 신발	1071244.png
+1071245	Shoes	Sweet Strawberry Flats	달콤 딸기 구두	1071245.png
 1072010	Shoes	Black Dress Shoes	검은색 정장 구두	1072010.png
 1072013	Shoes	Red Air H's	빨간색 나이스 에어 농구화	1072013.png
 1072014	Shoes	Camping Boots	캠핑 웰트화	1072014.png
@@ -42164,7 +42958,7 @@ id	category	gms_name	kms_name	icon
 1073781	Shoes	Walk in the Forest	숲 속을 걸어요	1073781.png
 1073782	Shoes	CAPOO Ranger Shoes		1073782.png
 1073784	Shoes	Magica in the Autumn Forest Shoes		1073784.png
-1073785	Shoes	Abyssal Shrine Boots		1073785.png
+1073785	Shoes	Dapper Abyss Boots		1073785.png
 1073786	Shoes	Black Sandals	깜이 샌들	1073786.png
 1073787	Shoes	Midsummer Night Shoes	한여름밤 소식	1073787.png
 1073788	Shoes	Aqua Shoes		1073788.png
@@ -42489,8 +43283,8 @@ id	category	gms_name	kms_name	icon
 1074217	Shoes	Cream Berry Knee Socks	크림베리 니삭스	1074217.png
 1074218	Shoes	Cherry Berry Knee Socks	체리베리 니삭스	1074218.png
 1074219	Shoes	Ducky Tube Slides	튜브덕 슬리퍼	1074219.png
-1074221	Shoes	Dancing Puppet Shoes		1074221.png
-1074222	Shoes	Mad Puppeteer Bandage		1074222.png
+1074221	Shoes	Mad Puppeteer Shoes		1074221.png
+1074222	Shoes	Dancing Puppet Bandages		1074222.png
 1074223	Shoes	Playful Affection Shoes		1074223.png
 1074224	Shoes	Playful Love Shoes		1074224.png
 1074225	Shoes	Cursed Doll Purple Shoes		1074225.png
@@ -42500,6 +43294,14 @@ id	category	gms_name	kms_name	icon
 1074229	Shoes	Warm Kitty Boots		1074229.png
 1074232	Shoes	Doomed Path	파멸의 궤적	1074232.png
 1074233	Shoes	Forbidden Path	금단의 궤적	1074233.png
+1074234	Shoes	Frieren's Shoes	프리렌의 신발	1074234.png
+1074235	Shoes	Fern's Shoes	페른의 신발	1074235.png
+1074236	Shoes	Stark's Shoes	슈타르크의 신발	1074236.png
+1074237	Shoes	Himmel's Shoes	힘멜의 신발	1074237.png
+1074238	Shoes	Übel's Shoes	위벨의 신발	1074238.png
+1074239	Shoes	Aura's Shoes	아우라의 신발	1074239.png
+1074240	Shoes	Linie's Shoes	리니에의 신발	1074240.png
+1074241	Shoes	Lügner's Shoes	류그너의 신발	1074241.png
 1074242	Shoes	Observer's Footsteps	관측자의 발걸음	1074242.png
 1074243	Shoes	Tangerine Slippers	탠저린 슬리퍼	1074243.png
 1074244	Shoes	Blood Pentacle		1074244.png
@@ -42507,6 +43309,7 @@ id	category	gms_name	kms_name	icon
 1074246	Shoes	Gloomy Grin Shoes		1074246.png
 1074247	Shoes	Eternal Greeting Shoes		1074247.png
 1074248	Shoes	Eternal Farewell Shoes		1074248.png
+1074249	Shoes	Night Troupe Festival Shoes		1074249.png
 1074250	Shoes	New Leaf Mall Shoes	메이플 아지트 슈즈	1074250.png
 1074253	Shoes	Sweet Apple Shoes	사뿐 풋사과	1074253.png
 1074254	Shoes	Gamer's Slippers	게이밍 슬리퍼	1074254.png
@@ -42517,6 +43320,7 @@ id	category	gms_name	kms_name	icon
 1074259	Shoes	Fluffy Heart		1074259.png
 1074260	Shoes	Arcade Racer Shoes		1074260.png
 1074261	Shoes	Sweet Library Trip Shoes		1074261.png
+1074263	Shoes	Stark's Winter Shoes	슈타르크의 겨울용 신발	1074263.png
 1074264	Shoes	Green Tyranno Shoes	그린 티라노 워커	1074264.png
 1074265	Shoes	Purple Stego Shoes	퍼플 스테고 워커	1074265.png
 1074266	Shoes	Crimson Scars	크림슨 스카	1074266.png
@@ -42596,14 +43400,31 @@ id	category	gms_name	kms_name	icon
 1074351	Shoes	Red Moon Shoes		1074351.png
 1074352	Shoes	Royal Greaves		1074352.png
 1074353	Shoes	Royal Heels		1074353.png
+1074357	Shoes	Fluffy Kitty Paws	뽀송뽀송 냥발바닥	1074357.png
+1074358	Shoes	Fluffy Red Panda Paws	도톰 레서판다 발바닥	1074358.png
+1074359	Shoes	Lop-Eared Shoes	몽글 롭이어 신발	1074359.png
+1074360	Shoes	Maple Invasion Sneakers	메이플 어택 스니커즈	1074360.png
+1074361	Shoes	Jockey Riding Boots	캐발리에 톨 부츠	1074361.png
 1074362	Shoes	A Rock Star's Pride		1074362.png
 1074363	Shoes	A Rock Star's Joy		1074363.png
+1074364	Shoes	Black Antique Loafers	앤티크 블랙 로퍼	1074364.png
 1074365	Shoes	Brilliant Angelic Will		1074365.png
 1074366	Shoes	Neon Step		1074366.png
 1074367	Shoes	Abyssal Heels		1074367.png
 1074368	Shoes	Primal Stomp		1074368.png
 1074369	Shoes	Primal Clomp		1074369.png
+1074370	Shoes	Street Performer Kicks	스트리트댄서 신발	1074370.png
 1074371	Shoes	Checkmate Shoes		1074371.png
+1074374	Shoes	Hero's Boots	기사단화	1074374.png
+1074375	Shoes	Dutch Angles	에픽 페이드인	1074375.png
+1074376	Shoes	Bold Beetle Boots	대담 풍뎅이 장화	1074376.png
+1074377	Shoes	Persistent Roly Poly Boots	성실 공벌레 장화	1074377.png
+1074380	Shoes	Golden Solar Night Boots		1074380.png
+1074381	Shoes	Solar Goddess Heels		1074381.png
+1074382	Shoes	Magical Ribbon Shoes		1074382.png
+1074383	Shoes	Pure Angelic Boots		1074383.png
+1074384	Shoes	Stinger Point Boots		1074384.png
+1074385	Shoes	Stinger Point Heels		1074385.png
 1074386	Shoes	Stellar Guardian Shoes		1074386.png
 1074387	Shoes	Researcher of Stars Shoes		1074387.png
 1074388	Shoes	March of the Stars		1074388.png
@@ -42612,12 +43433,18 @@ id	category	gms_name	kms_name	icon
 1074391	Shoes	Luna Rabbit Heels		1074391.png
 1074392	Shoes	Seeker of Stars Shoes		1074392.png
 1074393	Shoes	Young Erel Shoes		1074393.png
+1074402	Shoes	Gilded Black Flower		1074402.png
+1074403	Shoes	Gilded Black Fan		1074403.png
+1074404	Shoes	Neon Mechanic Boots		1074404.png
+1074405	Shoes	Neon Mechanic Heels		1074405.png
 1074406	Shoes	Jump to the Beat		1074406.png
 1074407	Shoes	Run to the Beat		1074407.png
 1074408	Shoes	Margaret Stroll Sneakers		1074408.png
 1074409	Shoes	Margaret Petal Heels		1074409.png
 1074410	Shoes	Heartthrob Steps		1074410.png
 1074411	Shoes	Sweet Fox Slides		1074411.png
+1074445	Shoes	Sleuthing Steps		1074445.png
+1074446	Shoes	Deducting Steps		1074446.png
 1902008	Taming	Frog	개구리	1902008.png
 1902009	Taming	Ostrich		1902009.png
 1902010	Taming	Frog	개구리	1902010.png
@@ -43524,7 +44351,7 @@ id	category	gms_name	kms_name	icon
 1702967	Weapon	Pink Bean Cotton Candy Wand		1702967.png
 1702968	Weapon	Cheesy Mouse		1702968.png
 1702969	Weapon	Red Warrior Katana		1702969.png
-1702970	Weapon	Ignite	이그나이트	
+1702970	Weapon	Ignite	이그나이트	1702970.png
 1702971	Weapon	Pink Bean Huggable Cushion	핑크빈 허그 쿠션	1702971.png
 1702972	Weapon	Sir Hedgehog		1702972.png
 1702973	Weapon	Chess Master's Heart	체스퀸 하트	1702973.png
@@ -43923,7 +44750,7 @@ id	category	gms_name	kms_name	icon
 1703390	Weapon	Diamond Slingshot	다이아 새총	1703390.png
 1703391	Weapon	Midsummer Night Flower Basket	한여름밤 꽃 바구니	1703391.png
 1703392	Weapon	Ducky Pals	꽥꽥 오리 친구들	1703392.png
-1703393	Weapon	Abyssal Shrine Black Scythe		1703393.png
+1703393	Weapon	Dapper Abyss Black Scythe		1703393.png
 1703394	Weapon	Creepy Bunny Weapon		1703394.png
 1703395	Weapon	French Doggie	프렌치 깜이	1703395.png
 1703396	Weapon	Dream Wheel	꿈의 핸들	1703396.png
@@ -44074,7 +44901,7 @@ id	category	gms_name	kms_name	icon
 1703552	Weapon	Death Sniper Rifle	데스 스나이퍼	1703552.png
 1703553	Weapon	Dave's Waterproof Box	데이브 적재함	1703553.png
 1703554	Weapon	Bancho's Sushi Knife	반쵸 일식도	1703554.png
-1703555	Weapon	See You in My Dreams	꿈에서 만나	
+1703555	Weapon	See You in My Dreams	꿈에서 만나	1703555.png
 1703556	Weapon	Sleepy Toy Hammer	수면 뿅망치	1703556.png
 1703557	Weapon	Clione Doll	클리오네 인형	1703557.png
 1703560	Weapon	Dreaming Star	드리밍 스타	1703560.png
@@ -44137,7 +44964,7 @@ id	category	gms_name	kms_name	icon
 1703623	Weapon	Spring Festival Staff		1703623.png
 1703624	Weapon	Fresher than Flowers Bouquet		1703624.png
 1703625	Weapon	Proxy Tracker	매니저 트래커	1703625.png
-1703626	Weapon	Tailor Bear Pin	백곰 수선 클립	
+1703626	Weapon	Tailor Bear Pin	백곰 수선 클립	1703626.png
 1703627	Weapon	Carcion Octo-hunter Net Launcher	카르시온 문어 헌터 런처	1703627.png
 1703633	Weapon	Love Specialist		1703633.png
 1703634	Weapon	Sassy & Fresh Dino Weapon		1703634.png
@@ -44214,6 +45041,12 @@ id	category	gms_name	kms_name	icon
 1703717	Weapon	Playful Confession Weapon		1703717.png
 1703718	Weapon	Heartburst Kitty		1703718.png
 1703721	Weapon	Chaos Crescent	카오스 크레센트	1703721.png
+1703722	Weapon	Frieren's Staff	프리렌의 지팡이	1703722.png
+1703723	Weapon	Fern's Staff	페른의 지팡이	1703723.png
+1703724	Weapon	Stark's Axe	슈타르크의 도끼	1703724.png
+1703725	Weapon	Himmel's Sword	힘멜의 검	1703725.png
+1703726	Weapon	Übel's Staff	위벨의 지팡이	1703726.png
+1703727	Weapon	Aura's Scales of Obedience	아우라의 복종의 천칭	1703727.png
 1703740	Weapon	Zodiac Staff	조디악 스태프	1703740.png
 1703741	Weapon	Zippy Citrus Snail	달려라 귤팽이	1703741.png
 1703742	Weapon	Bottled Starlight	별이 담긴 유리병	1703742.png
@@ -44325,18 +45158,51 @@ id	category	gms_name	kms_name	icon
 1703874	Weapon	Red Nightshifter Yokai Cry		1703874.png
 1703875	Weapon	Sovereign Legacy		1703875.png
 1703876	Weapon	K23-A Weapon Loadout		1703876.png
+1703878	Weapon	Nature's Breath Fan	환호지선	1703878.png
+1703879	Weapon	Pastel Milky Way	스위트 밀키 웨이	1703879.png
+1703880	Weapon	Circus Showstopper	언리얼 피에스타	1703880.png
+1703889	Weapon	Bittersweet Nightmare	스위트 나이트메어	1703889.png
+1703890	Weapon	Antique Tailor's Snips	앤티크 테일러	1703890.png
+1703891	Weapon	Cheery Candle	해피 캔들 라이트	1703891.png
+1703892	Weapon	Beloved Sleepy Fox Doll	쿨쿨 여우 애착 인형	1703892.png
+1703893	Weapon	Lil Squirrel Doll	꾸러기 다람쥐 인형	1703893.png
 1703894	Weapon	A Rock Star's Thrills		1703894.png
+1703895	Weapon	Sentimental Chocolate Paw	감성 충만 초코 젤리	1703895.png
+1703896	Weapon	Rising Star Chick	꿈나무 병아리	1703896.png
+1703897	Weapon	Maple Invasion Balloons	메이플 어택 벌룬	1703897.png
+1703898	Weapon	Radiant Reins	골든 레인스	1703898.png
+1703899	Weapon	Riding Crop	캐발리에 크롭	1703899.png
+1703900	Weapon	Talkative Walkalong Corgi	멍멍 코기의 산책	1703900.png
 1703901	Weapon	Brilliant Angelic Wisdom		1703901.png
 1703902	Weapon	Deep Sea Harpoon		1703902.png
 1703903	Weapon	Furious Barista		1703903.png
 1703904	Weapon	The Queen		1703904.png
 1703905	Weapon	Neon Mint Monster Fireworks		1703905.png
 1703906	Weapon	Neon Red Monster Fireworks		1703906.png
+1703912	Weapon	Teddy Jubilee	테니 인형극	1703912.png
+1703913	Weapon	Rock Spirit Cotton Candy	돌의 정령 솜사탕	1703913.png
+1703914	Weapon	Monsters Ice Cream	스윗 몬스터즈 아이스크림	1703914.png
+1703918	Weapon	Hero's Spear	기사단의 창	1703918.png
+1703919	Weapon	Movie Star Maker	무비 스타 메이커	1703919.png
+1703920	Weapon	Poppin' Buttered Popcorn	팡팡 버터 팝콘	1703920.png
+1703921	Weapon	Lavender Clapperboard	라벤더 슬레이트	1703921.png
+1703922	Weapon	Friendly Forester	정겨운 숲의 일꾼	1703922.png
+1703923	Weapon	Sun Lord Staff		1703923.png
+1703924	Weapon	Heart Guardian Wand		1703924.png
+1703925	Weapon	Venom Injector Spear		1703925.png
+1703926	Weapon	Transforming Summer Capybara Weapon		1703926.png
 1703927	Weapon	Gram of Holy Light		1703927.png
 1703928	Weapon	Guardian Knight's Pride		1703928.png
 1703929	Weapon	Researcher's Pride		1703929.png
 1703930	Weapon	Constellation's Pledge		1703930.png
 1703931	Weapon	Constellation's Ward		1703931.png
 1703932	Weapon	Seeker's Pride		1703932.png
+1703939	Weapon	Golden Dragon Pipe		1703939.png
+1703940	Weapon	Nine-Tailed Purple Flame Fan		1703940.png
+1703941	Weapon	Best of Friends		1703941.png
+1703942	Weapon	Cat Cappuccino		1703942.png
+1703943	Weapon	Precious Ice		1703943.png
+1703944	Weapon	Gluttonous Racoon Weapon		1703944.png
 1703945	Weapon	Margaret Bouquet		1703945.png
 1703946	Weapon	Sweet Apple Candy		1703946.png
+1703994	Weapon	Leftover Sunflower Seeds 		1703994.png
