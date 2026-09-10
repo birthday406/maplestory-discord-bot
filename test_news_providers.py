@@ -49,15 +49,31 @@ class NewsProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restore_google_terms(protected[0], mappings[0]),
                          'Night Troupe 행사 Night Troupe 행사')
 
-    async def test_summary_uses_previous_gpt_english_summary(self):
+    async def test_summary_requests_korean_with_glossary_in_one_call(self):
         bot = SimpleNamespace(openai=SimpleNamespace(responses=SimpleNamespace(
-            create=AsyncMock(return_value=SimpleNamespace(output_text='- English summary')))))
-        result = await MapleNewsBot.summarize(bot, {'name': 'Patch', 'body': '<p>Source</p>'})
-        self.assertEqual(result, '- English summary')
+            create=AsyncMock(return_value=SimpleNamespace(output_text='- 스타캐치 변경')))))
+        result = await MapleNewsBot.summarize(bot, {'name': 'Patch', 'body': '<p>Star Catching reset rates</p>'})
+        self.assertEqual(result, '- 스타캐치 변경')
         request = bot.openai.responses.create.call_args.kwargs
         self.assertEqual(request['model'], 'gpt-5.6-luna')
-        self.assertIn('English', request['instructions'])
-        self.assertIn('Source', request['input'])
+        self.assertIn('Korean', request['instructions'])
+        self.assertIn('스타캐치', request['instructions'])
+        self.assertIn('재설정 확률', request['instructions'])
+        self.assertIn('Star Catching', request['input'])
+        bot.openai.responses.create.assert_awaited_once()
+
+    async def test_summary_uses_admin_glossary_override(self):
+        bot = SimpleNamespace(openai=SimpleNamespace(responses=SimpleNamespace(
+            create=AsyncMock(return_value=SimpleNamespace(output_text='- 지정 표현')))),
+            correction_store=SimpleNamespace(list=lambda: [('Star Catching', '별 잡기', '지정 표현')]))
+        await MapleNewsBot.summarize(bot, {'name': 'Patch', 'body': 'Star Catching'})
+        self.assertIn('지정 표현', bot.openai.responses.create.call_args.kwargs['instructions'])
+
+    async def test_empty_gpt_summary_is_rejected(self):
+        bot = SimpleNamespace(openai=SimpleNamespace(responses=SimpleNamespace(
+            create=AsyncMock(return_value=SimpleNamespace(output_text='  ')))))
+        with self.assertRaisesRegex(ValueError, 'empty summary'):
+            await MapleNewsBot.summarize(bot, {'name': 'Patch', 'body': 'Source'})
 
     async def test_google_translation_preserves_order_and_validates_response(self):
         response = Mock()

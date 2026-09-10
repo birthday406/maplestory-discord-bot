@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-import aiohttp
 from openai import AsyncOpenAI
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +21,7 @@ async def run(source: Path, title: str) -> int:
     # .env는 읽지 않습니다. 없는 키만 터미널에서 숨김 입력받고 파일에는 저장하지 않습니다.
     keys = {}
     try:
-        for name in ('OPENAI_API_KEY', 'GOOGLE_TRANSLATE_API_KEY'):
+        for name in ('OPENAI_API_KEY',):
             value = os.environ.get(name, '').strip()
             if not value:
                 if not sys.stdin.isatty():
@@ -40,22 +39,18 @@ async def run(source: Path, title: str) -> int:
     started = time.monotonic()
     stage = '용어사전·원문 검사'
     try:
-        # 요약 비용이 발생하기 전에 사전 파일을 검사합니다. 번역에는 공통 함수가 적용합니다.
+        # 요약 비용이 발생하기 전에 사전 파일을 검사합니다. 운영과 같은 요약 함수를 씁니다.
         terms = file_terms()
         print(f'용어사전 적용: {GLOSSARY_PATH} ({len(terms)}개)', flush=True)
         body = source.read_text(encoding='utf-8')
         if not body.strip():
             raise ValueError('Empty source')
         # 자동 재시도를 끄고 운영 봇 객체·Discord 연결·저장 상태는 만들지 않습니다.
-        async with AsyncOpenAI(api_key=keys['OPENAI_API_KEY'], max_retries=0, timeout=120) as client, aiohttp.ClientSession() as session:
-            bot = SimpleNamespace(openai=client, session=session,
-                                  google_api_key=keys['GOOGLE_TRANSLATE_API_KEY'])
+        async with AsyncOpenAI(api_key=keys['OPENAI_API_KEY'], max_retries=0, timeout=120) as client:
+            bot = SimpleNamespace(openai=client)
             print(f'{NEWS_MODEL} 요약 요청 시작', flush=True)
             stage = 'GPT 요약'
-            english = await MapleNewsBot.summarize(bot, {'name': title, 'body': body})
-            print(f'GPT 완료: {time.monotonic() - started:.1f}초. 용어사전 보호 후 Google 번역 요청', flush=True)
-            stage = 'Google 번역·용어 복원'
-            korean = format_news_summary((await MapleNewsBot.translate_texts(bot, [english]))[0])
+            korean = format_news_summary(await MapleNewsBot.summarize(bot, {'name': title, 'body': body}))
             print(f'전체 완료: {time.monotonic() - started:.1f}초\n\n{korean}')
             return 0
     except TranslationValidationError as error:

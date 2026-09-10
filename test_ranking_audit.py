@@ -54,9 +54,13 @@ class RankingAuditTests(unittest.TestCase):
         report = check_collection(self.store, self.now)[0]
         self.assertIn("시작 순위 21", report["issues"])
 
-    def test_duplicate_names_on_different_pages_are_detected(self):
+    def test_duplicate_names_on_different_pages_are_counted_once_without_warning(self):
         self.populate(duplicate=True)
-        self.assertIn("겹치는 캐릭터", check_collection(self.store, self.now)[0]["issues"])
+        with self.assertLogs('ranking_audit', level='INFO') as logged:
+            report = check_collection(self.store, self.now)[0]
+        self.assertEqual(json.loads(report['issues']), [])
+        self.assertEqual(json.loads(report['counts']), {str(w): 1 for w in WORLDS})
+        self.assertIn('duplicates=3', '\n'.join(logged.output))
 
     def test_representative_waits_for_completion_then_warns_on_drop(self):
         self.populate(kind="legion", count=10)
@@ -119,7 +123,49 @@ class RankingAuditTests(unittest.TestCase):
             connection.execute("UPDATE ranking_audit_pages SET names=? WHERE kind='achievement' AND world=45 AND page=1",
                                (json.dumps(['c45s0n0', 'unknown']),))
         report = check_collection(self.store, self.now)[0]
-        self.assertIn('Kronos: 배치에 있지만 DB에 없는 캐릭터 2명', json.loads(report['issues']))
+        self.assertIn('Kronos: 배치에 있지만 DB에 없는 캐릭터 1명', json.loads(report['issues']))
+        self.assertIn('업적: 월드 미확인·DB 저장 누락 1명', json.loads(report['issues']))
+
+    def test_global_achievement_pending_and_missing_are_reported_once(self):
+        self.populate(kind='achievement')
+        self.store.save_representative_page(
+            [{'characterName': 'waiting', 'achievementScore': 100, 'achievementRank': 9}],
+            self.day, 'achievement')
+        with self.store._connect() as connection:
+            for world in WORLDS:
+                connection.execute("UPDATE ranking_audit_pages SET names=? WHERE kind='achievement' AND world=? AND page=1",
+                                   (json.dumps(['waiting', 'lost', 'waiting']), world))
+        report = check_collection(self.store, self.now)[0]
+        issues = json.loads(report['issues'])
+        self.assertEqual(issues, ['업적: 값 보관됨·당일 경험치 기록 대기 1명 (월드 미확인)',
+                                  '업적: 월드 미확인·DB 저장 누락 1명'])
+        with self.store._connect() as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM ranking_snapshots WHERE name_key='waiting'").fetchone()[0], 0)
+
+    def test_pending_requires_matching_day_kind_and_positive_values(self):
+        self.populate(kind='achievement')
+        with self.store._connect() as connection:
+            connection.execute("UPDATE ranking_audit_pages SET names=? WHERE kind='achievement' AND world=45 AND page=1",
+                               (json.dumps(['wrongday', 'wrongkind', 'zero']),))
+            connection.executemany('INSERT INTO ranking_pending_representatives VALUES (?,?,?,?,?)', [
+                ('wrongday', '2026-09-06', 'achievement', 100, 1),
+                ('wrongkind', self.day.isoformat(), 'legion', 100, 1),
+                ('zero', self.day.isoformat(), 'achievement', 0, 1)])
+        issues = json.loads(check_collection(self.store, self.now)[0]['issues'])
+        self.assertIn('업적: 월드 미확인·DB 저장 누락 3명', issues)
+
+    def test_legion_pending_is_distinct_from_actual_missing(self):
+        self.populate(kind='legion')
+        self.store.save_representative_page(
+            [{'characterName': 'waiting', 'legionLevel': 9000, 'legionRank': 9}],
+            self.day, 'legion')
+        with self.store._connect() as connection:
+            connection.execute("UPDATE ranking_audit_pages SET names=? WHERE kind='legion' AND world=45 AND page=1",
+                               (json.dumps(['waiting', 'lost', 'lost']),))
+        issues = json.loads(check_collection(self.store, self.now)[0]['issues'])
+        self.assertIn('Kronos: 유니온 값 보관됨·당일 경험치 기록 대기 1명', issues)
+        self.assertIn('Kronos: 배치에 있지만 DB에 없는 캐릭터 1명', issues)
+        self.assertFalse(any('겹치는' in issue for issue in issues))
 
     def test_day_with_no_batches_is_reported_after_first_active_day(self):
         self.populate()

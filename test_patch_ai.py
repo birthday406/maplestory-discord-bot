@@ -73,7 +73,7 @@ class PatchFlowTests(unittest.IsolatedAsyncioTestCase):
                 alert_text_channels=lambda kind: [ok, failed], saved_categories={'update'},
                 patch_history=store,
                 openai=SimpleNamespace(responses=SimpleNamespace(create=AsyncMock(
-                    return_value=SimpleNamespace(output_text='Changed: 10% → 20%')))),
+                    return_value=SimpleNamespace(output_text='수정: 10% → 20%')))),
                 translate_texts=AsyncMock(return_value=['수정: 10% → 20%']))
             await maple_bot.MapleNewsBot.poll_patch_revisions(client)
             ok.send.assert_not_awaited()
@@ -85,7 +85,8 @@ class PatchFlowTests(unittest.IsolatedAsyncioTestCase):
             ok.send.assert_awaited_once()
             self.assertEqual(failed.send.await_count, 2)
             client.openai.responses.create.assert_awaited_once()
-            client.translate_texts.assert_awaited_once_with(['Changed: 10% → 20%'])
+            client.translate_texts.assert_not_awaited()
+            self.assertIn('Korean', client.openai.responses.create.call_args.kwargs['instructions'])
             self.assertEqual(ok.send.call_args.kwargs['embed'].description, '변경: 10% → 20%')
             self.assertEqual(failed.send.call_args.kwargs['embed'].description, '변경: 10% → 20%')
             self.assertEqual(store.pending(), [])

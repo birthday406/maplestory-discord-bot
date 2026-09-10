@@ -110,6 +110,28 @@ def parse_correction(text):
     return fields['원문'], fields['잘못된 번역'], fields['원하는 표현']
 
 
+def source_glossary(source, corrections=()):
+    # 파일을 매번 읽으므로 교정표 수정은 다음 요청부터 반영됩니다. DB 복사는 하지 않습니다.
+    terms = file_terms()
+    terms.update({normalize_term(term): (term, wrong, preferred)
+                  for term, wrong, preferred in corrections})
+    remaining, rows = normalize_term(source), []
+    for key, (term, wrong, preferred) in sorted(terms.items(), key=lambda item: -len(item[0])):
+        # 긴 용어부터 찾고 다른 단어의 일부는 제외합니다. 일반적인 s 복수형도 허용합니다.
+        pattern = re.compile(r'(?<!\w)' + re.escape(key) + r's?(?!\w)')
+        if not pattern.search(remaining):
+            continue
+        row = {'source': term, 'preferred': preferred}
+        if wrong:
+            row['avoid'] = wrong
+        if key in {'eternal', 'dawn', 'pitched'}:
+            row['context'] = 'Equipment/set names only; not ordinary words or other names.'
+        rows.append(row)
+        # 이미 찾은 긴 표현 안의 짧은 용어를 중복해서 보내지 않습니다.
+        remaining = pattern.sub(lambda match: ' ' * len(match.group()), remaining)
+    return json.dumps(rows, ensure_ascii=False, separators=(',', ':')) if rows else ''
+
+
 class CorrectionStore:
     def __init__(self, path=Path('translation-corrections.db')):
         self.path = path
@@ -135,25 +157,7 @@ class CorrectionStore:
             return db.execute('DELETE FROM corrections WHERE key=?', (source.casefold(),)).rowcount
 
     def glossary(self, source):
-        # 파일을 매번 읽으므로 교정표 수정은 다음 요청부터 반영됩니다. DB 복사는 하지 않습니다.
-        terms = file_terms()
-        terms.update({normalize_term(term): (term, wrong, preferred)
-                      for term, wrong, preferred in self.list()})
-        remaining, rows = normalize_term(source), []
-        for key, (term, wrong, preferred) in sorted(terms.items(), key=lambda item: -len(item[0])):
-            # 긴 용어부터 찾고 다른 단어의 일부는 제외합니다. 일반적인 s 복수형도 허용합니다.
-            pattern = re.compile(r'(?<!\w)' + re.escape(key) + r's?(?!\w)')
-            if not pattern.search(remaining):
-                continue
-            row = {'source': term, 'preferred': preferred}
-            if wrong:
-                row['avoid'] = wrong
-            if key in {'eternal', 'dawn', 'pitched'}:
-                row['context'] = 'Equipment/set names only; not ordinary words or other names.'
-            rows.append(row)
-            # 이미 찾은 긴 표현 안의 짧은 용어를 중복해서 보내지 않습니다.
-            remaining = pattern.sub(lambda match: ' ' * len(match.group()), remaining)
-        return json.dumps(rows, ensure_ascii=False, separators=(',', ':')) if rows else ''
+        return source_glossary(source, self.list())
 
 
 class CorrectionView(discord.ui.View):

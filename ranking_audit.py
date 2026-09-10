@@ -1,6 +1,7 @@
 """수집 배치의 페이지 연속성과 날짜별 인원을 검사합니다."""
 
 import json
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 
@@ -91,12 +92,17 @@ def check_collection(store, now=None):
                     "AND issues='[]' ORDER BY day DESC LIMIT 1", (day, kind),
                 ).fetchone()
                 baseline = json.loads(previous[0]) if previous else {}
-                # 업적 응답에는 다른 월드 캐릭터도 섞입니다. 같은 날짜의 실제
-                # 소속 월드로 구분하되, DB에 전혀 없는 이름은 누락 검사에 남깁니다.
-                achievement_worlds = dict(connection.execute(
+                # 당일 경험치가 없는 대표 값은 별도 대기 테이블에 정상 보관될 수 있습니다.
+                snapshot_worlds = dict(connection.execute(
                     "SELECT name_key, world_id FROM ranking_snapshots WHERE snapshot_date=?",
                     (day,),
-                )) if kind == "achievement" else {}
+                )) if kind != "world" else {}
+                retained = {r[0] for r in connection.execute(
+                    "SELECT name_key FROM ranking_pending_representatives "
+                    "WHERE snapshot_date=? AND ranking_type=? AND value>0 AND ranking>0",
+                    (day, kind),
+                )} - snapshot_worlds.keys() if kind != "world" else set()
+                unknown_world = set()
                 for world, name in WORLDS.items():
                     pages = {r[0]: json.loads(r[1]) for r in connection.execute(
                         "SELECT page, names FROM ranking_audit_pages WHERE day=? AND kind=? AND world=?",
@@ -115,14 +121,19 @@ def check_collection(store, now=None):
                         sample = ', '.join(map(str, sorted(missing)[:5]))
                         issues.append(f"{name}: 누락 페이지 {len(missing):,}개 (시작 순위 {sample})")
                     names = [nickname for items in pages.values() for nickname in items]
-                    if kind == "achievement":
-                        names = [nickname for nickname in names
-                                 if achievement_worlds.get(nickname, world) == world]
                     unique = set(names)
-                    counts[str(world)] = len(unique)
                     duplicate = len(names) - len(unique)
                     if duplicate:
-                        issues.append(f"{name}: 서로 겹치는 캐릭터 기록 {duplicate:,}개")
+                        # 공식 응답의 겹침은 집계에서 합치고 원본과 로그만 보존합니다.
+                        logging.getLogger(__name__).info(
+                            "ranking_audit_overlap day=%s kind=%s world=%s duplicates=%s",
+                            day, kind, world, duplicate,
+                        )
+                    if kind == "achievement":
+                        # 소속을 모르는 같은 이름을 네 월드의 누락으로 반복 세지 않습니다.
+                        unknown_world.update(unique - snapshot_worlds.keys())
+                        unique = {n for n in unique if snapshot_worlds.get(n) == world}
+                    counts[str(world)] = len(unique)
                     old = baseline.get(str(world), 0)
                     if old and len(unique) * 10 <= old * 9:
                         issues.append(f"{name}: 인원 {old:,} → {len(unique):,}명 (10% 이상 감소)")
@@ -132,11 +143,21 @@ def check_collection(store, now=None):
                         "SELECT name_key FROM ranking_snapshots WHERE snapshot_date=? "
                         f"AND world_id=? AND level>=260 AND {condition}", (day, world),
                     )}
-                    absent = unique - saved
+                    waiting = unique & retained
+                    if waiting:
+                        issues.append(f"{name}: {KINDS[kind]} 값 보관됨·당일 경험치 기록 대기 {len(waiting):,}명")
+                    absent = unique - saved - waiting
                     if absent:
                         issues.append(f"{name}: 배치에 있지만 DB에 없는 캐릭터 {len(absent):,}명")
                     if kind == "world" and not unique:
                         issues.append(f"{name}: 경험치 수집 인원 0명")
+                if unknown_world:
+                    waiting = unknown_world & retained
+                    absent = unknown_world - retained
+                    if waiting:
+                        issues.append(f"업적: 값 보관됨·당일 경험치 기록 대기 {len(waiting):,}명 (월드 미확인)")
+                    if absent:
+                        issues.append(f"업적: 월드 미확인·DB 저장 누락 {len(absent):,}명")
                 connection.execute(
                     "INSERT INTO ranking_audit_reports(day,kind,counts,issues,checked_at) VALUES(?,?,?,?,?)",
                     (day, kind, json.dumps(counts), json.dumps(issues, ensure_ascii=False), now.isoformat()),
