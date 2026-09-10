@@ -9,6 +9,16 @@ from translation_corrections import CorrectionStore, parse_correction, handle_co
 
 
 class CorrectionTests(unittest.IsolatedAsyncioTestCase):
+    def test_arcane_stands_alone_without_overriding_longer_names(self):
+        from translation_corrections import protect_google_terms, restore_google_terms
+        source = 'Arcane; Arcane Umbra; Arcane River; Arcane equipment; Arcane Symbol'
+        protected, mappings = protect_google_terms([source])
+        self.assertEqual(restore_google_terms(protected[0], mappings[0]),
+                         '아케인; 아케인셰이드; 아케인리버; 아케인 equipment; 아케인심볼')
+        rows = {row['source']: row for row in json.loads(self.store.glossary(source))}
+        self.assertEqual(rows['Arcane']['preferred'], '아케인')
+        self.assertNotIn('context', rows['Arcane'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

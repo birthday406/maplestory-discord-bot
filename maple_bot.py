@@ -3000,8 +3000,11 @@ class CalculatorView(UserOwnedView):
             default = preferences.get(parameter.name, "미적용")
             choice = next((c for c in parameter.choices if c.value == default), parameter.choices[0])
             self.selections[parameter.name] = choice
+            # 선택 후에도 어떤 설정인지 보이도록 적용 여부 앞에 항목 이름을 붙입니다.
             select = discord.ui.Select(placeholder=f"{parameter.display_name} 선택", row=row,
-                options=[discord.SelectOption(label=c.name, value=str(i), default=c == choice)
+                options=[discord.SelectOption(
+                    label=f"{parameter.display_name}: {c.name}" if c.name in {"적용", "미적용"} else c.name,
+                    value=str(i), default=c == choice)
                          for i, c in enumerate(parameter.choices)])
 
             async def select_changed(interaction, item=select, param=parameter):
@@ -3197,82 +3200,19 @@ class ExpCouponView(UserOwnedView):
                 pass  # 이미 사라진 메시지는 수정할 수 없습니다.
 
 
-async def exp_coupon_autocomplete(
-    interaction: discord.Interaction, current: str
-) -> list[app_commands.Choice[str]]:
-    """입력한 시작 레벨에서 실제 사용할 수 있는 EXP 교환권만 보여줍니다."""
-    level = getattr(interaction.namespace, "시작레벨", None)
-    if not isinstance(level, int):
-        return []
-    available = [name for name, (minimum, table) in EXP_COUPONS.items()
-                 if minimum <= level < minimum + len(table)]
-    return [
-        app_commands.Choice(name=name, value=name)
-        for name in available
-        if current.casefold() in name.casefold()
-    ]
-
-
-@app_commands.command(name="exp쿠폰", description="EXP 교환권 사용 결과를 계산합니다.")
+@app_commands.command(name="exp쿠폰", description="선택창과 수치 입력으로 EXP 교환권 사용 결과를 계산합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-@app_commands.rename(
-    coupon="쿠폰종류",
-    current_level="시작레벨",
-    current_exp_percent="경험치",
-    burning="버닝",
-    count="개수",
-)
-@app_commands.describe(
-    coupon="EXP 교환권 종류",
-    current_level="시작 캐릭터 레벨 (200~299)",
-    current_exp_percent="현재 경험치 퍼센트 (0 이상 100 미만)",
-    burning="생략하면 마지막 선택 사용 (첫 사용은 X)",
-    count="사용할 교환권 개수 (1~1억)",
-)
-@app_commands.choices(
-    burning=[
-        app_commands.Choice(name=burning_name, value=burning_name)
-        for burning_name in EXP_COUPON_BURNING_OPTIONS
-    ],
-)
-@app_commands.autocomplete(coupon=exp_coupon_autocomplete)
-async def exp_coupon_command(
-    interaction: discord.Interaction,
-    current_level: app_commands.Range[int, 200, 299] | None = None,
-    coupon: str | None = None,
-    current_exp_percent: app_commands.Range[float, 0.0, 99.999] | None = None,
-    count: app_commands.Range[int, 1, 100_000_000] | None = None,
-    burning: app_commands.Choice[str] | None = None,
-) -> None:
-    # 버닝을 생략하면 이 사용자가 마지막으로 고른 값을 쓰고, 첫 사용은 X로 계산합니다.
-    user_id = str(interaction.user.id)
+async def exp_coupon_command(interaction: discord.Interaction) -> None:
+    # 명령어 입력 옵션 없이 설정창을 열고, 마지막 버닝 선택을 복원합니다.
     preferences = interaction.client.exp_coupon_burning_preferences
-    burning_name = preferences.get(user_id, "X") if burning is None else burning.value
-    if burning is not None and preferences.get(user_id) != burning_name:
-        preferences[user_id] = burning_name
-        interaction.client.persist_state()
-
-    if any(value is None for value in (current_level, coupon, current_exp_percent, count)):
-        panel = ExpCouponView(interaction.user.id, burning_name)
-        if current_level is not None and current_exp_percent is not None and count is not None:
-            panel.values = (current_level, current_exp_percent, count)
-        if coupon in EXP_COUPONS:
-            panel.coupon = coupon
-        panel.update_options()
-        await interaction.response.send_message(embed=panel.settings_embed(), view=panel, ephemeral=True)
-        panel.message = await interaction.original_response()
-        return
-    try:
-        embed = build_exp_coupon_result(coupon, current_level, current_exp_percent, count, burning_name)
-    except ValueError as error:
-        await interaction.response.send_message(str(error), ephemeral=True)
-        return
-    await interaction.response.send_message(embed=embed)
+    panel = ExpCouponView(interaction.user.id, preferences.get(str(interaction.user.id), "X"))
+    await interaction.response.send_message(embed=panel.settings_embed(), view=panel, ephemeral=True)
+    panel.message = await interaction.original_response()
 
 
 def build_exp_coupon_result(coupon, current_level, current_exp_percent, count, burning_name):
-    """명령어 직접 입력과 버튼 계산이 같은 계산식·결과 표시를 사용합니다."""
+    """설정창에서 선택한 쿠폰·수치·버닝으로 계산 결과를 만듭니다."""
     result_level, result_exp, gained_exp, used_count = calculate_exp_coupons(
         coupon, current_level, current_exp_percent, count, burning_name
     )
@@ -3354,7 +3294,7 @@ async def epic_dungeon_calculator(
     dungeon_info = EPIC_DUNGEONS[dungeon.value]
     embed = discord.Embed(
         title=(
-            f"{EPIC_DUNGEON_EMOJIS[dungeon.value]} "
+            f"{EPIC_DUNGEON_EMOJIS[dungeon.value]}\u2003"
             "에픽 던전 경험치 계산기"
         ),
         description=(
@@ -3788,7 +3728,7 @@ async def appearance_search_command(
 # 전체 명령어를 분류별로 짧게 표시하고 실제 명령어 기능은 그대로 둡니다.
 HELP_CATEGORIES = {
     "공지·이벤트": (
-        ("/패치 · !패치", "최신 패치노트"),
+        ("/패치", "최신 패치노트"),
         ("/캐샵", "캐시샵 업데이트"), ("/썬데이 · /썬데이목록", "이번 주·전체 혜택"),
         ("/캐시이동 · /미라클큐브", "이벤트 일정"),
         ("/핫위크 · /큐브세일", "진행·예정 이벤트"),
@@ -3812,7 +3752,7 @@ HELP_CATEGORIES = {
     ),
     "편의": (
         ("/ㅁ · /심볼", "자주 쓰는 문구 복사"),
-        ("/항해 · !항해", "항해 안내"), ("/도핑 · !도핑", "보스 도핑 안내"),
+        ("/항해", "항해 안내"), ("/도핑", "보스 도핑 안내"),
     ),
 }
 CHARACTER_IMAGE_CACHE_PATH = Path(__file__).with_name('character-images.db')
@@ -4554,15 +4494,6 @@ class PatchQuestionModal(discord.ui.Modal, title='패치노트 질문'):
             bot._patch_question_busy = False
 
 
-@commands.command(name="패치")
-async def patch_prefix_command(ctx: commands.Context) -> None:
-    latest = await latest_patch_post(ctx.bot)
-    if latest is None:
-        await ctx.send("공식 패치노트를 찾지 못했습니다. 잠시 후 다시 시도해주세요.")
-        return
-    content, file = await patch_message(ctx.bot, latest)
-    await ctx.send(content, file=file, suppress_embeds=True)
-
 
 @app_commands.command(name="시간", description="주요 지역의 현재 시각을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -4587,12 +4518,6 @@ async def voyage_command(interaction: discord.Interaction) -> None:
     )
 
 
-@commands.command(name="항해")
-async def voyage_prefix_command(ctx: commands.Context) -> None:
-    await ctx.send(
-        file=discord.File(VOYAGE_GUIDE_IMAGE_PATH, filename="gms-voyage-guide.png")
-    )
-
 
 @app_commands.command(name="도핑", description="GMS 보스 물약·도핑 목록을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -4602,12 +4527,6 @@ async def doping_command(interaction: discord.Interaction) -> None:
         file=discord.File(DOPING_GUIDE_IMAGE_PATH, filename="gms-doping-guide.webp")
     )
 
-
-@commands.command(name="도핑")
-async def doping_prefix_command(ctx: commands.Context) -> None:
-    await ctx.send(
-        file=discord.File(DOPING_GUIDE_IMAGE_PATH, filename="gms-doping-guide.webp")
-    )
 
 
 @app_commands.command(name="썬데이", description="이번 주 썬데이 메이플 일정을 보여줍니다.")
@@ -5808,10 +5727,7 @@ class MapleNewsBot(commands.Bot):
         ):
             self.tree.add_command(command)
         self.add_command(quick_copy_symbol_prefix_command)
-        self.add_command(patch_prefix_command)
         self.add_command(time_prefix_command)
-        self.add_command(voyage_prefix_command)
-        self.add_command(doping_prefix_command)
         await self.tree.sync()
         self.persist_state()
 

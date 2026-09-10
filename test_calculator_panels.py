@@ -67,6 +67,19 @@ class CalculatorPanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await panel.interaction_check(self.interaction()))
         panel.stop()
 
+    async def test_burning_dropdowns_identify_setting_and_keep_calculation_values(self):
+        panel = bot.CalculatorView(1, bot.growth_potion_calculator)
+        for key, label in (("hyper_burning", "하이퍼버닝"), ("beyond_burning", "비욘드버닝")):
+            select = next(child for child in panel.children
+                          if isinstance(child, discord.ui.Select) and child.placeholder == f"{label} 선택")
+            self.assertEqual([option.label for option in select.options],
+                             [f"{label}: 적용", f"{label}: 미적용"])
+            select._values = ["0"]
+            await select.callback(self.interaction())
+            self.assertEqual(panel.selections[key].value, "적용")
+            self.assertTrue(select.options[0].default)
+        panel.stop()
+
     async def test_dropdown_changes_and_saved_symbol_settings(self):
         panel = bot.CalculatorView(1, bot.symbol_growth_calculator,
             {"potion_level": 6, "elanos": "적용"})

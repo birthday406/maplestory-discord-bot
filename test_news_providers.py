@@ -35,7 +35,8 @@ class NewsProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restore_google_terms(protected[0], mappings[0]),
                          '기어드락 퍼밀리어; 나이트 트루프: 지구방위본부; 스스비; '
                          '그랜드 어센틱심볼; 코어; 스스비')
-        self.assertEqual(protected[1], texts[1])
+        self.assertEqual(restore_google_terms(protected[1], mappings[1]),
+                         'Pets unfamiliar timezone; 아케인심볼; at dawn')
         token = next(iter(mappings[0]))
         with self.assertRaisesRegex(ValueError, '누락되거나 변경'):
             restore_google_terms(protected[0].replace(token, ''), mappings[0])

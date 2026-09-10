@@ -21,7 +21,7 @@ class ExpCouponViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(view, maple_bot.ExpCouponView)
         self.assertTrue(view.calculate.disabled)
         self.assertEqual({option.value for option in view.coupon_select.options}, set(maple_bot.EXP_COUPONS))
-        self.assertTrue(all(not parameter.required for parameter in maple_bot.exp_coupon_command.parameters))
+        self.assertEqual(maple_bot.exp_coupon_command.parameters, [])
 
     async def test_modal_selects_and_calculation_reuse_same_panel(self):
         interaction = self.interaction()

@@ -61,7 +61,7 @@ def protect_google_terms(texts, corrections=()):
         pattern = pattern.replace("'", "['’‘]")
         pattern += r'(?:es)?' if key.endswith('box') else r's?'
         # 중의적인 장비 이름은 장비·세트라는 명시적 문맥에서만 치환합니다.
-        context = r'(?=\s+(?:equipment|gear|set|armor|weapon)\b)' if key in {'arcane', 'eternal', 'dawn', 'pitched'} else ''
+        context = r'(?=\s+(?:equipment|gear|set|armor|weapon)\b)' if key in {'eternal', 'dawn', 'pitched'} else ''
         alternatives.append(f'(?P<t{index}>(?<!\\w){pattern}(?!\\w){context})')
         preferred[f't{index}'] = target
     matcher = re.compile('|'.join(alternatives), re.IGNORECASE)
@@ -148,8 +148,8 @@ class CorrectionStore:
             row = {'source': term, 'preferred': preferred}
             if wrong:
                 row['avoid'] = wrong
-            if key in {'arcane', 'eternal', 'dawn', 'pitched'}:
-                row['context'] = 'Equipment/set names only; not ordinary words or other names such as Arcane Symbol.'
+            if key in {'eternal', 'dawn', 'pitched'}:
+                row['context'] = 'Equipment/set names only; not ordinary words or other names.'
             rows.append(row)
             # 이미 찾은 긴 표현 안의 짧은 용어를 중복해서 보내지 않습니다.
             remaining = pattern.sub(lambda match: ' ' * len(match.group()), remaining)

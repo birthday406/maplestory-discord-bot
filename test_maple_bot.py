@@ -78,7 +78,6 @@ from maple_bot import (
     epic_dungeon_calculator as epic_dungeon_command,
     exp_coupon_command,
     exchange_log_alert_command,
-    exp_coupon_autocomplete,
     extreme_growth_potion_command,
     extract_cash_shop_transfer,
     extract_cash_shop_sections,
@@ -3430,110 +3429,28 @@ class ExpCouponTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 calculate_exp_coupons(coupon_name, level, 0, 1)
 
-    async def test_coupon_autocomplete_filters_advanced_coupon_by_level(self) -> None:
-        context = SimpleNamespace(_state=None, guild_id=None, guild=None)
-        def interaction_at(level):
-            options = [] if level is None else [{"name": "시작레벨", "type": 4, "value": level}]
-            return SimpleNamespace(namespace=maple_bot.app_commands.Namespace(context, {}, options))
-        missing_level = interaction_at(None)
-        low_level = interaction_at(259)
-        high_level = interaction_at(260)
-
-        missing_choices = await exp_coupon_autocomplete(missing_level, "")
-        low_choices = await exp_coupon_autocomplete(low_level, "")
-        high_choices = await exp_coupon_autocomplete(high_level, "")
-
-        self.assertEqual(missing_choices, [])
-        self.assertEqual([choice.value for choice in low_choices], ["EXP 교환권"])
-        self.assertEqual({choice.value for choice in high_choices}, set(EXP_COUPONS))
-        self.assertEqual([choice.value for choice in await exp_coupon_autocomplete(interaction_at(270), "")], ["상급 EXP 교환권"])
-
-    def test_command_offers_requested_burning_types(self) -> None:
-        burning_parameter = next(
-            parameter
-            for parameter in exp_coupon_command.parameters
-            if parameter.name == "burning"
-        )
-        self.assertEqual(
-            {choice.value for choice in burning_parameter.choices},
-            set(EXP_COUPON_BURNING_OPTIONS),
-        )
-        self.assertFalse(burning_parameter.required)
+    async def test_panel_filters_coupon_by_level_and_offers_burning_types(self) -> None:
+        panel = maple_bot.ExpCouponView(123, "X")
+        for level, expected in [(259, {"EXP 교환권"}), (260, set(EXP_COUPONS)), (270, {"상급 EXP 교환권"})]:
+            panel.values = (level, 0, 1)
+            panel.update_options()
+            self.assertEqual({option.value for option in panel.coupon_select.options}, expected)
+        self.assertEqual({option.value for option in panel.burning_select.options},
+                         set(EXP_COUPON_BURNING_OPTIONS))
+        panel.stop()
 
 
 class ExpCouponCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_result_uses_selected_coupon_emoji(self) -> None:
-        expected_emojis = {
-            "EXP 교환권": "<:EV:1536691867293323274>",
-            "상급 EXP 교환권": "<:AEV:1536691857692565554>",
-        }
-        for coupon_name, emoji in expected_emojis.items():
-            client = SimpleNamespace(
-                exp_coupon_burning_preferences={}, persist_state=Mock()
-            )
-            interaction = SimpleNamespace(
-                client=client,
-                user=SimpleNamespace(id=123),
-                response=SimpleNamespace(send_message=AsyncMock()),
-            )
-            with patch(
-                "maple_bot.calculate_exp_coupons",
-                return_value=(300, 0, 1, 1),
-            ):
-                await exp_coupon_command.callback(
-                    interaction,
-                    260,
-                    coupon_name,
-                    0,
-                    1,
-                    SimpleNamespace(name="X", value="X"),
-                )
-
-            embed = interaction.response.send_message.await_args.kwargs["embed"]
-            self.assertEqual(embed.title, f"{emoji} {coupon_name} 계산기")
-
-    async def test_burning_defaults_to_x_then_saves_and_reuses_selection(self) -> None:
-        client = SimpleNamespace(
-            exp_coupon_burning_preferences={}, persist_state=Mock()
-        )
-        interactions = [
-            SimpleNamespace(
-                client=client,
-                user=SimpleNamespace(id=123),
-                response=SimpleNamespace(send_message=AsyncMock()),
-            )
-            for _ in range(3)
-        ]
-        coupon = "상급 EXP 교환권"
-        with patch(
-            "maple_bot.calculate_exp_coupons",
-            return_value=(270, 0, 1, 1),
-        ) as calculate:
-            await exp_coupon_command.callback(
-                interactions[0], 269, coupon, 0, 1, None
-            )
-            await exp_coupon_command.callback(
-                interactions[1],
-                269,
-                coupon,
-                0,
-                1,
-                SimpleNamespace(name="비욘드버닝", value="비욘드버닝"),
-            )
-            await exp_coupon_command.callback(
-                interactions[2], 269, coupon, 0, 1, None
-            )
-
-        self.assertEqual(client.exp_coupon_burning_preferences, {"123": "비욘드버닝"})
-        client.persist_state.assert_called_once_with()
-        self.assertEqual(
-            [call.args[-1] for call in calculate.call_args_list],
-            ["X", "비욘드버닝", "비욘드버닝"],
-        )
-        first_embed = interactions[0].response.send_message.await_args.kwargs["embed"]
-        last_embed = interactions[2].response.send_message.await_args.kwargs["embed"]
-        self.assertIn("**버닝**　X", first_embed.description)
-        self.assertIn("**버닝**　비욘드버닝", last_embed.description)
+        for coupon, emoji in {"EXP 교환권": "<:EV:1536691867293323274>",
+                              "상급 EXP 교환권": "<:AEV:1536691857692565554>"}.items():
+            panel = maple_bot.ExpCouponView(123, "X")
+            panel.coupon, panel.values = coupon, (260, 0, 1)
+            interaction = SimpleNamespace(response=SimpleNamespace(edit_message=AsyncMock()))
+            await panel.calculate.callback(interaction)
+            embed = interaction.response.edit_message.await_args.kwargs["embed"]
+            self.assertEqual(embed.title, f"{emoji} {coupon} 계산기")
+            panel.stop()
 
 
 class EpicDungeonTests(unittest.TestCase):
@@ -3849,7 +3766,7 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
         reminders.start()
         self.addCleanup(reminders.stop)
 
-    async def test_patch_commands_attach_thumbnail_without_link_embed(self) -> None:
+    async def test_patch_command_attach_thumbnail_without_link_embed(self) -> None:
         post = {
             "id": 42415,
             "category": "update",
@@ -3866,28 +3783,22 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
             response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
             followup=SimpleNamespace(send=AsyncMock()),
         )
-        context = SimpleNamespace(bot=client, send=AsyncMock())
         expected = (
             "v.270 - Ride the Lightning\n"
             "https://www.nexon.com/maplestory/news/update/42415/"
             "updated-7-22-v-270-ride-the-lightning-patch-notes"
         )
 
-        files = [Mock(), Mock()]
+        files = [Mock()]
         with patch("maple_bot.discord.File", side_effect=files) as file_class:
             await maple_bot.patch_command.callback(interaction)
-            await maple_bot.patch_prefix_command.callback(context)
 
         interaction.followup.send.assert_awaited_once_with(
             expected, file=files[0], suppress_embeds=True
         )
-        context.send.assert_awaited_once_with(
-            expected, file=files[1], suppress_embeds=True
-        )
-        self.assertEqual(file_class.call_count, 2)
+        self.assertEqual(file_class.call_count, 1)
         self.assertEqual(file_class.call_args_list[0].kwargs["filename"], "patch-thumbnail.jpg")
-        self.assertEqual(file_class.call_args_list[1].kwargs["filename"], "patch-thumbnail.jpg")
-        self.assertEqual(client.fetch_character_image.await_count, 2)
+        self.assertEqual(client.fetch_character_image.await_count, 1)
         client.fetch_posts.assert_not_awaited()
 
     async def test_time_commands_send_the_same_embed_layout(self) -> None:
@@ -3906,35 +3817,29 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
         prefix_embed = context.send.await_args.kwargs["embed"]
         self.assertEqual(slash_embed.to_dict(), prefix_embed.to_dict())
 
-    async def test_voyage_commands_send_the_guide_image_without_embed(self) -> None:
+    async def test_voyage_command_send_the_guide_image_without_embed(self) -> None:
         interaction = SimpleNamespace(
             response=SimpleNamespace(send_message=AsyncMock())
         )
-        context = SimpleNamespace(send=AsyncMock())
         image_file = Mock(filename="gms-voyage-guide.png")
 
         with patch("maple_bot.discord.File", return_value=image_file) as file_class:
             await maple_bot.voyage_command.callback(interaction)
-            await maple_bot.voyage_prefix_command.callback(context)
 
-        self.assertEqual(file_class.call_count, 2)
+        self.assertEqual(file_class.call_count, 1)
         interaction.response.send_message.assert_awaited_once_with(file=image_file)
-        context.send.assert_awaited_once_with(file=image_file)
 
-    async def test_doping_commands_send_the_guide_image_without_embed(self) -> None:
+    async def test_doping_command_send_the_guide_image_without_embed(self) -> None:
         interaction = SimpleNamespace(
             response=SimpleNamespace(send_message=AsyncMock())
         )
-        context = SimpleNamespace(send=AsyncMock())
         image_file = Mock(filename="gms-doping-guide.webp")
 
         with patch("maple_bot.discord.File", return_value=image_file) as file_class:
             await maple_bot.doping_command.callback(interaction)
-            await maple_bot.doping_prefix_command.callback(context)
 
-        self.assertEqual(file_class.call_count, 2)
+        self.assertEqual(file_class.call_count, 1)
         interaction.response.send_message.assert_awaited_once_with(file=image_file)
-        context.send.assert_awaited_once_with(file=image_file)
 
     async def test_existing_patch_detail_is_refreshed_only_every_five_minutes(self) -> None:
         post = {
@@ -4021,13 +3926,13 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/서버", field_text)
         self.assertIn("/캐샵", field_text)
         self.assertIn("/패치", field_text)
-        self.assertIn("!패치", field_text)
+        self.assertNotIn("!패치", field_text)
         self.assertIn("/시간", field_text)
         self.assertIn("!시간", field_text)
         self.assertIn("/항해", field_text)
-        self.assertIn("!항해", field_text)
+        self.assertNotIn("!항해", field_text)
         self.assertIn("/도핑", field_text)
-        self.assertIn("!도핑", field_text)
+        self.assertNotIn("!도핑", field_text)
         self.assertIn("/아이템검색", field_text)
         self.assertIn("/외형검색", field_text)
         self.assertIn("/랭킹", field_text)
@@ -4258,11 +4163,9 @@ class AppearanceSearchTests(unittest.IsolatedAsyncioTestCase):
         bot.tree.add_command.assert_any_call(maple_bot.voyage_command)
         bot.tree.add_command.assert_any_call(maple_bot.doping_command)
         bot.add_command.assert_any_call(quick_copy_symbol_prefix_command)
-        bot.add_command.assert_any_call(maple_bot.patch_prefix_command)
         bot.add_command.assert_any_call(maple_bot.time_prefix_command)
-        bot.add_command.assert_any_call(maple_bot.voyage_prefix_command)
-        bot.add_command.assert_any_call(maple_bot.doping_prefix_command)
-        self.assertEqual(bot.add_command.call_count, 5)
+        self.assertEqual({call.args[0].name for call in bot.add_command.call_args_list},
+                         {"심볼", "시간"})
 
     def test_search_filters_hair_and_face(self) -> None:
         hair = search_cash_items("30000", category="Hair", limit=1)
