@@ -25,4 +25,4 @@ trap 'kill "$vnc_pid" "$display_pid" 2>/dev/null || true' EXIT INT TERM
 websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5901 > outputs/discord-login/web.log 2>&1 &
 web_pid=$!
 trap 'kill "$web_pid" "$vnc_pid" "$display_pid" 2>/dev/null || true' EXIT INT TERM
-DISPLAY=:99 .venv-discord/bin/python discord_news_collector.py --login --once
+DISPLAY=:99 .venv-discord/bin/python discord-collector-code/discord_news_collector.py --login --once
