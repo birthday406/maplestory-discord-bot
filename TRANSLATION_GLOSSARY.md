@@ -43,7 +43,7 @@
 | Grand Sacred Symbol | 그랜드 세이크리드 심볼 | 그랜드 어센틱심볼 |
 | Hotel Arcus | 호텔 아르쿠스 | 호텔 아르크스 |
 | bonus stat | 보너스 스탯 | 추가옵션 |
-| reset rate | 재설정 속도 | 재설정 확률 |
+| reset rate | 재설정 속도·재설정 확률 | 옵션 등장 확률 |
 | Star Catching | 별 잡기 | 스타캐치 |
 | legion | 군단 | 유니온 |
 | Monster Park Monday’s Creation Boxes | 몬스터 파크 월요일의 창조상자 | 창조의 월요일 상자 |

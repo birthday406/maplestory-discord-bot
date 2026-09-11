@@ -5837,6 +5837,9 @@ class MapleNewsBot(commands.Bot):
             self.check_news.start()
         if not self.check_patch_revisions.is_running():
             self.check_patch_revisions.start()
+        # 명시적으로 설정한 경우에만 별도 Discord 수집 파일을 처리합니다.
+        if os.getenv('DISCORD_NEWS_MODE') in ('shadow', 'live') and not self.check_discord_news.is_running():
+            self.check_discord_news.start()
         if not self.check_sunny_sunday.is_running():
             self.check_sunny_sunday.start()
         if not self.check_miracle_time.is_running():
@@ -5862,6 +5865,10 @@ class MapleNewsBot(commands.Bot):
 
     async def close(self) -> None:
         self.check_patch_revisions.cancel()
+        self.check_discord_news.cancel()
+        relay = getattr(self, '_discord_news_relay', None)
+        if relay:
+            await relay.close()
         self.check_ranking_integrity.cancel()
         # 보관 중 종료되어도 검증·DB 정리 작업이 끝나도록 기다립니다.
         self.collect_rankings.cancel()
@@ -6430,20 +6437,39 @@ class MapleNewsBot(commands.Bot):
                 sent_message_ids[channel.id] = message.id
         return sent_message_ids
 
-    async def send_server_open_alert(self, embed: discord.Embed) -> None:
-        """채널마다 관리자가 고른 역할을 멘션해 서버 오픈을 알립니다."""
+    async def send_server_open_alert(self, row, store) -> None:
+        """공식 Game is up 공지에만 점검·채널별 한 번 역할을 멘션합니다."""
+        from discord_news import CHANNEL_URL, is_game_up
+        if not is_game_up(row['body']):
+            return
+        watch = self.maintenance_watch or {}
+        # 홈페이지 점검 ID를 같은 점검의 기준으로 사용합니다. 정보가 없으면 UTC 날짜별로 제한합니다.
+        cycle = (f"maintenance:{watch['post_id']}" if watch.get('post_id')
+                 else 'discord-day:' + row['created_at'][:10])
+        embed = discord.Embed(title="메이플스토리 서버 오픈", color=0x2ECC71,
+                              description="**메이플스토리 서버가 열렸습니다.**\n공식 공지에서 접속 재개를 확인했습니다.",
+                              url=f"{CHANNEL_URL}/{row['id']}")
+        embed.set_author(name="MapleStory | SERVER STATUS")
         for channel in self.alert_text_channels(ALERT_SERVER):
+            if not store.claim_open(cycle, row['id'], channel.id):
+                continue
             role_id = self.server_alert_roles.get(str(channel.id))
+            status = 'sent'
             try:
-                await channel.send(
-                    content=f"<@&{role_id}>" if role_id is not None else None,
-                    embed=embed,
-                    allowed_mentions=discord.AllowedMentions(
-                        everyone=False, users=False, roles=True
-                    ),
-                )
-            except discord.HTTPException:
-                logging.exception("Failed to send server alert to %s.", channel.id)
+                await channel.send(content=f"<@&{role_id}>" if role_id is not None else None,
+                                   embed=embed, allowed_mentions=discord.AllowedMentions(
+                                       everyone=False, users=False, roles=True))
+            except Exception as error:
+                status = 'uncertain'
+                logging.error('server_open channel=%s error_type=%s', channel.id, type(error).__name__)
+                await self.send_owner_dm(f'서버 오픈 알림 전송 확인 필요: 채널 {channel.id}. 중복 멘션 방지를 위해 자동 재전송하지 않습니다.')
+            finally:
+                with store.connect() as db:
+                    db.execute('UPDATE open_alerts SET status=? WHERE cycle=? AND channel_id=?',
+                               (status, cycle, channel.id))
+        if self.maintenance_watch:
+            self.maintenance_watch['completed'] = True
+            self.persist_state()
 
     async def delete_sunny_day_message(self, channel: discord.TextChannel) -> None:
         # 당일 알림을 끄면 그 채널에 남아 있는 임시 주간 메시지도 함께 제거합니다.
@@ -6742,6 +6768,19 @@ class MapleNewsBot(commands.Bot):
             # 실패해도 루프를 종료하지 않고 다음 주기에 저장된 변경분부터 재시도합니다.
             logging.warning('patch_revision phase=failed utc=%s error_type=%s',
                             datetime.now(timezone.utc).isoformat(), type(error).__name__)
+
+    @tasks.loop(seconds=2)
+    async def check_discord_news(self) -> None:
+        from discord_news import NewsRelay
+        try:
+            if not hasattr(self, '_discord_news_relay'):
+                self._discord_news_relay = NewsRelay(
+                    os.getenv('DISCORD_NEWS_INBOX', 'discord-news-inbox'),
+                    os.getenv('DISCORD_NEWS_DATABASE', 'discord-news.db'),
+                    os.getenv('DISCORD_NEWS_MODE', 'shadow'))
+            await self._discord_news_relay.tick(self, list(self.alert_text_channels(ALERT_NEWS)))
+        except Exception as error:
+            logging.warning('discord_news phase=failed error_type=%s', type(error).__name__)
 
     @tasks.loop(minutes=POLL_INTERVAL_MINUTES)
     async def check_news(self) -> None:
@@ -7169,43 +7208,8 @@ class MapleNewsBot(commands.Bot):
 
     @tasks.loop(minutes=1)
     async def check_server_status(self) -> None:
-        # 평상시에는 시간만 확인하고 API를 호출하지 않습니다.
-        now_timestamp = int(datetime.now(timezone.utc).timestamp())
-        if not should_check_server_status(self.maintenance_watch, now_timestamp):
-            return
-
-        # API 오류는 점검으로 저장하지 않고 다음 1분 확인 때 다시 시도합니다.
-        try:
-            statuses = await self.fetch_server_status()
-        except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError) as error:
-            logging.warning("MapleStory server status check failed: %s", error)
-            return
-
-        current_status = "up" if all(statuses.values()) else "down"
-        state_changed = current_status != self.server_status
-        self.server_status = current_status
-        if current_status == "down":
-            if not self.maintenance_watch.get("saw_down", False):
-                self.maintenance_watch["saw_down"] = True
-                state_changed = True
-        elif (
-            self.maintenance_watch.get("saw_down", False)
-            or (
-                self.maintenance_watch.get("end_timestamp") is not None
-                and now_timestamp >= self.maintenance_watch["end_timestamp"]
-            )
-        ):
-            # 점검 시작 직후 서버가 잠깐 정상으로 잡히는 경우를 종료로 오인하지 않습니다.
-            # 실제 점검 중 상태를 봤거나 예정 종료 시각이 지난 뒤 정상일 때만 알립니다.
-            await self.send_server_open_alert(
-                build_server_status_embed(statuses, opened=True)
-            )
-            # 오픈을 확인한 점검은 완료 처리해 다음 점검까지 API 요청을 멈춥니다.
-            self.maintenance_watch["completed"] = True
-            state_changed = True
-
-        if state_changed:
-            self.persist_state()
+        # 서버 상태 API는 /서버 조회에만 사용합니다. 정상 응답으로 오픈 멘션을 보내지 않습니다.
+        return
 
     async def rename_info_channels(self, info_type: str, name: str) -> None:
         """등록된 음성 채널 이름이 달라졌을 때만 변경합니다."""

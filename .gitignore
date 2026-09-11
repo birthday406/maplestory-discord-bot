@@ -35,6 +35,13 @@ ranking-update-probe.log
 ranking-update-probe.json
 ranking-inbox/
 ranking-outbox/
+discord-news-profile/
+discord-news-inbox/
+discord-collector-code/
+discord-news-outbox/
+discord-news.db*
+.venv-discord/
+discord-source.conf
 maplebot-backfill-level-*.jsonl
 maplebot-backfill-current-level
 __pycache__/

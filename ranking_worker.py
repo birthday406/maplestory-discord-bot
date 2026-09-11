@@ -117,9 +117,9 @@ class RankingBatchWriter:
         self.finalize()
 
 
-async def sync_ready_batches(outbox: Path) -> int:
+async def sync_ready_batches(outbox: Path, *, target=None, ssh_key=None) -> int:
     """완성된 묶음을 SSH로 메인 서버에 보내고 로컬 보관 폴더로 옮깁니다."""
-    target = os.getenv("RANKING_SYNC_TARGET")
+    target = target or os.getenv("RANKING_SYNC_TARGET")
     if not target:
         return 0
     try:
@@ -132,7 +132,7 @@ async def sync_ready_batches(outbox: Path) -> int:
         remote_final = f"{remote_directory.rstrip('/')}/{batch_path.name}"
         remote_partial = f"{remote_final}.part"
         command = ["scp", "-q", "-o", "BatchMode=yes"]
-        ssh_key = os.getenv("RANKING_SYNC_SSH_KEY")
+        ssh_key = ssh_key or os.getenv("RANKING_SYNC_SSH_KEY")
         if ssh_key:
             command.extend(("-i", ssh_key))
         command.extend((str(batch_path), f"{remote_host}:{remote_partial}"))

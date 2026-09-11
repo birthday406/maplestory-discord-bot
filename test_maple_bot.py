@@ -2639,7 +2639,7 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
         bot.fetch_server_status.assert_not_awaited()
 
-    async def test_server_open_alert_is_sent_once_after_down_to_up_transition(self) -> None:
+    async def test_api_down_to_up_does_not_send_server_open_alert(self) -> None:
         statuses = {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")}
         bot = SimpleNamespace(
             server_status="down",
@@ -2656,10 +2656,10 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
         await maple_bot.MapleNewsBot.check_server_status.coro(bot)
         await maple_bot.MapleNewsBot.check_server_status.coro(bot)
 
-        self.assertEqual(bot.server_status, "up")
-        self.assertTrue(bot.maintenance_watch["completed"])
-        bot.send_server_open_alert.assert_awaited_once()
-        bot.persist_state.assert_called_once_with()
+        self.assertEqual(bot.server_status, "down")
+        self.assertFalse(bot.maintenance_watch["completed"])
+        bot.send_server_open_alert.assert_not_awaited()
+        bot.persist_state.assert_not_called()
 
     async def test_scheduled_maintenance_does_not_alert_before_down_or_end(self) -> None:
         statuses = {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")}
@@ -2681,7 +2681,7 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
         bot.send_server_open_alert.assert_not_awaited()
         self.assertFalse(bot.maintenance_watch["completed"])
 
-    async def test_scheduled_maintenance_alerts_after_planned_end(self) -> None:
+    async def test_planned_end_does_not_send_server_open_alert(self) -> None:
         statuses = {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")}
         bot = SimpleNamespace(
             server_status=None,
@@ -2698,8 +2698,8 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
         await maple_bot.MapleNewsBot.check_server_status.coro(bot)
 
-        bot.send_server_open_alert.assert_awaited_once()
-        self.assertTrue(bot.maintenance_watch["completed"])
+        bot.send_server_open_alert.assert_not_awaited()
+        self.assertFalse(bot.maintenance_watch["completed"])
 
     async def test_emergency_maintenance_waits_until_down_was_observed(self) -> None:
         statuses = {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")}
@@ -2747,12 +2747,12 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
             server_alert_roles={"111": 555, "222": 666},
             alert_text_channels=lambda alert_type: [first, second],
         )
-        embed = build_server_status_embed(
-            {world: True for world in ("Scania", "Bera", "Kronos", "Hyperion")},
-            opened=True,
-        )
-
-        await maple_bot.MapleNewsBot.send_server_open_alert(bot, embed)
+        from discord_news import NewsStore
+        import tempfile
+        bot.maintenance_watch = None
+        row = {'id': '1547812204580179969', 'body': 'Game is up!', 'created_at': '2026-09-11T03:33:06Z'}
+        with tempfile.TemporaryDirectory() as folder:
+            await maple_bot.MapleNewsBot.send_server_open_alert(bot, row, NewsStore(Path(folder) / 'news.db'))
 
         self.assertEqual(first.send.await_args.kwargs["content"], "<@&555>")
         self.assertEqual(second.send.await_args.kwargs["content"], "<@&666>")

@@ -1,0 +1,16 @@
+[Unit]
+Description=MapleStory official Discord announcement browser collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/maplestory-discord-bot
+EnvironmentFile=/home/ubuntu/maplestory-discord-bot/discord-source.conf
+ExecStart=/home/ubuntu/maplestory-discord-bot/.venv-discord/bin/python /home/ubuntu/maplestory-discord-bot/discord-collector-code/discord_news_collector.py
+Restart=on-failure
+RestartSec=30
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
