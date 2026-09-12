@@ -100,10 +100,12 @@ from maple_bot import (
     info_channel_command,
     utc_channel_command,
     is_cash_shop_update,
+    is_known_issues_article,
     is_patch_notes,
     is_server_maintenance_post,
     item_search_autocomplete,
     item_search_command,
+    known_issues_command,
     known_sunny_sunday_translation,
     localize_sunny_sunday_text,
     load_state,
@@ -3929,6 +3931,7 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/캐샵", field_text)
         self.assertIn("/캐샵일정", field_text)
         self.assertIn("/패치", field_text)
+        self.assertIn("/알려진문제", field_text)
         self.assertNotIn("!패치", field_text)
         self.assertIn("/시간", field_text)
         self.assertIn("!시간", field_text)
@@ -4163,6 +4166,7 @@ class AppearanceSearchTests(unittest.IsolatedAsyncioTestCase):
 
         bot.tree.add_command.assert_any_call(appearance_search_command)
         bot.tree.add_command.assert_any_call(cash_sale_schedule_command)
+        bot.tree.add_command.assert_any_call(known_issues_command)
         bot.tree.add_command.assert_any_call(quick_copy_symbol_command)
         bot.tree.add_command.assert_any_call(maple_bot.voyage_command)
         bot.tree.add_command.assert_any_call(maple_bot.doping_command)
@@ -4693,6 +4697,91 @@ class FrierenCashCommandTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_known_issues_article_selects_newest_support_article(self) -> None:
+        response = Mock()
+        response.raise_for_status = Mock()
+        response.json = AsyncMock(
+            return_value={
+                "articles": [
+                    {
+                        "id": 1,
+                        "title": "Known Issues – v.266 - Old Patch",
+                        "html_url": "https://support-maplestory.nexon.com/articles/1",
+                        "body": "<p>Old issue</p>",
+                        "created_at": "2026-02-01T00:00:00Z",
+                    },
+                    {
+                        "id": 2,
+                        "title": "Known Issues – v.271 - Frieren",
+                        "html_url": "https://support-maplestory.nexon.com/articles/2",
+                        "body": "<p>Current issue</p>",
+                        "created_at": "2026-09-09T00:00:00Z",
+                    },
+                ]
+            }
+        )
+        request = Mock(
+            __aenter__=AsyncMock(return_value=response),
+            __aexit__=AsyncMock(return_value=False),
+        )
+        bot = object.__new__(MapleNewsBot)
+        bot.session = Mock()
+        bot.session.get.return_value = request
+        bot.latest_known_issues = None
+
+        result = await MapleNewsBot.fetch_known_issues_article(bot)
+
+        self.assertEqual(result["id"], 2)
+        self.assertIs(bot.latest_known_issues, result)
+        response.raise_for_status.assert_called_once_with()
+
+    def test_latest_known_issues_selector_uses_current_version_article(self) -> None:
+        articles = [
+            {
+                "id": 1,
+                "title": "Known Issues – v.266 - Old Patch",
+                "created_at": "2026-02-01T00:00:00Z",
+            },
+            {
+                "id": 2,
+                "title": "Known Issues – v.271 - Frieren",
+                "created_at": "2026-09-09T00:00:00Z",
+            },
+            {
+                "id": 3,
+                "title": "MapleStory Server Status",
+                "created_at": "2026-09-12T00:00:00Z",
+            },
+        ]
+
+        selected = max(
+            (article for article in articles if is_known_issues_article(article)),
+            key=lambda article: article["created_at"],
+        )
+
+        self.assertEqual(selected["id"], 2)
+        self.assertFalse(is_known_issues_article(articles[2]))
+
+    async def test_known_issues_command_uses_official_support_article(self) -> None:
+        article = {
+            "id": 2,
+            "title": "Known Issues – v.271 - Frieren",
+            "html_url": "https://support-maplestory.nexon.com/hc/en-us/articles/2",
+            "body": "<p>Issue</p>",
+        }
+        interaction = SimpleNamespace(
+            client=SimpleNamespace(fetch_known_issues_article=AsyncMock(return_value=article)),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+        await known_issues_command.callback(interaction)
+
+        embed = interaction.followup.send.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "[ 알려진 문제 ]")
+        self.assertIn(article["html_url"], embed.description)
+        self.assertIn("v.271", embed.description)
+
     async def test_cash_shop_command_uses_saved_latest_link_and_thumbnail(self) -> None:
         interaction = SimpleNamespace(
             client=SimpleNamespace(

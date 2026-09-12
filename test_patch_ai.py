@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -77,6 +78,74 @@ class PatchTests(unittest.TestCase):
 
 
 class PatchFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_known_issues_still_runs_when_patch_news_fetch_fails(self):
+        with tempfile.TemporaryDirectory() as folder:
+            known_store = PatchHistory(Path(folder) / 'known-issues.db')
+            client = SimpleNamespace(
+                fetch_posts=AsyncMock(side_effect=maple_bot.aiohttp.ClientError()),
+                fetch_known_issues_article=AsyncMock(return_value={
+                    'id': 2,
+                    'title': 'Known Issues – v.271 - Frieren',
+                    'html_url': 'https://support-maplestory.nexon.com/hc/en-us/articles/2',
+                    'body': '<h2>Current Known Issues</h2><p>Issue</p>',
+                }),
+                alert_text_channels=lambda kind: [],
+                saved_categories={'update'},
+                patch_history=PatchHistory(Path(folder) / 'patch.db'),
+                known_issues_history=known_store,
+                openai=SimpleNamespace(),
+                correction_store=None,
+            )
+
+            await maple_bot.MapleNewsBot.poll_patch_revisions(client)
+
+            client.fetch_known_issues_article.assert_awaited_once_with()
+            database = sqlite3.connect(known_store.path)
+            try:
+                snapshot = database.execute(
+                    'SELECT body FROM snapshots WHERE post_id=?', (2,)
+                ).fetchone()
+            finally:
+                database.close()
+            self.assertEqual(snapshot, ('Current Known Issues\nIssue',))
+
+    async def test_known_issues_revision_is_sent_to_news_channel(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = PatchHistory(Path(folder) / 'known-issues.db')
+            article = {
+                'id': 2,
+                'title': 'Known Issues – v.271 - Frieren',
+                'html_url': 'https://support-maplestory.nexon.com/hc/en-us/articles/2',
+                'body': '<h2>Current Known Issues</h2><p>Old issue</p>',
+            }
+            channel = SimpleNamespace(id=10, send=AsyncMock())
+            client = SimpleNamespace(
+                fetch_posts=AsyncMock(return_value=[]),
+                fetch_known_issues_article=AsyncMock(return_value=article),
+                alert_text_channels=lambda kind: [channel],
+                saved_categories={'general', 'update'},
+                patch_history=PatchHistory(Path(folder) / 'patch.db'),
+                known_issues_history=store,
+                openai=SimpleNamespace(responses=SimpleNamespace(create=AsyncMock(
+                    return_value=SimpleNamespace(output_text='추가:\n새 문제')))),
+                correction_store=None,
+            )
+
+            await maple_bot.MapleNewsBot.poll_patch_revisions(client)
+            channel.send.assert_not_awaited()
+            article['body'] = '<h2>Current Known Issues</h2><p>Old issue</p><p>New issue</p>'
+            await maple_bot.MapleNewsBot.poll_patch_revisions(client)
+
+            channel.send.assert_awaited_once()
+            request = client.openai.responses.create.await_args.kwargs
+            self.assertIn('Known Issues', request['instructions'])
+            self.assertIn('marked resolved', request['instructions'])
+            embed = channel.send.await_args.kwargs['embed']
+            self.assertEqual(embed.author.name, 'MapleStory | KNOWN ISSUES UPDATE')
+            self.assertEqual(embed.title, '⚠️ v.271 알려진 문제 추가 수정')
+            self.assertIn('[공식 Known Issues 확인]', embed.description)
+            self.assertEqual(store.pending(), [])
+
     async def test_revision_retries_only_failed_channel_without_resummarizing(self):
         with tempfile.TemporaryDirectory() as folder:
             store = PatchHistory(Path(folder) / 'patch.db')

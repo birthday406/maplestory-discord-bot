@@ -63,9 +63,13 @@ from maple_data import (
 )
 
 
-BOT_VERSION = "1.4.3"
+BOT_VERSION = "1.4.4"
 NEWS_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news"
 NEWS_DETAIL_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news/{post_id}"
+KNOWN_ISSUES_API_URL = (
+    "https://support-maplestory.nexon.com/api/v2/help_center/en-us/"
+    "sections/200991769/articles.json"
+)
 SERVER_STATUS_API_URL = "https://www.nexon.com/api/maplestory/no-auth/v1/server-status/na"
 RANKING_API_URL = "https://www.nexon.com/api/maplestory/no-auth/ranking/v2/{region}"
 USD_EXCHANGE_RATE_URL = "https://finance.naver.com/marketindex/exchangeList.naver"
@@ -1168,6 +1172,12 @@ def is_patch_notes(post: dict) -> bool:
     # update 카테고리라도 Preview나 단독 콘텐츠 소개 글은 제외하고 실제 패치노트만 찾습니다.
     title = post.get("name", "").lower()
     return post.get("category") == "update" and "patch notes" in title and "preview" not in title
+
+
+def is_known_issues_article(article: dict) -> bool:
+    """고객지원 목록에서 패치별 Known Issues 문서만 찾습니다."""
+    title = html.unescape(str(article.get("title", ""))).casefold()
+    return "known issues" in title and re.search(r"\bv\.\d+", title) is not None
 
 
 def patch_display_title(post: dict) -> str:
@@ -3818,7 +3828,7 @@ async def appearance_search_command(
 # 전체 명령어를 분류별로 짧게 표시하고 실제 명령어 기능은 그대로 둡니다.
 HELP_CATEGORIES = {
     "공지·이벤트": (
-        ("/패치", "최신 패치노트"),
+        ("/패치 · /알려진문제", "최신 패치노트·Known Issues"),
         ("/캐샵 · /캐샵일정", "공식 업데이트·예약 일정"),
         ("/썬데이 · /썬데이목록", "이번 주·전체 혜택"),
         ("/캐시이동 · /미라클큐브", "이벤트 일정"),
@@ -4976,6 +4986,38 @@ async def latest_patch_post(client: commands.Bot) -> dict | None:
         latest = next((post for post in posts if is_patch_notes(post)), None)
         client.latest_patch = latest
     return latest
+
+
+@app_commands.command(
+    name=app_commands.locale_str("knownissues", ko="알려진문제"),
+    description="최신 공식 Known Issues 문서를 보여줍니다.",
+)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def known_issues_command(interaction: discord.Interaction) -> None:
+    await interaction.response.defer()
+    try:
+        article = getattr(interaction.client, "latest_known_issues", None)
+        if article is None:
+            article = await interaction.client.fetch_known_issues_article()
+    except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError, KeyError):
+        logging.exception("Failed to load the official Known Issues article.")
+        article = None
+    if article is None:
+        await interaction.followup.send(
+            "공식 Known Issues 문서를 찾지 못했습니다. 잠시 후 다시 시도해주세요.",
+            ephemeral=True,
+        )
+        return
+
+    title = re.sub(r"^\[[^]]+\]\s*", "", article["title"])
+    embed = discord.Embed(
+        title="[ 알려진 문제 ]",
+        description=f"[{title}]({article['html_url']})",
+        url=article["html_url"],
+        color=CATEGORY_COLORS["update"],
+    )
+    await interaction.followup.send(embed=embed)
 
 
 class PatchQuestionModal(discord.ui.Modal, title='패치노트 질문'):
@@ -6195,6 +6237,7 @@ class MapleNewsBot(commands.Bot):
         self._last_backfill_alert: str | None = None
         self._last_news_detail_refresh_at: float | None = None
         self.latest_patch: dict | None = None
+        self.latest_known_issues: dict | None = None
         self.familiar_expectation_store = FamiliarExpectationStore(FAMILIAR_DB_PATH)
         # 공지는 기존 GPT·Google 조합을 쓰고 Ollama는 패치 질문에만 사용합니다.
         self.openai = AsyncOpenAI()
@@ -6202,6 +6245,7 @@ class MapleNewsBot(commands.Bot):
         self.ollama_api_key = os.environ.get("OLLAMA_API_KEY", "")
         self.correction_store = CorrectionStore()
         self.patch_history = PatchHistory()
+        self.known_issues_history = PatchHistory(Path("known-issues-history.db"))
         self._patch_question_busy = False
 
     async def setup_hook(self) -> None:
@@ -6236,6 +6280,7 @@ class MapleNewsBot(commands.Bot):
             cash_shop_command,
             cash_sale_schedule_command,
             patch_command,
+            known_issues_command,
             time_command,
             voyage_command,
             doping_command,
@@ -6420,6 +6465,30 @@ class MapleNewsBot(commands.Bot):
         async with self.session.get(NEWS_URL, timeout=aiohttp.ClientTimeout(total=20)) as response:
             response.raise_for_status()
             return watched_posts(await response.json())
+
+    async def fetch_known_issues_article(self) -> dict:
+        """공식 고객지원에서 현재 패치의 Known Issues 본문을 가져옵니다."""
+        assert self.session is not None
+        async with self.session.get(
+            KNOWN_ISSUES_API_URL,
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json()
+        articles = payload.get("articles") if isinstance(payload, dict) else None
+        if not isinstance(articles, list):
+            raise ValueError("Known Issues article list is missing.")
+        matches = [article for article in articles if is_known_issues_article(article)]
+        if not matches:
+            raise ValueError("Current Known Issues article is missing.")
+        article = max(
+            matches,
+            key=lambda item: (str(item.get("created_at", "")), int(item.get("id", 0))),
+        )
+        if not all(article.get(key) for key in ("id", "title", "html_url", "body")):
+            raise ValueError("Known Issues article is incomplete.")
+        self.latest_known_issues = article
+        return article
 
     async def send_owner_dm(self, message: str) -> None:
         """서버 관리자가 아니라 Discord 애플리케이션 소유자에게만 알립니다."""
@@ -7263,21 +7332,20 @@ class MapleNewsBot(commands.Bot):
             ephemeral=True,
         )
 
-    async def poll_patch_revisions(self) -> None:
+    async def _poll_page_revisions(
+        self,
+        page: dict,
+        history: PatchHistory,
+        channels: dict[int, discord.TextChannel],
+        kind: str,
+    ) -> None:
         from patch_ai import normalize_revision_labels
-        # 별도 5분 작업으로 공지·이벤트 감시가 AI 응답 대기에 묶이지 않게 합니다.
-        posts = await self.fetch_posts()
-        post = next((post for post in posts if is_patch_notes(post)), None)
-        if post is None:
-            return
-        detail = await self.fetch_post_detail(post['id'])
-        channels = {channel.id: channel for channel in self.alert_text_channels(ALERT_NEWS)}
-        if 'update' not in self.saved_categories:
-            channels = {}
-        self.patch_history.observe(post['id'], patch_display_title(post), post_url(post),
-                                   detail['body'], list(channels))
+
+        history.observe(
+            page["id"], page["title"], page["url"], page["body"], list(channels)
+        )
         # 전송 성공한 채널을 즉시 기록해 일부 채널 실패 시 성공 채널에는 재발송하지 않습니다.
-        for revision in self.patch_history.pending():
+        for revision in history.pending():
             targets = set(revision['targets']) - set(revision['sent'])
             if not targets.intersection(channels):
                 continue
@@ -7292,11 +7360,22 @@ class MapleNewsBot(commands.Bot):
                     raise ValueError('Patch context too large')
                 store = getattr(self, 'correction_store', None)
                 glossary = source_glossary(source, store.list() if store else ())
+                subject = (
+                    "changed patch information"
+                    if kind == "patch"
+                    else "changed Known Issues information"
+                )
+                status_instruction = (
+                    "If an issue moved to Resolved Issues or was marked resolved, state that clearly. "
+                    if kind == "known_issues"
+                    else ""
+                )
                 response = await self.openai.responses.create(
                     model=NEWS_MODEL,
-                    instructions='Summarize ONLY the changed patch information in this unified diff. '
+                    instructions=f'Summarize ONLY the {subject} in this unified diff. '
                     'Lines starting - are previous or deleted text; + are new text; other lines are context. '
-                    'Write concise Korean Discord Markdown, at most 3000 characters. Start each changed item with its bold event/mission/item name and a short context sentence, using the supplied headings and table rows. Never guess missing context. '
+                    'Write concise Korean Discord Markdown, at most 3000 characters. Start each changed item with its bold event/mission/item/issue name and a short context sentence, using the supplied headings and table rows. Never guess missing context. '
+                    f'{status_instruction}'
                     'Number item headings ①, ②, ③ in order; do not use decorative topic emojis. Keep each heading directly attached to its context. Put exactly one blank line only between context and comparison, between numbered items, and before the original link. '
                     'For modifications write bold 변경 전: followed by its content on the next line, then one blank line, then bold 변경 후: and its content on the next line. For additions write bold 추가: followed by the content on the next line; for deletions use bold 삭제:. Do not invent a before state for additions. Keep related explanation lines together without blank lines. Bold only headings, labels, and important changed terms. Do not include links; the bot appends the original link. '
                     'Preserve numbers and conditions. Do not include a 핵심, 변경 핵심, takeaway or repetitive concluding summary. Include a brief clarification only when necessary to prevent misunderstanding (such as a documentation correction versus an actual gameplay change). '
@@ -7310,23 +7389,83 @@ class MapleNewsBot(commands.Bot):
                 summary = normalize_revision_labels(format_news_summary(response.output_text))
                 if len(summary) > 3800:
                     raise ValueError('Patch revision summary too long')
-                self.patch_history.set_summary(revision['id'], summary)
+                history.set_summary(revision['id'], summary)
             # 저장된 미전송 요약도 같은 구분 제목을 사용합니다. 발송 이력은 바꾸지 않습니다.
             summary = normalize_revision_labels(summary)
             version = re.search(r'v\.\d+(?:\.\d+)?', revision['title'], re.I)
-            heading = f'📝 {version.group(0)} 패치노트 추가 수정' if version else '📝 패치노트 추가 수정'
+            if kind == "patch":
+                heading = f'📝 {version.group(0)} 패치노트 추가 수정' if version else '📝 패치노트 추가 수정'
+                author = 'MapleStory | PATCH UPDATE'
+                link_label = '공식 패치노트 확인'
+            else:
+                heading = f'⚠️ {version.group(0)} 알려진 문제 추가 수정' if version else '⚠️ 알려진 문제 추가 수정'
+                author = 'MapleStory | KNOWN ISSUES UPDATE'
+                link_label = '공식 Known Issues 확인'
             # 원문 링크도 본문 끝에서 빈 줄 하나로 구분해 확인한 시안과 맞춥니다.
-            description = summary.rstrip() + f"\n\n[공식 패치노트 확인]({revision['url']})"
+            description = summary.rstrip() + f"\n\n[{link_label}]({revision['url']})"
             embed = discord.Embed(title=heading, description=description,
                                   url=revision['url'], color=CATEGORY_COLORS['update'])
-            embed.set_author(name='MapleStory | PATCH UPDATE')
+            embed.set_author(name=author)
             for channel_id in targets.intersection(channels):
                 try:
                     await channels[channel_id].send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
                 except discord.HTTPException:
-                    logging.warning('patch_revision phase=send_failed revision=%s channel=%s', revision['id'], channel_id)
+                    logging.warning('%s_revision phase=send_failed revision=%s channel=%s', kind, revision['id'], channel_id)
                 else:
-                    self.patch_history.mark_sent(revision['id'], channel_id)
+                    history.mark_sent(revision['id'], channel_id)
+
+    async def poll_patch_revisions(self) -> None:
+        # 한 번의 5분 작업에서 패치노트와 Known Issues의 수정 여부를 함께 확인합니다.
+        channels = {channel.id: channel for channel in self.alert_text_channels(ALERT_NEWS)}
+        try:
+            posts = await self.fetch_posts()
+            post = next((post for post in posts if is_patch_notes(post)), None)
+            if post is not None:
+                patch_channels = channels if 'update' in self.saved_categories else {}
+                detail = await self.fetch_post_detail(post['id'])
+                await MapleNewsBot._poll_page_revisions(
+                    self,
+                    {
+                        "id": post["id"],
+                        "title": patch_display_title(post),
+                        "url": post_url(post),
+                        "body": detail["body"],
+                    },
+                    self.patch_history,
+                    patch_channels,
+                    "patch",
+                )
+        except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError, KeyError, sqlite3.Error, OSError) as error:
+            # 뉴스 API가 실패해도 아래 고객지원 Known Issues 확인은 계속합니다.
+            logging.warning(
+                "patch_revision phase=fetch_failed error_type=%s",
+                type(error).__name__,
+            )
+
+        fetch_known_issues = getattr(self, "fetch_known_issues_article", None)
+        if fetch_known_issues is None:
+            return
+        try:
+            article = await fetch_known_issues()
+        except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError, KeyError, OSError) as error:
+            # 고객지원 페이지가 잠시 실패해도 먼저 처리한 패치 수정 알림은 유지합니다.
+            logging.warning(
+                "known_issues_revision phase=fetch_failed error_type=%s",
+                type(error).__name__,
+            )
+            return
+        await MapleNewsBot._poll_page_revisions(
+            self,
+            {
+                "id": article["id"],
+                "title": article["title"],
+                "url": article["html_url"],
+                "body": article["body"],
+            },
+            self.known_issues_history,
+            channels,
+            "known_issues",
+        )
 
     @tasks.loop(minutes=5)
     async def check_patch_revisions(self) -> None:

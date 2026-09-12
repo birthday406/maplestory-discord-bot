@@ -30,6 +30,7 @@ translation-corrections.db-shm
 patch-history.db
 patch-history.db-wal
 patch-history.db-shm
+known-issues-history.db*
 *.db-journal
 ranking-update-probe.log
 ranking-update-probe.json
