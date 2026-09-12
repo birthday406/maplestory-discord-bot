@@ -87,6 +87,10 @@ TRACKED_RANKING_WORLD_IDS = tuple(
 )
 PSSB_RATES_API_URL = "https://g.nexonstatic.com/maplestory/cms/v1/general-posts/5797"
 PSSB_RATES_PAGE_URL = "https://www.nexon.com/maplestory/general-post/5797"
+SIGNATURE_RATES_API_URL = "https://g.nexonstatic.com/maplestory/cms/v1/general-posts/44219"
+SIGNATURE_RATES_PAGE_URL = "https://www.nexon.com/maplestory/general-post/44219"
+WONDERBERRY_RATES_API_URL = "https://g.nexonstatic.com/maplestory/cms/v1/general-posts/5674"
+WONDERBERRY_RATES_PAGE_URL = "https://www.nexon.com/maplestory/general-post/5674"
 CASH_SHOP_MINING_URL = "https://masonym.dev/cash-shop"
 OLLAMA_CHAT_URL = "https://ollama.com/api/chat"
 GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2"
@@ -274,6 +278,19 @@ PSSB_ADVANCED_RATE_THRESHOLD = 2.0
 PSSB_SINGLE_PRICE = 3_600
 PSSB_SET_SIZE = 11
 PSSB_SET_PRICE = 36_000
+CASH_SIMULATOR_ITEM_DATA_PATH = Path(__file__).parent / "data" / "cash-simulator-items.tsv"
+CASH_SIMULATOR_ICON_ARCHIVE_PATH = Path(__file__).parent / "data" / "cash-simulator-icons.zip"
+WONDERBERRY_BACKGROUND_PATH = Path(__file__).parent / "assets" / "wonderberry-background.png"
+WONDERBERRY_COMMON_SLOT_PATH = Path(__file__).parent / "assets" / "wonderberry-slot-common.png"
+WONDERBERRY_SPECIAL_SLOT_PATH = Path(__file__).parent / "assets" / "wonderberry-slot-special.png"
+SIGNATURE_SPECIAL_RATE_THRESHOLD = 2.5
+WONDERBERRY_SPECIAL_RATE_THRESHOLD = 0.25
+SIGNATURE_SINGLE_PRICE = 7_900
+SIGNATURE_SET_SIZE = 10
+SIGNATURE_SET_PRICE = 79_000
+WONDERBERRY_SINGLE_PRICE = 4_000
+WONDERBERRY_SET_SIZE = 11
+WONDERBERRY_SET_PRICE = 40_000
 FAMILIAR_ASSET_PATHS = {
     "back": Path(__file__).parent / "assets" / "familiar-card-back.png",
     "scene": Path(__file__).parent / "assets" / "familiar-card-scene.png",
@@ -368,6 +385,33 @@ for item in CASH_ITEMS:
     current = CASH_ITEMS_BY_GMS_NAME.get(key)
     if current is None or (item["icon"] and not current["icon"]):
         CASH_ITEMS_BY_GMS_NAME[key] = item
+
+
+def load_cash_simulator_items(
+    path: Path = CASH_SIMULATOR_ITEM_DATA_PATH,
+) -> list[dict[str, str]]:
+    """클라이언트에서 추출한 시그니처 쿠폰·펫 아이콘 목록을 읽습니다."""
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8", newline="") as item_file:
+        return list(csv.DictReader(item_file, delimiter="\t"))
+
+
+CASH_SIMULATOR_ITEMS = load_cash_simulator_items()
+CASH_SIMULATOR_ITEMS_BY_NAME: dict[tuple[str, str], dict[str, str]] = {}
+for item in CASH_SIMULATOR_ITEMS:
+    kinds = ("wonderberry",) if item["kind"] == "pet" else (item["kind"],)
+    for kind in kinds:
+        key = (kind, item["name"].casefold())
+        current = CASH_SIMULATOR_ITEMS_BY_NAME.get(key)
+        # 같은 이름의 새 월드용 별도 ID가 있으면 더 큰 최신 ID의 아이콘을 씁니다.
+        if current is None or int(item["id"]) > int(current["id"]):
+            CASH_SIMULATOR_ITEMS_BY_NAME[key] = item
+
+
+def cash_simulator_item(kind: str, name: str) -> dict[str, str] | None:
+    """공식 확률표의 정확한 영문명으로 클라이언트 아이콘을 찾습니다."""
+    return CASH_SIMULATOR_ITEMS_BY_NAME.get((kind, name.casefold()))
 
 
 def pssb_cash_item(name: str) -> dict[str, str] | None:
@@ -1071,6 +1115,52 @@ def parse_pssb_rates(source: str) -> list[tuple[str, float]]:
 
     if pending_gender_item is not None:
         entries.append(pending_gender_item)
+    return entries
+
+
+def parse_signature_rates(source: str) -> list[tuple[str, float]]:
+    """프리렌 시그니처 공식 표에서 보상명과 확률을 읽습니다."""
+    entries: list[tuple[str, float]] = []
+    for row in re.findall(r"<tr\b.*?</tr>", source, flags=re.IGNORECASE | re.DOTALL):
+        cells = [
+            html.unescape(html_to_text(cell))
+            for cell in re.findall(
+                r"<t[dh]\b[^>]*>(.*?)</t[dh]>",
+                row,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        ]
+        # 공식 표의 합계 행은 이름 칸이 비어 있으므로 보상으로 추첨하지 않습니다.
+        name = cells[0].strip() if cells else ""
+        if len(cells) < 2 or not name or name.casefold() == "total":
+            continue
+        rate_match = re.fullmatch(r"(\d+(?:\.\d+)?)%", cells[-1].strip())
+        if rate_match:
+            entries.append((name, float(rate_match.group(1))))
+    return entries
+
+
+def parse_wonderberry_rates(source: str) -> list[tuple[str, str, float]]:
+    """프리렌 원더베리 공식 표에서 보상명·기간·확률을 읽습니다."""
+    entries: list[tuple[str, str, float]] = []
+    for row in re.findall(r"<tr\b.*?</tr>", source, flags=re.IGNORECASE | re.DOTALL):
+        cells = [
+            html.unescape(html_to_text(cell))
+            for cell in re.findall(
+                r"<t[dh]\b[^>]*>(.*?)</t[dh]>",
+                row,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        ]
+        # 이름이 빈 마지막 합계 행은 실제 원더베리 보상이 아닙니다.
+        name = cells[0].strip() if cells else ""
+        if len(cells) < 3 or not name or name.casefold() == "total":
+            continue
+        rate_match = re.fullmatch(r"(\d+(?:\.\d+)?)%", cells[-1].strip())
+        if rate_match:
+            entries.append(
+                (name, cells[1].strip(), float(rate_match.group(1)))
+            )
     return entries
 
 
@@ -3743,6 +3833,7 @@ HELP_CATEGORIES = {
     "시뮬레이터": (
         ("/익성비", "성장의 비약 시뮬레이션"), ("/연마석", "반지 연마"),
         ("/스스비 · /ㅅㅅㅂ", "스타일 박스"), ("/퍼밀리어", "퍼밀리어 잠재능력"),
+        ("/시그니처 · /원더베리", "프리렌 캐시 시뮬레이터"),
         ("/채널추천", "채널 추천"),
     ),
     "랭킹·아이템": (
@@ -4254,6 +4345,22 @@ def pssb_nx_cost(box_count: int) -> int:
     )
 
 
+def signature_nx_cost(box_count: int) -> int:
+    """시그니처 사용량을 1개·10개 판매 단위로 구매한 NX입니다."""
+    sets, singles = divmod(box_count, SIGNATURE_SET_SIZE)
+    return sets * SIGNATURE_SET_PRICE + min(
+        singles * SIGNATURE_SINGLE_PRICE, SIGNATURE_SET_PRICE
+    )
+
+
+def wonderberry_nx_cost(box_count: int) -> int:
+    """원더베리 사용량을 1개·11개 판매 단위로 가장 싸게 구매한 NX입니다."""
+    sets, singles = divmod(box_count, WONDERBERRY_SET_SIZE)
+    return sets * WONDERBERRY_SET_PRICE + min(
+        singles * WONDERBERRY_SINGLE_PRICE, WONDERBERRY_SET_PRICE
+    )
+
+
 def build_pssb_file(
     results: list[tuple[str, float]], count: int
 ) -> tuple[discord.File, str]:
@@ -4375,6 +4482,355 @@ async def pssb_initials_command(
 ) -> None:
     """초성으로 실행해도 기존 PSSB 명령어와 같은 로직을 사용합니다."""
     await pssb_command.callback(interaction, count)
+
+
+def draw_signature_results(
+    rates: list[tuple[str, float]], count: int
+) -> list[tuple[str, float]]:
+    """현재 프리렌 시그니처 목록에서 요청한 횟수만큼 독립 추첨합니다."""
+    return random.choices(rates, weights=[rate for _, rate in rates], k=count)
+
+
+def draw_wonderberry_results(
+    rates: list[tuple[str, str, float]], count: int
+) -> list[tuple[str, str, float]]:
+    """현재 Heroic 원더베리 목록에서 요청한 횟수만큼 독립 추첨합니다."""
+    return random.choices(rates, weights=[rate for _, _, rate in rates], k=count)
+
+
+def _cash_simulator_icon_bytes(kind: str, names: list[str]) -> dict[str, bytes]:
+    """한 결과 이미지에 필요한 클라이언트 아이콘만 ZIP에서 읽습니다."""
+    icons: dict[str, bytes] = {}
+    if not CASH_SIMULATOR_ICON_ARCHIVE_PATH.exists():
+        return icons
+    with zipfile.ZipFile(CASH_SIMULATOR_ICON_ARCHIVE_PATH) as archive:
+        for name in names:
+            item = cash_simulator_item(kind, name)
+            icon_name = item.get("icon") if item else None
+            if not icon_name:
+                continue
+            try:
+                icons[name] = archive.read(icon_name)
+            except KeyError:
+                logging.warning("Cash simulator icon is missing: %s", icon_name)
+    return icons
+
+
+def _paste_centered_icon(
+    canvas: Image.Image,
+    icon_data: bytes | None,
+    center_x: int,
+    center_y: int,
+    max_size: int,
+) -> None:
+    """클라이언트 아이콘 비율을 유지하며 결과 슬롯 가운데에 놓습니다."""
+    if not icon_data:
+        return
+    with Image.open(io.BytesIO(icon_data)) as source:
+        icon = source.convert("RGBA")
+    scale = min(max_size / icon.width, max_size / icon.height)
+    icon = icon.resize(
+        (max(1, round(icon.width * scale)), max(1, round(icon.height * scale))),
+        Image.Resampling.NEAREST if scale >= 1 else Image.Resampling.LANCZOS,
+    )
+    canvas.alpha_composite(
+        icon,
+        (center_x - icon.width // 2, center_y - icon.height // 2),
+    )
+
+
+def create_signature_result_image(results: list[tuple[str, float]]) -> io.BytesIO:
+    """기존 스스비 화면 형식으로 프리렌 시그니처 결과 PNG를 만듭니다."""
+    width, height = (664, 591) if len(results) == 1 else (664, 336)
+    slot_size = 150 if len(results) == 1 else 98
+    gap = 14
+    canvas = Image.new("RGBA", (width, height), (24, 40, 48, 255))
+    with Image.open(PSSB_BACK_EFFECT_PATH) as source:
+        effect = source.convert("RGBA").resize(
+            (width, height), Image.Resampling.LANCZOS
+        )
+    canvas.alpha_composite(effect)
+    icons = _cash_simulator_icon_bytes(
+        "signature", [name for name, _ in results]
+    )
+
+    total_width = len(results) * slot_size + (len(results) - 1) * gap
+    start_x = (width - total_width) // 2
+    slot_y = (height - slot_size) // 2
+    for index, (name, rate) in enumerate(results):
+        slot_path = (
+            PSSB_ADVANCED_SLOT_PATH
+            if rate <= SIGNATURE_SPECIAL_RATE_THRESHOLD
+            else PSSB_COMMON_SLOT_PATH
+        )
+        with Image.open(slot_path) as source:
+            slot = source.convert("RGBA").resize(
+                (slot_size, slot_size), Image.Resampling.LANCZOS
+            )
+        slot_x = start_x + index * (slot_size + gap)
+        canvas.alpha_composite(slot, (slot_x, slot_y))
+        _paste_centered_icon(
+            canvas,
+            icons.get(name),
+            slot_x + slot_size // 2,
+            slot_y + slot_size // 2,
+            int(slot_size * 0.62),
+        )
+
+    output = io.BytesIO()
+    canvas.convert("RGB").save(output, format="PNG", optimize=True)
+    output.seek(0)
+    return output
+
+
+def create_wonderberry_result_image(
+    results: list[tuple[str, str, float]],
+) -> io.BytesIO:
+    """새 원더베리 달빛 숲 화면에 실제 결과 슬롯과 펫 아이콘을 합칩니다."""
+    width, height = 960, 540
+    with Image.open(WONDERBERRY_BACKGROUND_PATH) as source:
+        canvas = source.convert("RGBA").resize(
+            (width, height), Image.Resampling.LANCZOS
+        )
+    # 클라이언트의 B2000000 후처리처럼 배경을 어둡게 해 결과 슬롯을 선명하게 보입니다.
+    canvas.alpha_composite(Image.new("RGBA", (width, height), (0, 0, 0, 178)))
+    icons = _cash_simulator_icon_bytes(
+        "wonderberry", [name for name, _, _ in results]
+    )
+
+    cell_width = 142 if len(results) > 1 else 230
+    total_width = len(results) * cell_width
+    start_x = (width - total_width) // 2
+    anchor_y = 245
+    for index, (name, _duration, rate) in enumerate(results):
+        special = rate <= WONDERBERRY_SPECIAL_RATE_THRESHOLD
+        slot_path = (
+            WONDERBERRY_SPECIAL_SLOT_PATH if special else WONDERBERRY_COMMON_SLOT_PATH
+        )
+        target_width = 170 if len(results) == 1 else (118 if special else 108)
+        with Image.open(slot_path) as source:
+            slot = source.convert("RGBA")
+        target_height = round(slot.height * target_width / slot.width)
+        slot = slot.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        center_x = start_x + index * cell_width + cell_width // 2
+        slot_x = center_x - target_width // 2
+        slot_y = anchor_y - target_height // 2
+        canvas.alpha_composite(slot, (slot_x, slot_y))
+        _paste_centered_icon(
+            canvas,
+            icons.get(name),
+            center_x,
+            anchor_y + (8 if special else 0),
+            94 if len(results) == 1 else 62,
+        )
+
+    output = io.BytesIO()
+    canvas.convert("RGB").save(output, format="PNG", optimize=True)
+    output.seek(0)
+    return output
+
+
+def build_frieren_cash_embed(kind: str, results: list[tuple], draw_count: int) -> discord.Embed:
+    """시그니처·원더베리 결과명과 누적 비용을 한 임베드로 표시합니다."""
+    if kind == "signature":
+        title = "✨ Frieren Signature Style Collection"
+        url = SIGNATURE_RATES_PAGE_URL
+        color = 0xA78BFA
+        description = "\n".join(
+            f"**{index}.** {'✨ ' if rate <= SIGNATURE_SPECIAL_RATE_THRESHOLD else ''}"
+            f"**{name}**　`{rate:.2f}%`"
+            for index, (name, rate) in enumerate(results, start=1)
+        )
+        cost = signature_nx_cost(draw_count)
+    else:
+        title = "🫐 Wisp's Wondrous Wonderberry · Heroic"
+        url = WONDERBERRY_RATES_PAGE_URL
+        color = 0x77C7FF
+        description = "\n".join(
+            f"**{index}.** {'✨ ' if rate <= WONDERBERRY_SPECIAL_RATE_THRESHOLD else ''}"
+            f"**{name}**　`{duration}` · `{rate:.2f}%`"
+            for index, (name, duration, rate) in enumerate(results, start=1)
+        )
+        cost = wonderberry_nx_cost(draw_count)
+    embed = discord.Embed(title=title, url=url, description=description, color=color)
+    embed.set_footer(
+        text=f"누적 횟수: {draw_count:,}회\n지금까지 낭비한 돈: {cost:,} NX"
+    )
+    return embed
+
+
+def frieren_cash_expectation_text(
+    kind: str, results: list[tuple], draw_count: int
+) -> str:
+    """결과별 평균 개봉 수와 누적 성공 확률을 계산합니다."""
+    lines = []
+    seen = set()
+    for result in results:
+        name, rate = result[0], result[-1]
+        if name in seen:
+            continue
+        seen.add(name)
+        probability = rate / 100
+        expected_boxes = round(1 / probability)
+        cost = (
+            signature_nx_cost(expected_boxes)
+            if kind == "signature"
+            else wonderberry_nx_cost(expected_boxes)
+        )
+        success = cumulative_success_probability(probability, draw_count) * 100
+        lines.append(
+            f"**{name}**\n{expectation_line(probability)}\n"
+            f"평균 구매 비용: 약 `{cost:,} NX`\n"
+            f"내 {draw_count:,}회 이내 달성 확률: 상위 `{success:.2f}%`"
+        )
+    price_note = (
+        "*1개 7,900 NX · 10개 79,000 NX 기준*"
+        if kind == "signature"
+        else "*1개 4,000 NX · 11개 40,000 NX 기준*"
+    )
+    return "\n\n".join(lines) + f"\n\n{price_note}"
+
+
+def build_frieren_cash_file(
+    kind: str, results: list[tuple], count: int
+) -> tuple[discord.File, str]:
+    """선택한 상품의 정적 결과 이미지를 Discord 파일로 만듭니다."""
+    filename = f"{kind}-{count}-results.png"
+    image = (
+        create_signature_result_image(results)
+        if kind == "signature"
+        else create_wonderberry_result_image(results)
+    )
+    return discord.File(image, filename=filename), filename
+
+
+class FrierenCashSimulatorView(UserOwnedView):
+    """같은 메시지에서 최신 공식 확률로 다시 뽑게 합니다."""
+
+    def __init__(self, user_id: int, kind: str, count: int, results: list[tuple]) -> None:
+        super().__init__(user_id, timeout=86_400)
+        self.kind = kind
+        self.count = count
+        self.results = results
+        self.draw_count = count
+
+    @discord.ui.button(label="다시 뽑기", style=discord.ButtonStyle.primary)
+    async def reroll(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.defer()
+        try:
+            if self.kind == "signature":
+                rates = await interaction.client.fetch_signature_rates()
+                results = draw_signature_results(rates, self.count)
+            else:
+                rates = await interaction.client.fetch_wonderberry_rates()
+                results = draw_wonderberry_results(rates, self.count)
+        except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError):
+            logging.exception("Failed to reload Frieren cash simulator rates.")
+            await interaction.followup.send(
+                "공식 확률표를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+                ephemeral=True,
+            )
+            return
+        self.results = results
+        self.draw_count += self.count
+        embed = build_frieren_cash_embed(self.kind, results, self.draw_count)
+        try:
+            file, filename = build_frieren_cash_file(self.kind, results, self.count)
+            embed.set_image(url=f"attachment://{filename}")
+            await interaction.edit_original_response(
+                embed=embed, attachments=[file], view=self
+            )
+        except (OSError, ValueError, zipfile.BadZipFile):
+            logging.exception("Frieren cash simulator image could not be created.")
+            await interaction.edit_original_response(
+                embed=embed, attachments=[], view=self
+            )
+
+    @discord.ui.button(label="기대값 계산하기", style=discord.ButtonStyle.secondary)
+    async def show_expectation(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.send_message(
+            frieren_cash_expectation_text(self.kind, self.results, self.draw_count),
+            ephemeral=True,
+        )
+
+
+async def run_frieren_cash_simulator(
+    interaction: discord.Interaction,
+    kind: str,
+    count: int,
+) -> None:
+    """공식 확률표 조회부터 추첨·전송까지 두 명령의 공통 흐름을 실행합니다."""
+    await interaction.response.defer()
+    try:
+        if kind == "signature":
+            rates = await interaction.client.fetch_signature_rates()
+            results = draw_signature_results(rates, count)
+        else:
+            rates = await interaction.client.fetch_wonderberry_rates()
+            results = draw_wonderberry_results(rates, count)
+    except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError):
+        logging.exception("Failed to load Frieren cash simulator rates.")
+        await interaction.followup.send(
+            "공식 확률표를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+            ephemeral=True,
+        )
+        return
+
+    embed = build_frieren_cash_embed(kind, results, count)
+    view = FrierenCashSimulatorView(interaction.user.id, kind, count, results)
+    try:
+        file, filename = build_frieren_cash_file(kind, results, count)
+        embed.set_image(url=f"attachment://{filename}")
+        await interaction.followup.send(embed=embed, file=file, view=view)
+    except (OSError, ValueError, zipfile.BadZipFile):
+        logging.exception("Frieren cash simulator image could not be created.")
+        await interaction.followup.send(embed=embed, view=view)
+
+
+@app_commands.command(
+    name=app_commands.locale_str("signature", ko="시그니처"),
+    description="프리렌 시그니처 스타일 컬렉션을 1회 또는 5회 시뮬레이션합니다.",
+)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.rename(count="횟수")
+@app_commands.describe(count="개봉 횟수")
+@app_commands.choices(
+    count=[
+        app_commands.Choice(name="1회", value=1),
+        app_commands.Choice(name="5회", value=5),
+    ]
+)
+async def signature_command(
+    interaction: discord.Interaction,
+    count: app_commands.Choice[int],
+) -> None:
+    await run_frieren_cash_simulator(interaction, "signature", count.value)
+
+
+@app_commands.command(
+    name=app_commands.locale_str("wonderberry", ko="원더베리"),
+    description="Heroic 프리렌 원더베리를 1회 또는 5회 시뮬레이션합니다.",
+)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.rename(count="횟수")
+@app_commands.describe(count="개봉 횟수")
+@app_commands.choices(
+    count=[
+        app_commands.Choice(name="1회", value=1),
+        app_commands.Choice(name="5회", value=5),
+    ]
+)
+async def wonderberry_command(
+    interaction: discord.Interaction,
+    count: app_commands.Choice[int],
+) -> None:
+    await run_frieren_cash_simulator(interaction, "wonderberry", count.value)
 
 
 @app_commands.command(name="캐샵", description="최신 캐시샵 업데이트 링크를 보여줍니다.")
@@ -5699,6 +6155,8 @@ class MapleNewsBot(commands.Bot):
             familiar_command,
             pssb_command,
             pssb_initials_command,
+            signature_command,
+            wonderberry_command,
             cash_shop_command,
             patch_command,
             time_command,
@@ -6226,6 +6684,30 @@ class MapleNewsBot(commands.Bot):
             rates = parse_pssb_rates((await response.json())["body"])
         if not rates:
             raise ValueError("The official PSSB rate table is empty.")
+        return rates
+
+    async def fetch_signature_rates(self) -> list[tuple[str, float]]:
+        # 판매 중 구성이 바뀌면 다음 명령부터 바로 반영되도록 공식 표를 매번 읽습니다.
+        assert self.session is not None
+        async with self.session.get(
+            SIGNATURE_RATES_API_URL, timeout=aiohttp.ClientTimeout(total=20)
+        ) as response:
+            response.raise_for_status()
+            rates = parse_signature_rates((await response.json())["body"])
+        if not rates:
+            raise ValueError("The official Signature rate table is empty.")
+        return rates
+
+    async def fetch_wonderberry_rates(self) -> list[tuple[str, str, float]]:
+        # Heroic 원더베리의 아이템명·기간·확률을 공식 표에서 함께 갱신합니다.
+        assert self.session is not None
+        async with self.session.get(
+            WONDERBERRY_RATES_API_URL, timeout=aiohttp.ClientTimeout(total=20)
+        ) as response:
+            response.raise_for_status()
+            rates = parse_wonderberry_rates((await response.json())["body"])
+        if not rates:
+            raise ValueError("The official Wonderberry rate table is empty.")
         return rates
 
     async def ollama_chat(self, instructions: str, source: str, *, json_output: bool = False) -> str:

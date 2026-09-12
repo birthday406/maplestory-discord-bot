@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+import ranking_worker
 from maple_bot import configured_ranking_world_ids, import_ready_ranking_batches
 from ranking_store import RankingStore
 from ranking_worker import (
@@ -192,6 +193,42 @@ class RankingWorkerTests(unittest.TestCase):
                 store = RankingStore(path)
                 self.assertEqual(store.representative_cursor(45, kind, first), 89881)
                 self.assertEqual(store.representative_cursor(45, kind, second), 1)
+
+    def test_finished_representative_scan_stays_finished_after_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ranking.db"
+            day = date(2026, 9, 8)
+            state_type = "achievement-shard-0-of-4"
+            store = RankingStore(path)
+            store.representative_cursor(45, state_type, day)
+            store.finish_representative_scan(45, state_type)
+
+            self.assertTrue(
+                RankingStore(path).representative_scan_finished(45, state_type, day)
+            )
+            self.assertFalse(
+                RankingStore(path).representative_scan_finished(
+                    45, state_type, day + timedelta(days=1)
+                )
+            )
+
+    def test_achievement_is_scheduled_once_while_legion_stays_per_world(self):
+        self.assertEqual(
+            ranking_worker.representative_jobs((45, 19, 1, 70)),
+            [
+                (45, "legion"),
+                (19, "legion"),
+                (1, "legion"),
+                (70, "legion"),
+                (45, "achievement"),
+            ],
+        )
+
+    def test_achievement_uses_canonical_world_when_configuration_is_reordered(self):
+        self.assertEqual(
+            ranking_worker.representative_jobs((19, 1, 45, 70))[-1],
+            (45, "achievement"),
+        )
 
     def test_early_representatives_survive_restart_until_experience_arrives(self):
         for existing in (False, True):

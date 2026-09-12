@@ -105,13 +105,21 @@ class RankingAuditTests(unittest.TestCase):
     def test_achievement_global_pages_use_actual_snapshot_world(self):
         self.populate(kind="achievement")
         with self.store._connect() as connection:
-            # 월드별 요청에 같은 전역 업적 목록이 돌아온 상황을 재현합니다.
+            # 업적은 전역 목록이므로 Kronos 키 하나로만 네 월드의 완료·페이지를 보관합니다.
             names = [r[0] for r in connection.execute('SELECT name_key FROM ranking_snapshots')]
-            for world in WORLDS:
-                connection.execute('UPDATE ranking_audit_pages SET names=? WHERE kind=? AND world=? AND page=1',
-                                   (json.dumps(names), 'achievement', world))
-                connection.execute('UPDATE ranking_audit_pages SET names=? WHERE kind=? AND world=? AND page<>1',
-                                   ('[]', 'achievement', world))
+            connection.execute(
+                "DELETE FROM ranking_audit_pages WHERE kind='achievement' AND world<>45"
+            )
+            connection.execute(
+                "DELETE FROM ranking_audit_ends WHERE kind='achievement' AND world<>45"
+            )
+            connection.execute(
+                "UPDATE ranking_audit_pages SET names=? WHERE kind='achievement' AND world=45 AND page=1",
+                (json.dumps(names),),
+            )
+            connection.execute(
+                "UPDATE ranking_audit_pages SET names='[]' WHERE kind='achievement' AND world=45 AND page<>1"
+            )
         report = check_collection(self.store, self.now)[0]
         self.assertEqual(json.loads(report['issues']), [])
         self.assertEqual(json.loads(report['counts']), {str(w): 4 for w in WORLDS})
@@ -135,10 +143,11 @@ class RankingAuditTests(unittest.TestCase):
             for world in WORLDS:
                 connection.execute("UPDATE ranking_audit_pages SET names=? WHERE kind='achievement' AND world=? AND page=1",
                                    (json.dumps(['waiting', 'lost', 'waiting']), world))
-        report = check_collection(self.store, self.now)[0]
+        with self.assertLogs('ranking_audit', level='INFO') as logged:
+            report = check_collection(self.store, self.now)[0]
         issues = json.loads(report['issues'])
-        self.assertEqual(issues, ['업적: 값 보관됨·당일 경험치 기록 대기 1명 (월드 미확인)',
-                                  '업적: 월드 미확인·DB 저장 누락 1명'])
+        self.assertEqual(issues, ['업적: 월드 미확인·DB 저장 누락 1명'])
+        self.assertIn('retained=1', '\n'.join(logged.output))
         with self.store._connect() as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM ranking_snapshots WHERE name_key='waiting'").fetchone()[0], 0)
 
@@ -163,7 +172,7 @@ class RankingAuditTests(unittest.TestCase):
             connection.execute("UPDATE ranking_audit_pages SET names=? WHERE kind='legion' AND world=45 AND page=1",
                                (json.dumps(['waiting', 'lost', 'lost']),))
         issues = json.loads(check_collection(self.store, self.now)[0]['issues'])
-        self.assertIn('Kronos: 유니온 값 보관됨·당일 경험치 기록 대기 1명', issues)
+        self.assertFalse(any('값 보관됨' in issue for issue in issues))
         self.assertIn('Kronos: 배치에 있지만 DB에 없는 캐릭터 1명', issues)
         self.assertFalse(any('겹치는' in issue for issue in issues))
 

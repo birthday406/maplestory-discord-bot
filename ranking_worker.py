@@ -22,7 +22,17 @@ from maple_bot import (
 from ranking_store import MIN_TRACKED_LEVEL, RANKING_PAGE_SIZE, RankingStore
 
 
-REPRESENTATIVE_RANKING_TYPES = ("legion", "achievement")
+ACHIEVEMENT_AUDIT_WORLD = 45
+
+
+def representative_jobs(world_ids) -> list[tuple[int, str]]:
+    """유니온은 월드별로, 전역 업적 목록은 한 번만 수집합니다."""
+    worlds = list(world_ids)
+    if not worlds:
+        return []
+    return [(world_id, "legion") for world_id in worlds] + [
+        (ACHIEVEMENT_AUDIT_WORLD, "achievement")
+    ]
 
 
 def normalize_representative(character: dict, ranking_type: str) -> dict:
@@ -358,11 +368,19 @@ async def run_worker() -> None:
 
                 remaining = [world for world in world_ids if world not in completed]
                 if not remaining:
-                    jobs = [
-                        (world_id, ranking_type)
-                        for world_id in world_ids
-                        for ranking_type in REPRESENTATIVE_RANKING_TYPES
-                    ]
+                    jobs = []
+                    for world_id, ranking_type in representative_jobs(world_ids):
+                        state_type = (
+                            f"{ranking_type}-shard-{shard_index}-of-{shard_count}"
+                        )
+                        # 완료 시각은 DB에 남으므로 작업 재시작 뒤에도 같은 날 다시 훑지 않습니다.
+                        if not store.representative_scan_finished(
+                            world_id, state_type, scan_date
+                        ):
+                            jobs.append((world_id, ranking_type))
+                    if not jobs:
+                        await asyncio.sleep(60)
+                        continue
                     world_id, ranking_type = jobs[representative_offset % len(jobs)]
                     representative_offset += 1
                     try:

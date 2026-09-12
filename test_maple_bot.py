@@ -4548,6 +4548,141 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("✨", maple_bot.format_pssb_result(1, "Common Item", 4.0))
 
 
+class FrierenCashRateTests(unittest.TestCase):
+    def test_signature_rates_parse_item_and_rate_rows(self) -> None:
+        source = """
+        <table><tbody>
+        <tr><th>Item Name</th><th>Rate</th></tr>
+        <tr><td>Frieren Outfit Set Coupon</td><td>1.50%</td></tr>
+        <tr><td>Lügner Outfit Set Coupon</td><td>30.00%</td></tr>
+        <tr><td></td><td>100.00%</td></tr>
+        </tbody></table>
+        """
+
+        self.assertEqual(
+            maple_bot.parse_signature_rates(source),
+            [
+                ("Frieren Outfit Set Coupon", 1.5),
+                ("Lügner Outfit Set Coupon", 30.0),
+            ],
+        )
+
+    def test_wonderberry_rates_keep_duration_with_each_reward(self) -> None:
+        source = """
+        <table><tbody>
+        <tr><th>Item Name</th><th>Duration</th><th>Rate</th></tr>
+        <tr><td>Lil Frieren</td><td>90 Days</td><td>0.25%</td></tr>
+        <tr><td>Mini Queen</td><td>Permanent</td><td>1.33%</td></tr>
+        <tr><td></td><td></td><td>100.00%</td></tr>
+        </tbody></table>
+        """
+
+        self.assertEqual(
+            maple_bot.parse_wonderberry_rates(source),
+            [
+                ("Lil Frieren", "90 Days", 0.25),
+                ("Mini Queen", "Permanent", 1.33),
+            ],
+        )
+
+    def test_signature_cost_uses_ten_item_sales_bundle(self) -> None:
+        self.assertEqual(maple_bot.signature_nx_cost(5), 39_500)
+        self.assertEqual(maple_bot.signature_nx_cost(10), 79_000)
+        self.assertEqual(maple_bot.signature_nx_cost(11), 86_900)
+
+    def test_wonderberry_cost_uses_eleven_item_sales_bundle(self) -> None:
+        self.assertEqual(maple_bot.wonderberry_nx_cost(10), 40_000)
+        self.assertEqual(maple_bot.wonderberry_nx_cost(11), 40_000)
+        self.assertEqual(maple_bot.wonderberry_nx_cost(12), 44_000)
+
+
+class FrierenCashCommandTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def interaction(fetch_name: str, rates: list[tuple]) -> SimpleNamespace:
+        return SimpleNamespace(
+            user=SimpleNamespace(id=123),
+            client=SimpleNamespace(**{fetch_name: AsyncMock(return_value=rates)}),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+    def test_both_commands_offer_one_or_five_draws(self) -> None:
+        self.assertEqual(
+            {choice.value for choice in maple_bot.signature_command.parameters[0].choices},
+            {1, 5},
+        )
+        self.assertEqual(
+            {choice.value for choice in maple_bot.wonderberry_command.parameters[0].choices},
+            {1, 5},
+        )
+
+    async def test_signature_draw_uses_official_rates_and_ten_pack_price(self) -> None:
+        result = ("Frieren Outfit Set Coupon", 1.5)
+        interaction = self.interaction("fetch_signature_rates", [result])
+
+        with patch("maple_bot.random.choices", return_value=[result] * 5):
+            await maple_bot.signature_command.callback(
+                interaction, SimpleNamespace(value=5)
+            )
+
+        interaction.client.fetch_signature_rates.assert_awaited_once()
+        message = interaction.followup.send.await_args.kwargs
+        self.assertEqual(message["file"].filename, "signature-5-results.png")
+        self.assertEqual(
+            message["embed"].footer.text,
+            "누적 횟수: 5회\n지금까지 낭비한 돈: 39,500 NX",
+        )
+        with Image.open(message["file"].fp) as result_image:
+            self.assertEqual(result_image.size, (664, 336))
+
+    async def test_wonderberry_draw_uses_new_client_result_screen(self) -> None:
+        result = ("Lil Frieren", "90 Days", 0.25)
+        interaction = self.interaction("fetch_wonderberry_rates", [result])
+
+        with patch("maple_bot.random.choices", return_value=[result]):
+            await maple_bot.wonderberry_command.callback(
+                interaction, SimpleNamespace(value=1)
+            )
+
+        interaction.client.fetch_wonderberry_rates.assert_awaited_once()
+        message = interaction.followup.send.await_args.kwargs
+        self.assertEqual(message["file"].filename, "wonderberry-1-results.png")
+        self.assertIn("90 Days", message["embed"].description)
+        self.assertEqual(
+            message["embed"].footer.text,
+            "누적 횟수: 1회\n지금까지 낭비한 돈: 4,000 NX",
+        )
+        with Image.open(message["file"].fp) as result_image:
+            self.assertEqual(result_image.size, (960, 540))
+
+    async def test_reroll_refreshes_the_matching_official_table(self) -> None:
+        result = ("Lil Fern", "90 Days", 0.25)
+        view = maple_bot.FrierenCashSimulatorView(
+            123, "wonderberry", 1, [("Lil Frieren", "90 Days", 0.25)]
+        )
+        interaction = SimpleNamespace(
+            client=SimpleNamespace(
+                fetch_wonderberry_rates=AsyncMock(return_value=[result])
+            ),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+
+        await view.children[0].callback(interaction)
+
+        interaction.client.fetch_wonderberry_rates.assert_awaited_once()
+        self.assertEqual(view.results, [result])
+        self.assertEqual(view.draw_count, 2)
+        interaction.edit_original_response.assert_awaited_once()
+
+    def test_latest_frieren_pet_alias_is_used_for_the_icon(self) -> None:
+        item = maple_bot.cash_simulator_item("wonderberry", "Lil Frieren")
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item["id"], "5004047")
+
+
 class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_cash_shop_command_uses_saved_latest_link_and_thumbnail(self) -> None:
         interaction = SimpleNamespace(

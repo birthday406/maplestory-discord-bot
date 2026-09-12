@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 
 WORLDS = {45: "Kronos", 19: "Scania", 1: "Bera", 70: "Hyperion"}
 KINDS = {"world": "경험치", "legion": "유니온", "achievement": "업적"}
+ACHIEVEMENT_AUDIT_WORLD = 45
 
 
 def initialize_audit(connection):
@@ -83,7 +84,14 @@ def check_collection(store, now=None):
                     "SELECT world, shard, page FROM ranking_audit_ends WHERE day=? AND kind=?",
                     (day, kind),
                 )}
-                expected = {(world, shard) for world in WORLDS for shard in range(4)}
+                audit_worlds = (
+                    (ACHIEVEMENT_AUDIT_WORLD,)
+                    if kind == "achievement"
+                    else WORLDS
+                )
+                expected = {
+                    (world, shard) for world in audit_worlds for shard in range(4)
+                }
                 if not expected.issubset(ends) and now < deadline:
                     continue
                 issues, counts = [], {}
@@ -103,36 +111,84 @@ def check_collection(store, now=None):
                     (day, kind),
                 )} - snapshot_worlds.keys() if kind != "world" else set()
                 unknown_world = set()
-                for world, name in WORLDS.items():
+                achievement_names = None
+                if kind == "achievement":
                     pages = {r[0]: json.loads(r[1]) for r in connection.execute(
-                        "SELECT page, names FROM ranking_audit_pages WHERE day=? AND kind=? AND world=?",
-                        (day, kind, world),
+                        "SELECT page, names FROM ranking_audit_pages "
+                        "WHERE day=? AND kind=? AND world=?",
+                        (day, kind, ACHIEVEMENT_AUDIT_WORLD),
                     )}
                     missing, pending = [], []
                     for shard in range(4):
-                        end = ends.get((world, shard))
+                        end = ends.get((ACHIEVEMENT_AUDIT_WORLD, shard))
                         if end is None:
                             pending.append(str(shard + 1))
                         else:
-                            missing.extend(p for p in range(1 + shard * 10, end, 40) if p not in pages)
+                            missing.extend(
+                                page for page in range(1 + shard * 10, end, 40)
+                                if page not in pages
+                            )
                     if pending:
-                        issues.append(f"{name}: 완료 표식 없음 (샤드 {', '.join(pending)})")
+                        issues.append(
+                            f"업적: 완료 표식 없음 (샤드 {', '.join(pending)})"
+                        )
                     if missing:
                         sample = ', '.join(map(str, sorted(missing)[:5]))
-                        issues.append(f"{name}: 누락 페이지 {len(missing):,}개 (시작 순위 {sample})")
-                    names = [nickname for items in pages.values() for nickname in items]
-                    unique = set(names)
-                    duplicate = len(names) - len(unique)
-                    if duplicate:
-                        # 공식 응답의 겹침은 집계에서 합치고 원본과 로그만 보존합니다.
-                        logging.getLogger(__name__).info(
-                            "ranking_audit_overlap day=%s kind=%s world=%s duplicates=%s",
-                            day, kind, world, duplicate,
+                        issues.append(
+                            f"업적: 누락 페이지 {len(missing):,}개 (시작 순위 {sample})"
                         )
+                    names = [nickname for items in pages.values() for nickname in items]
+                    achievement_names = set(names)
+                    duplicate = len(names) - len(achievement_names)
+                    if duplicate:
+                        logging.getLogger(__name__).info(
+                            "ranking_audit_overlap day=%s kind=%s world=global duplicates=%s",
+                            day, kind, duplicate,
+                        )
+                    unknown_world = achievement_names - snapshot_worlds.keys()
+                for world, name in WORLDS.items():
                     if kind == "achievement":
-                        # 소속을 모르는 같은 이름을 네 월드의 누락으로 반복 세지 않습니다.
-                        unknown_world.update(unique - snapshot_worlds.keys())
-                        unique = {n for n in unique if snapshot_worlds.get(n) == world}
+                        # 전역 업적 목록은 당일 경험치 스냅샷의 실제 월드로 나눕니다.
+                        unique = {
+                            nickname for nickname in achievement_names
+                            if snapshot_worlds.get(nickname) == world
+                        }
+                    else:
+                        pages = {r[0]: json.loads(r[1]) for r in connection.execute(
+                            "SELECT page, names FROM ranking_audit_pages "
+                            "WHERE day=? AND kind=? AND world=?",
+                            (day, kind, world),
+                        )}
+                        missing, pending = [], []
+                        for shard in range(4):
+                            end = ends.get((world, shard))
+                            if end is None:
+                                pending.append(str(shard + 1))
+                            else:
+                                missing.extend(
+                                    page for page in range(1 + shard * 10, end, 40)
+                                    if page not in pages
+                                )
+                        if pending:
+                            issues.append(
+                                f"{name}: 완료 표식 없음 (샤드 {', '.join(pending)})"
+                            )
+                        if missing:
+                            sample = ', '.join(map(str, sorted(missing)[:5]))
+                            issues.append(
+                                f"{name}: 누락 페이지 {len(missing):,}개 (시작 순위 {sample})"
+                            )
+                        names = [
+                            nickname for items in pages.values() for nickname in items
+                        ]
+                        unique = set(names)
+                        duplicate = len(names) - len(unique)
+                        if duplicate:
+                            # 공식 응답의 겹침은 집계에서 합치고 원본과 로그만 보존합니다.
+                            logging.getLogger(__name__).info(
+                                "ranking_audit_overlap day=%s kind=%s world=%s duplicates=%s",
+                                day, kind, world, duplicate,
+                            )
                     counts[str(world)] = len(unique)
                     old = baseline.get(str(world), 0)
                     if old and len(unique) * 10 <= old * 9:
@@ -145,7 +201,10 @@ def check_collection(store, now=None):
                     )}
                     waiting = unique & retained
                     if waiting:
-                        issues.append(f"{name}: {KINDS[kind]} 값 보관됨·당일 경험치 기록 대기 {len(waiting):,}명")
+                        logging.getLogger(__name__).info(
+                            "ranking_audit_pending day=%s kind=%s world=%s retained=%s",
+                            day, kind, world, len(waiting),
+                        )
                     absent = unique - saved - waiting
                     if absent:
                         issues.append(f"{name}: 배치에 있지만 DB에 없는 캐릭터 {len(absent):,}명")
@@ -155,7 +214,10 @@ def check_collection(store, now=None):
                     waiting = unknown_world & retained
                     absent = unknown_world - retained
                     if waiting:
-                        issues.append(f"업적: 값 보관됨·당일 경험치 기록 대기 {len(waiting):,}명 (월드 미확인)")
+                        logging.getLogger(__name__).info(
+                            "ranking_audit_pending day=%s kind=%s world=unknown retained=%s",
+                            day, kind, len(waiting),
+                        )
                     if absent:
                         issues.append(f"업적: 월드 미확인·DB 저장 누락 {len(absent):,}명")
                 connection.execute(

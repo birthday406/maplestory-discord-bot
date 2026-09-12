@@ -1252,6 +1252,19 @@ class RankingStore:
                 (next_index, world_id, ranking_type),
             )
 
+    def representative_scan_finished(
+        self, world_id: int, ranking_type: str, scan_date: date
+    ) -> bool:
+        """같은 기준일의 대표 랭킹을 이미 끝냈는지 재시작 후에도 확인합니다."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT 1 FROM representative_scan_state
+                   WHERE world_id = ? AND ranking_type = ? AND scan_date = ?
+                     AND completed_at IS NOT NULL""",
+                (world_id, ranking_type, scan_date.isoformat()),
+            ).fetchone()
+        return row is not None
+
     def finish_representative_scan(self, world_id: int, ranking_type: str) -> None:
         now = int(datetime.now(timezone.utc).timestamp())
         with self._connect() as connection:
