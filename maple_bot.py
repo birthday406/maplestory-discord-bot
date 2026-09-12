@@ -91,7 +91,6 @@ SIGNATURE_RATES_API_URL = "https://g.nexonstatic.com/maplestory/cms/v1/general-p
 SIGNATURE_RATES_PAGE_URL = "https://www.nexon.com/maplestory/general-post/44219"
 WONDERBERRY_RATES_API_URL = "https://g.nexonstatic.com/maplestory/cms/v1/general-posts/5674"
 WONDERBERRY_RATES_PAGE_URL = "https://www.nexon.com/maplestory/general-post/5674"
-CASH_SHOP_MINING_URL = "https://masonym.dev/cash-shop"
 OLLAMA_CHAT_URL = "https://ollama.com/api/chat"
 GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2"
 NEWS_MODEL = "gpt-5.6-luna"
@@ -234,6 +233,7 @@ class KoreanCommandTranslator(app_commands.Translator):
 
 SUNNY_SUNDAY_IMAGE_PATH = Path(__file__).parent / "assets" / "title-sunny-sunday.webp"
 CASH_SHOP_TRANSFER_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-transfer.png"
+CASH_SALE_SCHEDULE_PATH = Path(__file__).parent / "data" / "cash-sale-schedule.json"
 CASH_SHOP_UPDATE_IMAGE_PATH = Path(__file__).parent / "assets" / "cash-shop-update.png"
 VOYAGE_GUIDE_IMAGE_PATH = Path(__file__).parent / "assets" / "gms-voyage-guide.png"
 DOPING_GUIDE_IMAGE_PATH = Path(__file__).parent / "assets" / "gms-doping-guide.webp"
@@ -3819,7 +3819,8 @@ async def appearance_search_command(
 HELP_CATEGORIES = {
     "공지·이벤트": (
         ("/패치", "최신 패치노트"),
-        ("/캐샵", "캐시샵 업데이트"), ("/썬데이 · /썬데이목록", "이번 주·전체 혜택"),
+        ("/캐샵 · /캐샵일정", "공식 업데이트·예약 일정"),
+        ("/썬데이 · /썬데이목록", "이번 주·전체 혜택"),
         ("/캐시이동 · /미라클큐브", "이벤트 일정"),
         ("/핫위크 · /큐브세일", "진행·예정 이벤트"),
         ("/우르스 · /서버", "골든타임·접속 상태"),
@@ -4845,7 +4846,7 @@ async def wonderberry_command(
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def cash_shop_command(interaction: discord.Interaction) -> None:
-    """저장된 최신 공식 캐시샵 공지와 데이터 마이닝 페이지를 보여줍니다."""
+    """저장된 최신 공식 캐시샵 공지를 보여줍니다."""
     latest = getattr(interaction.client, "latest_cash_shop", None)
     if latest is None:
         await interaction.response.send_message(
@@ -4857,8 +4858,7 @@ async def cash_shop_command(interaction: discord.Interaction) -> None:
     embed = discord.Embed(
         title="[ 캐시샵 업데이트 ]",
         description=(
-            f"[공식 캐시샵 업데이트]({latest['url']})　"
-            f"[캐시샵 데이터 마이닝]({CASH_SHOP_MINING_URL})"
+            f"[공식 캐시샵 업데이트]({latest['url']})"
             + (
                 "\n\n" + "\n".join(f"· {item}" for item in latest.get("items", []))
                 if latest.get("items")
@@ -4876,6 +4876,74 @@ async def cash_shop_command(interaction: discord.Interaction) -> None:
             filename="cash-shop-update.png",
         ),
     )
+
+
+def _cash_schedule_moment(value: str) -> datetime:
+    """일정 파일의 UTC 시각을 비교와 Discord 표시에 쓸 수 있게 읽습니다."""
+    moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if moment.tzinfo is None:
+        raise ValueError("캐시샵 판매 일정 시각에는 시간대가 필요합니다.")
+    return moment.astimezone(timezone.utc)
+
+
+def build_cash_sale_schedule_embed(now: datetime | None = None) -> discord.Embed:
+    """아직 끝나지 않은 클라이언트 예약 판매 기간만 표시합니다."""
+    payload = json.loads(CASH_SALE_SCHEDULE_PATH.read_text(encoding="utf-8"))
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    active: list[tuple[datetime, datetime]] = []
+    upcoming: list[tuple[datetime, datetime]] = []
+
+    # 같은 기간에 여러 상품 행이 있어도 Discord에는 판매 기간을 한 번만 보여줍니다.
+    periods = {
+        (_cash_schedule_moment(entry["start"]), _cash_schedule_moment(entry["end"]))
+        for entry in payload["entries"]
+    }
+    for start, end in sorted(periods):
+        if end <= current:
+            continue
+        (active if start <= current else upcoming).append((start, end))
+
+    embed = discord.Embed(
+        title="[ 캐시샵 판매 일정 ]",
+        description=(
+            f"**{payload['source_version']} 클라이언트 예약 데이터**에서 확인된 판매 기간입니다.\n"
+            "**공식 판매 확정 전 정보**이며 실제 일정은 변경되거나 취소될 수 있습니다."
+        ),
+        color=0x9B59B6,
+    )
+    for title, rows in (("🟢 진행 중", active), ("🗓️ 예정", upcoming)):
+        if rows:
+            embed.add_field(
+                name=title,
+                value="\n".join(
+                    f"• <t:{int(start.timestamp())}:F> ~ <t:{int(end.timestamp())}:F>"
+                    for start, end in rows
+                ),
+                inline=False,
+            )
+    if not embed.fields:
+        embed.add_field(
+            name="남은 일정 없음",
+            value="현재 클라이언트 자료에서 확인되는 남은 판매 기간이 없습니다.",
+            inline=False,
+        )
+    embed.set_footer(
+        text=(
+            f"Etc/Commodity.img · {payload['extracted_at']} 추출 · "
+            f"원시 {payload['source_rows']}행"
+        )
+    )
+    return embed
+
+
+@app_commands.command(
+    name=app_commands.locale_str("cashschedule", ko="캐샵일정"),
+    description="클라이언트에서 확인된 캐시샵 예약 판매 기간을 보여줍니다.",
+)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def cash_sale_schedule_command(interaction: discord.Interaction) -> None:
+    await interaction.response.send_message(embed=build_cash_sale_schedule_embed())
 
 
 @app_commands.command(name="패치", description="최신 공식 패치노트 링크를 보여줍니다.")
@@ -6166,6 +6234,7 @@ class MapleNewsBot(commands.Bot):
             signature_command,
             wonderberry_command,
             cash_shop_command,
+            cash_sale_schedule_command,
             patch_command,
             time_command,
             voyage_command,

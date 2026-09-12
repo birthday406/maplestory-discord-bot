@@ -56,6 +56,7 @@ from maple_bot import (
     build_miracle_time_embed,
     build_command_stats_embed,
     build_exchange_rate_log_embed,
+    build_cash_sale_schedule_embed,
     build_server_status_embed,
     build_ursus_embed,
     appearance_search_autocomplete,
@@ -65,6 +66,7 @@ from maple_bot import (
     calculate_growth_potions,
     calculate_hexa_cost,
     cash_shop_command,
+    cash_sale_schedule_command,
     cash_shop_transfer_alert_command,
     cash_shop_transfer_command,
     channel_recommend_command,
@@ -3925,6 +3927,7 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/우르스", field_text)
         self.assertIn("/서버", field_text)
         self.assertIn("/캐샵", field_text)
+        self.assertIn("/캐샵일정", field_text)
         self.assertIn("/패치", field_text)
         self.assertNotIn("!패치", field_text)
         self.assertIn("/시간", field_text)
@@ -4159,6 +4162,7 @@ class AppearanceSearchTests(unittest.IsolatedAsyncioTestCase):
             await maple_bot.MapleNewsBot.setup_hook(bot)
 
         bot.tree.add_command.assert_any_call(appearance_search_command)
+        bot.tree.add_command.assert_any_call(cash_sale_schedule_command)
         bot.tree.add_command.assert_any_call(quick_copy_symbol_command)
         bot.tree.add_command.assert_any_call(maple_bot.voyage_command)
         bot.tree.add_command.assert_any_call(maple_bot.doping_command)
@@ -4709,7 +4713,7 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
         embed = arguments.kwargs["embed"]
         self.assertEqual(embed.title, "[ 캐시샵 업데이트 ]")
         self.assertIn("https://example.com/latest-cash-shop", embed.description)
-        self.assertIn("https://masonym.dev/cash-shop", embed.description)
+        self.assertNotIn("masonym.dev", embed.description)
         self.assertIn("cash-shop)\n\n· 블랙 프라이데이", embed.description)
         self.assertIn("· 블랙 프라이데이 기념 아이템 출시", embed.description)
         self.assertIn("· 불프 스스비", embed.description)
@@ -4718,6 +4722,37 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
             maple_bot.CASH_SHOP_UPDATE_IMAGE_PATH,
             filename="cash-shop-update.png",
         )
+
+    def test_cash_sale_schedule_embed_groups_active_and_upcoming_sales(self) -> None:
+        embed = build_cash_sale_schedule_embed(
+            datetime(2026, 9, 12, 12, tzinfo=timezone.utc)
+        )
+
+        self.assertEqual(embed.title, "[ 캐시샵 판매 일정 ]")
+        self.assertIn("v.271 클라이언트 예약 데이터", embed.description)
+        self.assertIn("공식 판매 확정 전", embed.description)
+        field_names = [field.name for field in embed.fields]
+        field_values = "\n".join(field.value for field in embed.fields)
+        self.assertEqual(field_names[0], "🟢 진행 중")
+        self.assertIn("<t:1788962400:F> ~ <t:1791417540:F>", field_values)
+        self.assertIn("<t:1791360000:F> ~ <t:1791964800:F>", field_values)
+        self.assertNotIn("시그니처 스타일 컬렉션", field_values)
+        self.assertNotIn("바이올렛 큐브", field_values)
+
+    async def test_cash_sale_schedule_command_sends_schedule_embed(self) -> None:
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+        expected_embed = Mock(title="[ 캐시샵 판매 일정 ]")
+        with patch(
+            "maple_bot.build_cash_sale_schedule_embed",
+            return_value=expected_embed,
+        ):
+            await cash_sale_schedule_command.callback(interaction)
+
+        arguments = interaction.response.send_message.await_args
+        self.assertIs(arguments.kwargs["embed"], expected_embed)
 
     def test_cash_shop_sections_stop_before_ongoing_sales(self) -> None:
         source = """
