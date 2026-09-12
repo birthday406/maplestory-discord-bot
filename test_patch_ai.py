@@ -12,6 +12,21 @@ import maple_bot
 
 
 class PatchTests(unittest.TestCase):
+    def test_revision_saves_heading_and_table_context_at_observation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = PatchHistory(Path(folder) / 'patch.db')
+            prefix = '<h2>Frieren Event</h2><h3>Grimoire Collection Missions</h3>' + '<p>Other mission</p>' * 30
+            old = prefix + '<table><tr><td>Star Force Grimoire</td><td>Star Catching success then 30 enhancements</td></tr></table>'
+            new = old.replace('Star Catching success then 30 enhancements', '30 enhancements')
+            store.observe(1, 'v.271', 'link', old, [10])
+            store.observe(1, 'v.271', 'link', new, [10])
+            item = store.pending()[0]
+            self.assertIn('Frieren Event', item['context'])
+            self.assertIn('Grimoire Collection Missions', item['context'])
+            self.assertIn('Star Force Grimoire', item['context'])
+            store.observe(1, 'v.271', 'link', '<p>Unrelated later revision</p>', [10])
+            self.assertEqual(store.pending()[0]['context'], item['context'])
+
     def test_revision_labels_are_fixed_without_changing_body(self):
         from patch_ai import normalize_revision_labels
         source = '- **추가됨:** 피해량 900% → 2,430%\n* **추가사항**: 신규 스킬\n추가 사항: 보상\n- 변경 사항: 수치\n- 수정됨: 조건\n- 제거됨: 아이템\n- 삭제됨: 목록\n추가 보상을 지급합니다.\n스킬 설명의 변경 사항: 유지'
@@ -87,8 +102,23 @@ class PatchFlowTests(unittest.IsolatedAsyncioTestCase):
             client.openai.responses.create.assert_awaited_once()
             client.translate_texts.assert_not_awaited()
             self.assertIn('Korean', client.openai.responses.create.call_args.kwargs['instructions'])
-            self.assertEqual(ok.send.call_args.kwargs['embed'].description, '변경: 10% → 20%')
-            self.assertEqual(failed.send.call_args.kwargs['embed'].description, '변경: 10% → 20%')
+            request = client.openai.responses.create.call_args.kwargs
+            self.assertIn('이전 주변 문맥:', request['input'])
+            self.assertIn('Rate 10%', request['input'])
+            self.assertIn('Rate 20%', request['input'])
+            self.assertIn('Do not include a 핵심', request['instructions'])
+            embed = ok.send.call_args.kwargs['embed']
+            self.assertEqual(embed.author.name, 'MapleStory | PATCH UPDATE')
+            self.assertEqual(embed.title, '📝 v.271 패치노트 추가 수정')
+            self.assertIn('bold 변경 전:', request['instructions'])
+            self.assertIn('bold 변경 후:', request['instructions'])
+            self.assertIn('then one blank line', request['instructions'])
+            self.assertIn('bold 추가:', request['instructions'])
+            self.assertNotIn('⚪', request['instructions'])
+            self.assertEqual(list(embed.fields), [])
+            expected = '변경: 10% → 20%\n\n[공식 패치노트 확인](' + embed.url + ')'
+            self.assertEqual(embed.description, expected)
+            self.assertEqual(failed.send.call_args.kwargs['embed'].description, expected)
             self.assertEqual(store.pending(), [])
 
     async def test_question_uses_latest_source_and_releases_busy_flag(self):

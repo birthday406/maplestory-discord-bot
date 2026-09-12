@@ -32,6 +32,29 @@ def patch_diff(before, after):
                                           fromfile='이전 원문', tofile='수정 원문', lineterm='', n=2))
 
 
+def revision_context(before, current, body):
+    # 변경 위치의 상위 제목과 표·주변 문장을 함께 보관합니다. 이후 원문이 바뀌어도 맥락이 섞이지 않습니다.
+    headings = {patch_text(text): int(level) for level, text in
+                re.findall(r'<h([1-6])\b[^>]*>(.*?)</h\1>', body, re.I | re.S)}
+    old, new = before.splitlines(), current.splitlines()
+    paths, stack = [], {}
+    for line in new:
+        if line in headings:
+            level = headings[line]
+            stack = {n: title for n, title in stack.items() if n < level}
+            stack[level] = line
+        paths.append(' > '.join(stack.values()))
+    parts = []
+    for tag, a, b, c, d in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        if tag == 'equal':
+            continue
+        heading = paths[min(c, len(paths) - 1)] if paths else ''
+        parts.append('상위 제목: ' + (heading or '확인되지 않음') + '\n이전 주변 문맥:\n' +
+                     '\n'.join(old[max(0, a-12):b+8]) + '\n수정 후 주변 문맥:\n' +
+                     '\n'.join(new[max(0, c-12):d+8]))
+    return '\n\n'.join(parts)
+
+
 class PatchHistory:
     def __init__(self, path=Path('patch-history.db')):
         self.path = path
@@ -43,6 +66,8 @@ class PatchHistory:
                     targets TEXT, sent TEXT, summary TEXT,
                     observed_utc TEXT DEFAULT CURRENT_TIMESTAMP);
             ''')
+            if 'context' not in {row[1] for row in db.execute('PRAGMA table_info(revisions)')}:
+                db.execute('ALTER TABLE revisions ADD COLUMN context TEXT')
 
     def observe(self, post_id, title, url, body, targets):
         current = patch_text(body)
@@ -52,8 +77,9 @@ class PatchHistory:
             previous = db.execute('SELECT body FROM snapshots WHERE post_id=?', (post_id,)).fetchone()
             if previous and previous[0] != current:
                 changes = patch_diff(previous[0], current)
-                db.execute('INSERT INTO revisions (post_id,title,url,changes,targets,sent) VALUES (?,?,?,?,?,?)',
-                           (post_id, title, url, changes, json.dumps(targets), '[]'))
+                context = revision_context(previous[0], current, body)
+                db.execute('INSERT INTO revisions (post_id,title,url,changes,targets,sent,context) VALUES (?,?,?,?,?,?,?)',
+                           (post_id, title, url, changes, json.dumps(targets), '[]', context))
             # 처음에는 비교 원문이 없으므로 추가 수정 알림을 보내지 않습니다.
             db.execute('INSERT OR REPLACE INTO snapshots VALUES (?,?)', (post_id, current))
 
