@@ -99,6 +99,7 @@ from maple_bot import (
     html_to_text,
     info_channel_command,
     utc_channel_command,
+    extract_current_known_issues,
     is_cash_shop_update,
     is_known_issues_article,
     is_patch_notes,
@@ -3931,7 +3932,7 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/캐샵", field_text)
         self.assertIn("/캐샵일정", field_text)
         self.assertIn("/패치", field_text)
-        self.assertIn("/알려진문제", field_text)
+        self.assertIn("/알려진이슈", field_text)
         self.assertNotIn("!패치", field_text)
         self.assertIn("/시간", field_text)
         self.assertIn("!시간", field_text)
@@ -4697,6 +4698,16 @@ class FrierenCashCommandTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
+    def test_current_known_issues_excludes_resolved_section(self) -> None:
+        body = (
+            '<h2>Current Known Issues</h2><ul><li>Current issue</li></ul>'
+            '<h2>Resolved Issues</h2><ul><li>Resolved issue</li></ul>'
+        )
+
+        result = extract_current_known_issues(body)
+
+        self.assertEqual(result, 'Current issue')
+
     async def test_fetch_known_issues_article_selects_newest_support_article(self) -> None:
         response = Mock()
         response.raise_for_status = Mock()
@@ -4770,7 +4781,10 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
             "body": "<p>Issue</p>",
         }
         interaction = SimpleNamespace(
-            client=SimpleNamespace(fetch_known_issues_article=AsyncMock(return_value=article)),
+            client=SimpleNamespace(
+                fetch_known_issues_article=AsyncMock(return_value=article),
+                summarize_known_issues=AsyncMock(return_value='- 현재 알려진 문제'),
+            ),
             response=SimpleNamespace(defer=AsyncMock()),
             followup=SimpleNamespace(send=AsyncMock()),
         )
@@ -4778,9 +4792,38 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
         await known_issues_command.callback(interaction)
 
         embed = interaction.followup.send.await_args.kwargs["embed"]
-        self.assertEqual(embed.title, "[ 알려진 문제 ]")
+        self.assertEqual(embed.title, "[ 알려진 이슈 ]")
         self.assertIn(article["html_url"], embed.description)
         self.assertIn("v.271", embed.description)
+        self.assertIn("현재 알려진 문제", embed.description)
+        self.assertEqual(embed.footer.text, "현재 해결되지 않은 이슈만 표시합니다.")
+
+    async def test_known_issues_summary_is_cached_for_same_body(self) -> None:
+        article = {
+            "id": 2,
+            "title": "Known Issues – v.271 - Frieren",
+            "html_url": "https://support-maplestory.nexon.com/articles/2",
+            "body": (
+                '<h2>Current Known Issues</h2><ul><li>Current issue</li></ul>'
+                '<h2>Resolved Issues</h2><ul><li>Resolved issue</li></ul>'
+            ),
+        }
+        create = AsyncMock(return_value=SimpleNamespace(output_text='- 현재 알려진 문제'))
+        bot = object.__new__(MapleNewsBot)
+        bot.openai = SimpleNamespace(responses=SimpleNamespace(create=create))
+        bot.correction_store = None
+        bot._known_issues_summary_key = None
+        bot._known_issues_summary = None
+
+        first = await MapleNewsBot.summarize_known_issues(bot, article)
+        second = await MapleNewsBot.summarize_known_issues(bot, article)
+
+        self.assertEqual(first, '- 현재 알려진 문제')
+        self.assertEqual(second, first)
+        create.assert_awaited_once()
+        prompt = create.await_args.kwargs
+        self.assertIn('Current issue', prompt['input'])
+        self.assertNotIn('Resolved issue', prompt['input'])
 
     async def test_cash_shop_command_uses_saved_latest_link_and_thumbnail(self) -> None:
         interaction = SimpleNamespace(
