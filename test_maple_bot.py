@@ -4549,6 +4549,11 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FrierenCashRateTests(unittest.TestCase):
+    def test_wonderberry_permanent_and_rare_pets_use_special_slot(self) -> None:
+        self.assertTrue(maple_bot.is_wonderberry_special("Permanent", 1.33))
+        self.assertTrue(maple_bot.is_wonderberry_special("90 Days", 0.25))
+        self.assertFalse(maple_bot.is_wonderberry_special("90 Days", 1.33))
+
     def test_signature_rates_parse_item_and_rate_rows(self) -> None:
         source = """
         <table><tbody>

@@ -4498,6 +4498,13 @@ def draw_wonderberry_results(
     return random.choices(rates, weights=[rate for _, _, rate in rates], k=count)
 
 
+def is_wonderberry_special(duration: str, rate: float) -> bool:
+    """영구 펫과 프리렌 희귀 펫에 보라색 스페셜 슬롯을 사용합니다."""
+    return duration.strip().casefold() == "permanent" or (
+        rate <= WONDERBERRY_SPECIAL_RATE_THRESHOLD
+    )
+
+
 def _cash_simulator_icon_bytes(kind: str, names: list[str]) -> dict[str, bytes]:
     """한 결과 이미지에 필요한 클라이언트 아이콘만 ZIP에서 읽습니다."""
     icons: dict[str, bytes] = {}
@@ -4602,8 +4609,9 @@ def create_wonderberry_result_image(
     total_width = len(results) * cell_width
     start_x = (width - total_width) // 2
     anchor_y = 245
-    for index, (name, _duration, rate) in enumerate(results):
-        special = rate <= WONDERBERRY_SPECIAL_RATE_THRESHOLD
+    for index, (name, duration, rate) in enumerate(results):
+        # 영구 펫은 일반 확률이어도 클라이언트의 보라색 스페셜 슬롯으로 구분합니다.
+        special = is_wonderberry_special(duration, rate)
         slot_path = (
             WONDERBERRY_SPECIAL_SLOT_PATH if special else WONDERBERRY_COMMON_SLOT_PATH
         )
