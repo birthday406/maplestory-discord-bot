@@ -63,7 +63,7 @@ from maple_data import (
 )
 
 
-BOT_VERSION = "1.4.5"
+BOT_VERSION = "1.4.6"
 NEWS_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news"
 NEWS_DETAIL_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news/{post_id}"
 KNOWN_ISSUES_API_URL = (
@@ -5439,6 +5439,20 @@ async def fetch_daily_ranking_profile(client, nickname: str) -> tuple[tuple, boo
     return await asyncio.shield(pending[key])
 
 
+async def ranking_nickname_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """입력한 사람에게만 자신의 최근 성공 조회 캐릭터를 보여줍니다."""
+    query = current.strip().casefold()
+    names = interaction.client.ranking_store.get_recent_characters(interaction.user.id)
+    return [
+        app_commands.Choice(name=name, value=name)
+        for name in names
+        if not query or query in name.casefold()
+    ][:10]
+
+
 @app_commands.command(
     name="닉네임추적",
     description="GMS 랭킹 기록에서 캐릭터의 닉네임 변경 후보를 확인합니다.",
@@ -5489,7 +5503,8 @@ async def nickname_trace_command(
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.rename(nickname="닉네임")
-@app_commands.describe(nickname="처음에는 입력하고, 이후에는 비워도 됩니다")
+@app_commands.describe(nickname="캐릭터명을 입력하거나 최근 조회 목록에서 선택")
+@app_commands.autocomplete(nickname=ranking_nickname_autocomplete)
 async def ranking_command(
     interaction: discord.Interaction,
     nickname: str | None = None,

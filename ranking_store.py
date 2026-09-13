@@ -176,6 +176,16 @@ class RankingStore:
                     character_name TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS ranking_recent_characters (
+                    discord_user_id INTEGER NOT NULL,
+                    character_name TEXT NOT NULL COLLATE NOCASE,
+                    last_used_seq INTEGER NOT NULL,
+                    PRIMARY KEY (discord_user_id, character_name)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_ranking_recent_characters
+                ON ranking_recent_characters (discord_user_id, last_used_seq DESC);
+
                 CREATE TABLE IF NOT EXISTS representative_scan_state (
                     world_id INTEGER NOT NULL,
                     ranking_type TEXT NOT NULL,
@@ -229,6 +239,11 @@ class RankingStore:
                 INSERT OR IGNORE INTO ranking_collector_state
                     (id, consecutive_limit_failures, retry_until)
                 VALUES (1, 0, 0);
+
+                INSERT OR IGNORE INTO ranking_recent_characters
+                    (discord_user_id, character_name, last_used_seq)
+                SELECT discord_user_id, character_name, 0
+                FROM ranking_preferences;
                 """
             )
             # 옛 진행 위치에는 기준일이 없으므로 처음 한 번 새 기준일의 첫 페이지부터 돕니다.
@@ -317,7 +332,7 @@ class RankingStore:
                 )
 
     def save_default_character(self, discord_user_id: int, character_name: str) -> None:
-        """사용자가 마지막으로 직접 조회한 캐릭터 이름을 기억합니다."""
+        """마지막 캐릭터와 자동완성에 쓸 최근 조회 목록을 함께 기억합니다."""
         with self._connect() as connection:
             connection.execute(
                 """
@@ -327,6 +342,36 @@ class RankingStore:
                     character_name = excluded.character_name
                 """,
                 (discord_user_id, character_name),
+            )
+            # 같은 캐릭터를 다시 조회하면 이름 표기와 최근 순서만 갱신합니다.
+            next_sequence = connection.execute(
+                """SELECT COALESCE(MAX(last_used_seq), 0) + 1
+                   FROM ranking_recent_characters WHERE discord_user_id = ?""",
+                (discord_user_id,),
+            ).fetchone()[0]
+            connection.execute(
+                """
+                INSERT INTO ranking_recent_characters
+                    (discord_user_id, character_name, last_used_seq)
+                VALUES (?, ?, ?)
+                ON CONFLICT(discord_user_id, character_name) DO UPDATE SET
+                    character_name = excluded.character_name,
+                    last_used_seq = excluded.last_used_seq
+                """,
+                (discord_user_id, character_name, next_sequence),
+            )
+            # 최근 10개만 남겨 목록이 너무 길어지지 않게 합니다.
+            connection.execute(
+                """
+                DELETE FROM ranking_recent_characters
+                WHERE discord_user_id = ? AND character_name NOT IN (
+                    SELECT character_name FROM ranking_recent_characters
+                    WHERE discord_user_id = ?
+                    ORDER BY last_used_seq DESC
+                    LIMIT 10
+                )
+                """,
+                (discord_user_id, discord_user_id),
             )
 
     def detect_nickname_changes(
@@ -583,6 +628,18 @@ class RankingStore:
                 (discord_user_id,),
             ).fetchone()
         return row["character_name"] if row is not None else None
+
+    def get_recent_characters(self, discord_user_id: int) -> list[str]:
+        """해당 Discord 사용자가 성공적으로 조회한 최근 캐릭터를 반환합니다."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT character_name FROM ranking_recent_characters
+                   WHERE discord_user_id = ?
+                   ORDER BY last_used_seq DESC
+                   LIMIT 10""",
+                (discord_user_id,),
+            ).fetchall()
+        return [row["character_name"] for row in rows]
 
     def save_ranking_profile(self, character_name: str, profile: tuple) -> None:
         """명령어 카드에 필요한 공식 랭킹 응답을 다음 조회용으로 저장합니다."""

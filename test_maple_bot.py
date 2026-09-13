@@ -128,6 +128,7 @@ from maple_bot import (
     quick_copy_symbol_command,
     quick_copy_symbol_prefix_command,
     ranking_command,
+    ranking_nickname_autocomplete,
     maple_addict_power,
     record_command_usage,
     record_exchange_rate,
@@ -1863,6 +1864,46 @@ class RankingCommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(store.get_default_character(1), "Akanelize")
             self.assertEqual(store.get_default_character(2), "Home")
             self.assertIsNone(store.get_default_character(3))
+
+    def test_recent_ranking_characters_are_private_and_recent_first(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            store.save_default_character(1, "Alpha")
+            store.save_default_character(1, "Beta")
+            store.save_default_character(2, "Other")
+            store.save_default_character(1, "ALPHA")
+
+            self.assertEqual(store.get_recent_characters(1), ["ALPHA", "Beta"])
+            self.assertEqual(store.get_recent_characters(2), ["Other"])
+            self.assertEqual(store.get_recent_characters(3), [])
+            self.assertEqual(store.get_default_character(1), "ALPHA")
+
+    def test_recent_ranking_characters_keep_only_ten(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = RankingStore(Path(directory) / "ranking.db")
+            for index in range(12):
+                store.save_default_character(1, f"Character{index}")
+
+            recent = store.get_recent_characters(1)
+
+            self.assertEqual(len(recent), 10)
+            self.assertEqual(recent[0], "Character11")
+            self.assertEqual(recent[-1], "Character2")
+
+    async def test_ranking_nickname_autocomplete_filters_personal_history(self) -> None:
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=123),
+            client=SimpleNamespace(
+                ranking_store=SimpleNamespace(
+                    get_recent_characters=Mock(return_value=["Home", "Homework"])
+                )
+            ),
+        )
+
+        choices = await ranking_nickname_autocomplete(interaction, "work")
+
+        interaction.client.ranking_store.get_recent_characters.assert_called_once_with(123)
+        self.assertEqual([choice.value for choice in choices], ["Homework"])
 
     def test_full_ranking_profile_survives_store_restart(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
