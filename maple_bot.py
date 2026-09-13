@@ -63,7 +63,7 @@ from maple_data import (
 )
 
 
-BOT_VERSION = "1.4.7"
+BOT_VERSION = "1.4.8"
 NEWS_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news"
 NEWS_DETAIL_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news/{post_id}"
 KNOWN_ISSUES_API_URL = (
@@ -114,7 +114,9 @@ STATE_PATH = Path("state.json")
 RANKING_DB_PATH = Path("ranking.db")
 FAMILIAR_DB_PATH = Path("familiar.db")
 BACKFILL_ALERT_PATH = Path(__file__).with_name("maplebot-backfill-alert.txt")
-RANKING_BACKUP_PATH = Path.home() / "maplestory-discord-bot-backups" / "ranking.db"
+RANKING_ARCHIVE_DEFAULT_PATH = (
+    Path.home() / "maplestory-discord-bot-backups" / "snapshots"
+)
 # 12.5명/초도 장시간 실행하면 공식 API가 403을 반환하므로
 # 요청 시작은 1초마다 한 페이지로 제한하되 느린 응답은 최대 3개까지 겹칩니다.
 RANKING_SCAN_INTERVAL_SECONDS = 1
@@ -6323,12 +6325,10 @@ class MapleNewsBot(commands.Bot):
         self._ranking_import_only = os.getenv(
             "RANKING_COLLECTION_IMPORT_ONLY", "0"
         ).lower() in {"1", "true", "yes"}
-        self._last_ranking_backup_scan_date: date | None = None
-        self._ranking_backup_task: asyncio.Task | None = None
         self._ranking_archive_task: asyncio.Task | None = None
         self._last_ranking_archive_scan_date: date | None = None
         self._ranking_archive_path = Path(os.getenv(
-            "RANKING_ARCHIVE_PATH", str(RANKING_BACKUP_PATH.parent / "snapshots")
+            "RANKING_ARCHIVE_PATH", str(RANKING_ARCHIVE_DEFAULT_PATH)
         ))
         replica_path = os.getenv("RANKING_ARCHIVE_REPLICA_PATH")
         self._ranking_archive_replica_path = Path(replica_path) if replica_path else None
@@ -6897,16 +6897,6 @@ class MapleNewsBot(commands.Bot):
             # 복사·복원 검증 실패 시 해당 묶음 원본은 남기고 다음 기준일에 다시 시도합니다.
             logging.exception("ranking_archive phase=failed date=%s utc=%s",
                               scan_date, datetime.now(timezone.utc).isoformat())
-
-    async def backup_ranking_database(self) -> None:
-        """대용량 DB 백업이 일일 랭킹 수집을 멈추지 않게 별도 스레드에서 실행합니다."""
-        try:
-            rows = await asyncio.to_thread(
-                self.ranking_store.backup_to, RANKING_BACKUP_PATH
-            )
-            logging.info("Ranking backup completed: %s characters.", rows)
-        except (OSError, sqlite3.Error):
-            logging.exception("ranking_main_error phase=backup")
 
     def pause_ranking_collection(self, error: RankingRateLimited) -> int:
         """API 제한 대기를 DB에 남겨 서비스 재시작 뒤에도 같은 요청을 막습니다."""
@@ -8331,17 +8321,6 @@ class MapleNewsBot(commands.Bot):
             if world_id not in self._completed_ranking_world_ids
         ]
         if not active_world_ids:
-            if (
-                self._last_ranking_backup_scan_date != scan_date
-                and (
-                    self._ranking_backup_task is None
-                    or self._ranking_backup_task.done()
-                )
-            ):
-                self._ranking_backup_task = asyncio.create_task(
-                    self.backup_ranking_database()
-                )
-                self._last_ranking_backup_scan_date = scan_date
             representative_jobs = [
                 (world_id, ranking_type)
                 for world_id in tracked_world_ids

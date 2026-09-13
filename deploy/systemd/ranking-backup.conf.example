@@ -1,0 +1,4 @@
+# 실제 값은 /etc/maplestory-ranking-backup.conf에 저장하고 Git에는 넣지 않습니다.
+RANKING_BACKUP_REPLICA_TARGET=ubuntu@보조서버_내부_IP
+RANKING_BACKUP_REPLICA_DIR=/home/ubuntu/maplestory-ranking-backups/weekly
+RANKING_BACKUP_SSH_KEY=/home/ubuntu/.ssh/ranking-sync

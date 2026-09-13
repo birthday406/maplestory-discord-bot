@@ -1,6 +1,6 @@
 # 메이플스토리 Discord 공지 봇
 
-현재 버전: `v1.4.7`
+현재 버전: `v1.4.8`
 
 최근 통합 배포: 2026-09-09(미국 서부시간), Discord 재연결 확인 2026-09-10 03:13:47 UTC. 로컬·메인 서버 전체 테스트 각 402개, 보조 서버 3대 랭킹 테스트 각 37개를 통과했습니다. 공지 봇과 4개 샤드 수집기에 반영했으며 기존 설정·DB·수집 체크포인트는 배포 파일로 덮어쓰지 않았습니다.
 
@@ -394,7 +394,11 @@ MapleBot 과거 경험치 백필은 보조 서버에서 체크포인트와 현�
 
 `/랭킹`으로 조회에 성공한 캐릭터는 중복 없이 우선 대상에 등록됩니다. 다음 날짜의 자동 수집에서는 이 캐릭터들을 최근 조회 순서로 하루 한 번 먼저 갱신한 뒤 월드별 상위 랭킹 수집을 이어갑니다. 명령어 조회와 자동 수집을 포함한 모든 공식 랭킹 요청은 같은 요청 간격 제한을 공유합니다.
 
-각 수집기는 페이지마다 자신의 체크포인트를 저장하고, 60페이지 단위 JSONL이 메인 서버에 도착하면 메인 봇이 `ranking.db`에 반영합니다. 별도 백업은 일일 랭킹 수집을 마친 뒤 프로젝트 밖 `~/maplestory-discord-bot-backups/ranking.db`에 만들고 SQLite 무결성 검사를 실행합니다. 자동 수집을 켜지 않아도 `/랭킹`으로 직접 조회한 기록은 같은 DB에 저장됩니다.
+각 수집기는 페이지마다 자신의 체크포인트를 저장하고, 60페이지 단위 JSONL이 메인 서버에 도착하면 메인 봇이 `ranking.db`에 반영합니다. 자동 수집을 켜지 않아도 `/랭킹`으로 직접 조회한 기록은 같은 DB에 저장됩니다.
+
+운영 `ranking.db` 전체 백업은 메인 봇 반복문과 분리된 `maple-ranking-backup.timer`가 매주 일요일 03:30 UTC 이후 30분 안에 실행합니다. 실행 중인 DB를 SQLite 온라인 백업으로 복사해 전체 무결성을 검사한 뒤 gzip으로 압축하고 SHA-256 체크섬을 만듭니다. 메인 서버의 `~/maplestory-discord-bot-backups/weekly`와 별도 보조 서버의 `~/maplestory-ranking-backups/weekly`에 각각 최근 4개를 보관합니다. 보조 서버 전송 후 해시가 일치해야 최종 파일로 바꾸며, 실패하면 새 로컬 백업을 남기고 기존 백업을 정리하지 않습니다. DB 스키마 변경이나 대규모 데이터 수정 전에는 이 주간 백업과 별도로 수동 백업을 만듭니다.
+
+타이머는 `deploy/systemd/maple-ranking-backup.service`와 `maple-ranking-backup.timer`를 사용합니다. 실제 보조 서버 주소와 SSH 키 경로는 Git에 넣지 않는 `/etc/maplestory-ranking-backup.conf`에 저장하며 `ranking-backup.conf.example` 형식을 따릅니다. 백업은 봇을 멈추지 않고 낮은 CPU·I/O 우선순위로 실행됩니다.
 
 공식 랭킹의 실제 일일 갱신 시각을 측정할 때는 `python tools/probe_ranking_update.py`를 실행합니다. 최근 경험치 변경 캐릭터 5명을 10분마다 확인하고 최초 변경 감지 시각을 한국시간으로 `ranking-update-probe.json`에 남긴 뒤 종료합니다. 기본 감시 시간은 24시간입니다.
 
@@ -468,6 +472,7 @@ API 키는 절대로 채팅, Discord, GitHub, 스크린샷에 올리지 마세�
 - `tools/update_cash_item_db.ps1`: 패치된 WZ 파일에서 위 두 데이터 파일을 다시 만드는 도구
 - `tools/export_frieren_simulator_assets.ps1`: 설치된 GMS 클라이언트에서 프리렌 시뮬레이터 데이터와 정적 화면 자산을 갱신하는 도구
 - `tools/extract_mcv_last_frame.py`: 원더베리 MCV0 영상에서 정적 배경 한 장을 추출하는 보조 도구
+- `tools/backup_ranking_db.py`: 랭킹 DB를 검사·압축하고 메인·보조 서버에 순환 보관하는 주간 백업 도구
 - `tools/wz_cash_exporter`: WZ 파일을 읽는 추출기와 WzComparerR2 MIT 라이선스 안내
 
 프리렌 시뮬레이터 자산을 새 클라이언트에서 다시 만들 때만 OpenCV가 필요합니다. 서버에서 봇을 실행할 때는 필요하지 않습니다.
@@ -579,7 +584,7 @@ python -m unittest discover -v
 - `maple_bot.py`: 봇의 실제 동작 코드
 - `ranking_worker.py`: 주요 4개 월드와 대표 캐릭터 랭킹을 샤드 단위로 수집해 JSONL로 전달하는 분산 수집기
 - `ranking_store.py`: 캐릭터 현재값·일별 스냅샷·대표 랭킹·닉네임 변경 후보를 저장하는 SQLite 계층
-- `deploy/systemd/`: 메인 봇 import-only 설정과 랭킹 수집기·샤드별 systemd 예시
+- `deploy/systemd/`: 메인 봇 import-only 설정, 랭킹 수집기·샤드, 주간 DB 백업 systemd 설정 예시
 - `.env`: 내 API 키와 Discord 설정을 보관하는 개인 파일. 공유하면 안 됨
 - `.env.example`: `.env` 작성 예시. 실제 키를 넣지 않음
 - `state.json`: 이미 보낸 공지, 최신 캐시샵 링크, Sunny Sunday 번역, 캐시이동·미라클 타임 일정, 최근 서버 상태, 알리미별 채널 설정과 명령어 사용 통계 기록

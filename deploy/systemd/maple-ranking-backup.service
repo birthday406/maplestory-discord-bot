@@ -1,0 +1,17 @@
+[Unit]
+Description=Weekly MapleStory ranking database backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/maplestory-discord-bot
+EnvironmentFile=/etc/maplestory-ranking-backup.conf
+ExecStart=/home/ubuntu/maplestory-discord-bot/.venv/bin/python /home/ubuntu/maplestory-discord-bot/tools/backup_ranking_db.py --database /home/ubuntu/maplestory-discord-bot/ranking.db --backup-dir /home/ubuntu/maplestory-discord-bot-backups/weekly --retain 4 --replica-target ${RANKING_BACKUP_REPLICA_TARGET} --replica-dir ${RANKING_BACKUP_REPLICA_DIR} --identity ${RANKING_BACKUP_SSH_KEY}
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=6h
+UMask=0077

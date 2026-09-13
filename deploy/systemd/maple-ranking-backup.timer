@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the MapleStory ranking database backup every week
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00 UTC
+RandomizedDelaySec=30m
+Persistent=true
+Unit=maple-ranking-backup.service
+
+[Install]
+WantedBy=timers.target
