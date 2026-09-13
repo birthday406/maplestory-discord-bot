@@ -398,7 +398,7 @@ MapleBot 과거 경험치 백필은 보조 서버에서 체크포인트와 현�
 
 운영 `ranking.db` 전체 백업은 메인 봇 반복문과 분리된 `maple-ranking-backup.timer`가 매주 일요일 03:30 UTC 이후 30분 안에 실행합니다. 실행 중인 DB를 SQLite 온라인 백업으로 복사해 전체 무결성을 검사한 뒤 gzip으로 압축하고 SHA-256 체크섬을 만듭니다. 메인 서버의 `~/maplestory-discord-bot-backups/weekly`와 별도 보조 서버의 `~/maplestory-ranking-backups/weekly`에 각각 최근 4개를 보관합니다. 보조 서버 전송 후 해시가 일치해야 최종 파일로 바꾸며, 실패하면 새 로컬 백업을 남기고 기존 백업을 정리하지 않습니다. DB 스키마 변경이나 대규모 데이터 수정 전에는 이 주간 백업과 별도로 수동 백업을 만듭니다.
 
-타이머는 `deploy/systemd/maple-ranking-backup.service`와 `maple-ranking-backup.timer`를 사용합니다. 실제 보조 서버 주소와 SSH 키 경로는 Git에 넣지 않는 `/etc/maplestory-ranking-backup.conf`에 저장하며 `ranking-backup.conf.example` 형식을 따릅니다. 백업은 봇을 멈추지 않고 낮은 CPU·I/O 우선순위로 실행됩니다.
+타이머는 `deploy/systemd/maple-ranking-backup.service`와 `maple-ranking-backup.timer`를 사용합니다. 실제 보조 서버 주소와 SSH 키 경로는 Git에 넣지 않는 `/etc/maplestory-ranking-backup.conf`에 저장하며 `ranking-backup.conf.example` 형식을 따릅니다. 백업은 봇을 멈추지 않고 낮은 CPU·I/O 우선순위로 실행되며, 메모리는 3GB부터 회수 우선순위를 높이고 4GB를 상한으로 제한합니다.
 
 공식 랭킹의 실제 일일 갱신 시각을 측정할 때는 `python tools/probe_ranking_update.py`를 실행합니다. 최근 경험치 변경 캐릭터 5명을 10분마다 확인하고 최초 변경 감지 시각을 한국시간으로 `ranking-update-probe.json`에 남긴 뒤 종료합니다. 기본 감시 시간은 24시간입니다.
 

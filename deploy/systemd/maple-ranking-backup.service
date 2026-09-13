@@ -13,5 +13,7 @@ ExecStart=/home/ubuntu/maplestory-discord-bot/.venv/bin/python /home/ubuntu/mapl
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
+MemoryHigh=3G
+MemoryMax=4G
 TimeoutStartSec=6h
 UMask=0077
