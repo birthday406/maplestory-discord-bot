@@ -1036,10 +1036,10 @@ class NewsFilteringTests(unittest.TestCase):
         self.assertFalse(should_send_miracle_time(entry, 222, 201))
 
     def test_patch_event_commands_have_requested_names(self) -> None:
-        self.assertEqual(cash_shop_transfer_command.name, "캐시이동")
-        self.assertEqual(miracle_time_command.name, "미라클큐브")
-        self.assertEqual(hot_week_command.name, "핫위크")
-        self.assertEqual(cube_sale_command.name, "큐브세일")
+        self.assertEqual(cash_shop_transfer_command.name, "cash-transfer")
+        self.assertEqual(miracle_time_command.name, "miracle-time")
+        self.assertEqual(hot_week_command.name, "hotweek")
+        self.assertEqual(cube_sale_command.name, "cube-sale")
 
     def test_cash_transfer_alert_is_sent_only_during_first_24_hours(self) -> None:
         event = {
@@ -3248,7 +3248,7 @@ class ExtremeGrowthPotionTests(unittest.TestCase):
             simulate_extreme_growth_potions(130, 0)
 
     def test_command_is_named_extreme_growth_potion(self) -> None:
-        self.assertEqual(extreme_growth_potion_command.name, "익성비")
+        self.assertEqual(extreme_growth_potion_command.name, "extreme-growth-potion")
 
 
 class ExtremeGrowthPotionCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -3364,7 +3364,7 @@ class GrowthPotionTests(unittest.TestCase):
             )
 
     def test_command_is_named_growth_potion(self) -> None:
-        self.assertEqual(growth_potion_command.name, "성장의비약")
+        self.assertEqual(growth_potion_command.name, "growth-potion")
 
 
 class GrowthPotionCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -3683,7 +3683,7 @@ class SymbolCalculatorTests(unittest.TestCase):
             for parameter in symbol_calculator_command.parameters
             if parameter.name == "elanos"
         )
-        self.assertEqual(symbol_calculator_command.name, "심볼계산기")
+        self.assertEqual(symbol_calculator_command.name, "symbol-calculator")
         self.assertEqual(
             {choice.value for choice in symbol_calculator_command.parameters[0].choices},
             set(SYMBOL_REGIONS),
@@ -3962,7 +3962,7 @@ class HelpCommandTests(unittest.IsolatedAsyncioTestCase):
         await help_command.callback(interaction)
 
         arguments = interaction.response.send_message.await_args
-        self.assertEqual(help_command.name, "명령어")
+        self.assertEqual(help_command.name, "help")
         self.assertTrue(arguments.kwargs["ephemeral"])
         # 한 화면 대신 분류 전체에 기존 사용자 명령어가 남아 있는지 확인합니다.
         field_text = "\n".join(name for rows in maple_bot.HELP_CATEGORIES.values() for name, _ in rows)
@@ -4212,6 +4212,25 @@ class AppearanceSearchTests(unittest.IsolatedAsyncioTestCase):
         bot.tree.add_command.assert_any_call(quick_copy_symbol_command)
         bot.tree.add_command.assert_any_call(maple_bot.voyage_command)
         bot.tree.add_command.assert_any_call(maple_bot.doping_command)
+        # 전역 등록되는 모든 슬래시 명령어에 영문 기본 이름과 한국어 이름이 있습니다.
+        registered = {
+            call.args[0].name: call.args[0]
+            for call in bot.tree.add_command.call_args_list
+        }
+        self.assertEqual(
+            set(registered),
+            set(maple_bot.COMMAND_NAME_LOCALIZATIONS),
+        )
+        translator = maple_bot.KoreanCommandTranslator()
+        for english_name, korean_name in maple_bot.COMMAND_NAME_LOCALIZATIONS.items():
+            self.assertEqual(
+                await translator.translate(
+                    registered[english_name]._locale_name,
+                    maple_bot.discord.Locale.korean,
+                    None,
+                ),
+                korean_name,
+            )
         bot.add_command.assert_any_call(quick_copy_symbol_prefix_command)
         bot.add_command.assert_any_call(maple_bot.time_prefix_command)
         self.assertEqual({call.args[0].name for call in bot.add_command.call_args_list},
@@ -4307,7 +4326,7 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
             await maple_bot.familiar_command.callback(interaction)
 
         message = interaction.response.send_message.await_args.kwargs
-        self.assertEqual(maple_bot.familiar_command.name, "퍼밀리어")
+        self.assertEqual(maple_bot.familiar_command.name, "familiar")
         self.assertNotIn("embed", message)
         self.assertEqual(message["content"], "누적 횟수: 1회")
         self.assertEqual(message["file"].filename, "familiar-result.png")
@@ -4469,7 +4488,7 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         translator = maple_bot.KoreanCommandTranslator()
 
         self.assertEqual(pssb_command.name, "ssb")
-        self.assertEqual(maple_bot.pssb_initials_command.name, "ㅅㅅㅂ")
+        self.assertEqual(maple_bot.pssb_initials_command.name, "ssb-shortcut")
         self.assertEqual(
             await translator.translate(
                 pssb_command._locale_name,

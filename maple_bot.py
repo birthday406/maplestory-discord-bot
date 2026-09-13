@@ -63,7 +63,7 @@ from maple_data import (
 )
 
 
-BOT_VERSION = "1.4.6"
+BOT_VERSION = "1.4.7"
 NEWS_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news"
 NEWS_DETAIL_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news/{post_id}"
 KNOWN_ISSUES_API_URL = (
@@ -233,6 +233,69 @@ class KoreanCommandTranslator(app_commands.Translator):
         if locale is discord.Locale.korean:
             return string.extras.get("ko")
         return None
+
+
+# 영문 이름을 기본 명령어로 등록하고 한국어 Discord에서는 기존 이름으로 표시합니다.
+COMMAND_NAME_LOCALIZATIONS = {
+    "polisher": "연마석",
+    "hexa": "헥사",
+    "extreme-growth-potion": "익성비",
+    "growth-potion": "성장의비약",
+    "exp-coupon": "exp쿠폰",
+    "epic-dungeon": "에픽던전",
+    "symbol-calculator": "심볼계산기",
+    "item-search": "아이템검색",
+    "appearance-search": "외형검색",
+    "help": "명령어",
+    "admin": "관리자",
+    "quick-copy": "ㅁ",
+    "symbol": "심볼",
+    "command-stats": "명령어통계",
+    "boss-5-percent": "5퍼",
+    "channel-recommend": "채널추천",
+    "familiar": "퍼밀리어",
+    "ssb": "스스비",
+    "ssb-shortcut": "ㅅㅅㅂ",
+    "signature": "시그니처",
+    "wonderberry": "원더베리",
+    "cashshop": "캐샵",
+    "cashschedule": "캐샵일정",
+    "patch": "패치",
+    "knownissues": "알려진이슈",
+    "time": "시간",
+    "voyage": "항해",
+    "buffs": "도핑",
+    "sunny": "썬데이",
+    "sunny-list": "썬데이목록",
+    "cash-transfer": "캐시이동",
+    "ursus": "우르스",
+    "nickname-history": "닉네임추적",
+    "ranking": "랭킹",
+    "server": "서버",
+    "hotweek": "핫위크",
+    "cube-sale": "큐브세일",
+    "miracle-time": "미라클큐브",
+    "alert-settings": "알림설정확인",
+    "news-alert": "공지알림",
+    "sunny-alert": "썬데이알림",
+    "sunny-list-alert": "썬데이목록알림",
+    "miracle-time-alert": "미라클큐브알림",
+    "cash-transfer-alert": "캐시이동알림",
+    "ursus-alert": "우르스알림",
+    "server-alert": "서버알림",
+    "cube-sale-alert": "큐브세일알림",
+    "exchange-log-alert": "환율기록알림",
+    "info-channel": "정보채널",
+    "utc-channel": "utc채널",
+}
+
+
+def localized_command_name(english_name: str) -> app_commands.locale_str:
+    """한 코드를 공유하는 영문·한국어 슬래시 명령어 이름을 만듭니다."""
+    return app_commands.locale_str(
+        english_name,
+        ko=COMMAND_NAME_LOCALIZATIONS[english_name],
+    )
 
 
 SUNNY_SUNDAY_IMAGE_PATH = Path(__file__).parent / "assets" / "title-sunny-sunday.webp"
@@ -2882,7 +2945,7 @@ def build_miracle_time_embed(
     return embed
 
 
-@app_commands.command(name="연마석", description="게임 강화창에서 연마석 강화를 시뮬레이션합니다.")
+@app_commands.command(name=localized_command_name("polisher"), description="게임 강화창에서 연마석 강화를 시뮬레이션합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def seed_ring_command(interaction: discord.Interaction) -> None:
@@ -2896,7 +2959,7 @@ async def seed_ring_command(interaction: discord.Interaction) -> None:
     view.message = await interaction.original_response()
 
 
-@app_commands.command(name="헥사", description="HEXA 코어 강화에 필요한 재료를 계산합니다.")
+@app_commands.command(name=localized_command_name("hexa"), description="HEXA 코어 강화에 필요한 재료를 계산합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.describe(
@@ -2944,7 +3007,7 @@ async def hexa_calculator(
     await send_calculator_embed(interaction, embed)
 
 
-@app_commands.command(name="익성비", description="익스트림 성장의 비약 결과를 무작위로 추첨합니다.")
+@app_commands.command(name=localized_command_name("extreme-growth-potion"), description="익스트림 성장의 비약 결과를 무작위로 추첨합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.rename(current_level="시작레벨", count="개수")
@@ -2985,7 +3048,7 @@ async def extreme_growth_potion_command(
     await interaction.response.send_message(embed=embed)
 
 
-@app_commands.command(name="성장의비약", description="성장의 비약 사용 결과를 계산합니다.")
+@app_commands.command(name=localized_command_name("growth-potion"), description="성장의 비약 사용 결과를 계산합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.rename(
@@ -3185,28 +3248,28 @@ async def open_calculator(interaction, calculator):
     panel.message = await interaction.original_response()
 
 
-@app_commands.command(name="헥사", description="드롭다운과 입력창으로 HEXA 강화 비용을 계산합니다.")
+@app_commands.command(name=localized_command_name("hexa"), description="드롭다운과 입력창으로 HEXA 강화 비용을 계산합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def hexa_command(interaction: discord.Interaction):
     await open_calculator(interaction, hexa_calculator)
 
 
-@app_commands.command(name="성장의비약", description="드롭다운과 입력창으로 성장의 비약 결과를 계산합니다.")
+@app_commands.command(name=localized_command_name("growth-potion"), description="드롭다운과 입력창으로 성장의 비약 결과를 계산합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def growth_potion_command(interaction: discord.Interaction):
     await open_calculator(interaction, growth_potion_calculator)
 
 
-@app_commands.command(name="에픽던전", description="드롭다운과 입력창으로 에픽 던전 경험치를 계산합니다.")
+@app_commands.command(name=localized_command_name("epic-dungeon"), description="드롭다운과 입력창으로 에픽 던전 경험치를 계산합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def epic_dungeon_command(interaction: discord.Interaction):
     await open_calculator(interaction, epic_dungeon_calculator)
 
 
-@app_commands.command(name="심볼계산기", description="드롭다운과 입력창으로 심볼 성장 비용을 계산합니다.")
+@app_commands.command(name=localized_command_name("symbol-calculator"), description="드롭다운과 입력창으로 심볼 성장 비용을 계산합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def symbol_calculator_command(interaction: discord.Interaction):
@@ -3321,7 +3384,7 @@ class ExpCouponView(UserOwnedView):
                 pass  # 이미 사라진 메시지는 수정할 수 없습니다.
 
 
-@app_commands.command(name="exp쿠폰", description="선택창과 수치 입력으로 EXP 교환권 사용 결과를 계산합니다.")
+@app_commands.command(name=localized_command_name("exp-coupon"), description="선택창과 수치 입력으로 EXP 교환권 사용 결과를 계산합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def exp_coupon_command(interaction: discord.Interaction) -> None:
@@ -3364,7 +3427,7 @@ def build_exp_coupon_result(coupon, current_level, current_exp_percent, count, b
     return embed
 
 
-@app_commands.command(name="에픽던전", description="에픽 던전 완료 후 경험치를 계산합니다.")
+@app_commands.command(name=localized_command_name("epic-dungeon"), description="에픽 던전 완료 후 경험치를 계산합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.rename(
@@ -3436,7 +3499,7 @@ async def epic_dungeon_calculator(
     await send_calculator_embed(interaction, embed)
 
 
-@app_commands.command(name="심볼계산기", description="심볼 성장에 필요한 개수와 메소를 계산합니다.")
+@app_commands.command(name=localized_command_name("symbol-calculator"), description="심볼 성장에 필요한 개수와 메소를 계산합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.rename(
@@ -3733,7 +3796,7 @@ CHANNEL_RECOMMEND_MESSAGES = (
 
 
 @app_commands.command(
-    name="아이템검색", description="캐시 아이템의 GMS·KMS 이름과 아이콘을 검색합니다."
+    name=localized_command_name("item-search"), description="캐시 아이템의 GMS·KMS 이름과 아이콘을 검색합니다."
 )
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -3791,7 +3854,7 @@ async def item_search_command(
 
 
 @app_commands.command(
-    name="외형검색", description="헤어·성형의 GMS 이름과 KMS 이름을 검색합니다."
+    name=localized_command_name("appearance-search"), description="헤어·성형의 GMS 이름과 KMS 이름을 검색합니다."
 )
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -3916,7 +3979,7 @@ def build_help_embed() -> discord.Embed:
     return embed
 
 
-@app_commands.command(name="명령어", description="일반 사용자 명령어를 분류별로 안내합니다.")
+@app_commands.command(name=localized_command_name("help"), description="일반 사용자 명령어를 분류별로 안내합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def help_command(interaction: discord.Interaction) -> None:
@@ -3925,7 +3988,7 @@ async def help_command(interaction: discord.Interaction) -> None:
     )
 
 
-@app_commands.command(name="관리자", description="서버 관리자용 알림·채널 설정 명령어를 안내합니다.")
+@app_commands.command(name=localized_command_name("admin"), description="서버 관리자용 알림·채널 설정 명령어를 안내합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -3954,7 +4017,7 @@ QUICK_COPY_TEXT = (
 )
 
 
-@app_commands.command(name="ㅁ", description="자주 쓰는 메이플 문구를 복사하기 쉽게 보여줍니다.")
+@app_commands.command(name=localized_command_name("quick-copy"), description="자주 쓰는 메이플 문구를 복사하기 쉽게 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def quick_copy_command(interaction: discord.Interaction) -> None:
@@ -3962,7 +4025,7 @@ async def quick_copy_command(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(QUICK_COPY_TEXT, ephemeral=True)
 
 
-@app_commands.command(name="심볼", description="자주 쓰는 메이플 문구를 복사하기 쉽게 보여줍니다.")
+@app_commands.command(name=localized_command_name("symbol"), description="자주 쓰는 메이플 문구를 복사하기 쉽게 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def quick_copy_symbol_command(interaction: discord.Interaction) -> None:
@@ -4032,7 +4095,7 @@ def build_command_stats_embed(command_stats: dict) -> discord.Embed:
     return embed
 
 
-@app_commands.command(name="명령어통계", description="봇 명령어 사용 통계를 확인합니다.")
+@app_commands.command(name=localized_command_name("command-stats"), description="봇 명령어 사용 통계를 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def command_stats_command(interaction: discord.Interaction) -> None:
@@ -4166,7 +4229,7 @@ class TrafficLightView(UserOwnedView):
                 pass  # 이미 삭제된 메시지는 수정할 수 없습니다.
 
 
-@app_commands.command(name="5퍼", description="글로벌 리부트 보스의 5% 최소 피해량을 확인합니다.")
+@app_commands.command(name=localized_command_name("boss-5-percent"), description="글로벌 리부트 보스의 5% 최소 피해량을 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def traffic_light_command(interaction: discord.Interaction) -> None:
@@ -4178,7 +4241,7 @@ async def traffic_light_command(interaction: discord.Interaction) -> None:
 
 
 @app_commands.command(
-    name="채널추천",
+    name=localized_command_name("channel-recommend"),
     description="메이플스토리 1~40채널 중 하나를 추천합니다.",
 )
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -4300,7 +4363,7 @@ class FamiliarSimulatorView(UserOwnedView):
 
 
 @app_commands.command(
-    name="퍼밀리어",
+    name=localized_command_name("familiar"),
     description="유니크 퍼밀리어 잠재능력 두 줄을 무작위로 추첨합니다.",
 )
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -4454,7 +4517,7 @@ class PssbSimulatorView(UserOwnedView):
 
 
 @app_commands.command(
-    name=app_commands.locale_str("ssb", ko="스스비"),
+    name=localized_command_name("ssb"),
     description="현재 PSSB 공식 확률표로 1회 또는 5회 시뮬레이션합니다.",
 )
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -4497,7 +4560,7 @@ async def pssb_command(
         await interaction.followup.send(embed=embed, view=view)
 
 
-@app_commands.command(name="ㅅㅅㅂ", description="/스스비의 초성 별칭입니다.")
+@app_commands.command(name=localized_command_name("ssb-shortcut"), description="/스스비의 초성 별칭입니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.rename(count="횟수")
@@ -4832,7 +4895,7 @@ async def run_frieren_cash_simulator(
 
 
 @app_commands.command(
-    name=app_commands.locale_str("signature", ko="시그니처"),
+    name=localized_command_name("signature"),
     description="프리렌 시그니처 스타일 컬렉션을 1회 또는 5회 시뮬레이션합니다.",
 )
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -4853,7 +4916,7 @@ async def signature_command(
 
 
 @app_commands.command(
-    name=app_commands.locale_str("wonderberry", ko="원더베리"),
+    name=localized_command_name("wonderberry"),
     description="Heroic 프리렌 원더베리를 1회 또는 5회 시뮬레이션합니다.",
 )
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -4873,7 +4936,7 @@ async def wonderberry_command(
     await run_frieren_cash_simulator(interaction, "wonderberry", count.value)
 
 
-@app_commands.command(name="캐샵", description="최신 캐시샵 업데이트 링크를 보여줍니다.")
+@app_commands.command(name=localized_command_name("cashshop"), description="최신 캐시샵 업데이트 링크를 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def cash_shop_command(interaction: discord.Interaction) -> None:
@@ -4968,7 +5031,7 @@ def build_cash_sale_schedule_embed(now: datetime | None = None) -> discord.Embed
 
 
 @app_commands.command(
-    name=app_commands.locale_str("cashschedule", ko="캐샵일정"),
+    name=localized_command_name("cashschedule"),
     description="클라이언트에서 확인된 캐시샵 예약 판매 기간을 보여줍니다.",
 )
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -4977,7 +5040,7 @@ async def cash_sale_schedule_command(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(embed=build_cash_sale_schedule_embed())
 
 
-@app_commands.command(name="패치", description="최신 공식 패치노트 링크를 보여줍니다.")
+@app_commands.command(name=localized_command_name("patch"), description="최신 공식 패치노트 링크를 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def patch_command(interaction: discord.Interaction) -> None:
@@ -5010,7 +5073,7 @@ async def latest_patch_post(client: commands.Bot) -> dict | None:
 
 
 @app_commands.command(
-    name=app_commands.locale_str("knownissues", ko="알려진이슈"),
+    name=localized_command_name("knownissues"),
     description="현재 공식 Known Issues 목록을 보여줍니다.",
 )
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -5104,7 +5167,7 @@ class PatchQuestionModal(discord.ui.Modal, title='패치노트 질문'):
 
 
 
-@app_commands.command(name="시간", description="주요 지역의 현재 시각을 보여줍니다.")
+@app_commands.command(name=localized_command_name("time"), description="주요 지역의 현재 시각을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def time_command(interaction: discord.Interaction) -> None:
@@ -5118,7 +5181,7 @@ async def time_prefix_command(ctx: commands.Context) -> None:
     await ctx.send(embed=build_server_time_embed(datetime.now(timezone.utc)))
 
 
-@app_commands.command(name="항해", description="GMS 항해 가이드를 보여줍니다.")
+@app_commands.command(name=localized_command_name("voyage"), description="GMS 항해 가이드를 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def voyage_command(interaction: discord.Interaction) -> None:
@@ -5128,7 +5191,7 @@ async def voyage_command(interaction: discord.Interaction) -> None:
 
 
 
-@app_commands.command(name="도핑", description="GMS 보스 물약·도핑 목록을 보여줍니다.")
+@app_commands.command(name=localized_command_name("buffs"), description="GMS 보스 물약·도핑 목록을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def doping_command(interaction: discord.Interaction) -> None:
@@ -5138,7 +5201,7 @@ async def doping_command(interaction: discord.Interaction) -> None:
 
 
 
-@app_commands.command(name="썬데이", description="이번 주 썬데이 메이플 일정을 보여줍니다.")
+@app_commands.command(name=localized_command_name("sunny"), description="이번 주 썬데이 메이플 일정을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def sunny_sunday_command(interaction: discord.Interaction) -> None:
@@ -5165,7 +5228,7 @@ async def sunny_sunday_command(interaction: discord.Interaction) -> None:
     )
 
 
-@app_commands.command(name="썬데이목록", description="남아 있는 썬데이 메이플 일정을 보여줍니다.")
+@app_commands.command(name=localized_command_name("sunny-list"), description="남아 있는 썬데이 메이플 일정을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def sunny_sunday_list_command(interaction: discord.Interaction) -> None:
@@ -5190,7 +5253,7 @@ async def sunny_sunday_list_command(interaction: discord.Interaction) -> None:
     )
 
 
-@app_commands.command(name="캐시이동", description="저장된 캐시 보관함 이동 일정을 보여줍니다.")
+@app_commands.command(name=localized_command_name("cash-transfer"), description="저장된 캐시 보관함 이동 일정을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def cash_shop_transfer_command(interaction: discord.Interaction) -> None:
@@ -5212,7 +5275,7 @@ async def cash_shop_transfer_command(interaction: discord.Interaction) -> None:
     )
 
 
-@app_commands.command(name="우르스", description="현재 우르스 골든타임 여부를 확인합니다.")
+@app_commands.command(name=localized_command_name("ursus"), description="현재 우르스 골든타임 여부를 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def ursus_command(interaction: discord.Interaction) -> None:
@@ -5454,7 +5517,7 @@ async def ranking_nickname_autocomplete(
 
 
 @app_commands.command(
-    name="닉네임추적",
+    name=localized_command_name("nickname-history"),
     description="GMS 랭킹 기록에서 캐릭터의 닉네임 변경 후보를 확인합니다.",
 )
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -5499,7 +5562,7 @@ async def nickname_trace_command(
     )
 
 
-@app_commands.command(name="랭킹", description="GMS 캐릭터의 공식 레벨 랭킹을 확인합니다.")
+@app_commands.command(name=localized_command_name("ranking"), description="GMS 캐릭터의 공식 레벨 랭킹을 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.rename(nickname="닉네임")
@@ -5635,7 +5698,7 @@ async def ranking_command(
     )
 
 
-@app_commands.command(name="서버", description="글로벌 메이플 주요 월드의 접속 상태를 확인합니다.")
+@app_commands.command(name=localized_command_name("server"), description="글로벌 메이플 주요 월드의 접속 상태를 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def server_status_command(interaction: discord.Interaction) -> None:
@@ -5798,21 +5861,21 @@ async def send_event_notice(interaction, kind):
     await interaction.followup.send(embed=embed)
 
 
-@app_commands.command(name="핫위크", description="핫위크 일정 안내를 확인합니다.")
+@app_commands.command(name=localized_command_name("hotweek"), description="핫위크 일정 안내를 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def hot_week_command(interaction: discord.Interaction) -> None:
     await send_event_notice(interaction, "hot_week")
 
 
-@app_commands.command(name="큐브세일", description="큐브세일 일정 안내를 확인합니다.")
+@app_commands.command(name=localized_command_name("cube-sale"), description="큐브세일 일정 안내를 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def cube_sale_command(interaction: discord.Interaction) -> None:
     await send_event_notice(interaction, "cube_sale")
 
 
-@app_commands.command(name="미라클큐브", description="저장된 미라클 타임 일정을 보여줍니다.")
+@app_commands.command(name=localized_command_name("miracle-time"), description="저장된 미라클 타임 일정을 보여줍니다.")
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def miracle_time_command(interaction: discord.Interaction) -> None:
@@ -5849,7 +5912,7 @@ INFO_CHANNEL_TYPE_CHOICES = [
 ]
 
 
-@app_commands.command(name="알림설정확인", description="현재 서버의 알림·정보 채널 설정을 확인합니다.")
+@app_commands.command(name=localized_command_name("alert-settings"), description="현재 서버의 알림·정보 채널 설정을 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -5924,7 +5987,7 @@ async def run_alert_setting_command(
     )
 
 
-@app_commands.command(name="공지알림", description="번역 공지 알림 채널을 설정합니다.")
+@app_commands.command(name=localized_command_name("news-alert"), description="번역 공지 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -5941,7 +6004,7 @@ async def news_alert_command(
     )
 
 
-@app_commands.command(name="썬데이알림", description="당일 Sunny Sunday 알림 채널을 설정합니다.")
+@app_commands.command(name=localized_command_name("sunny-alert"), description="당일 Sunny Sunday 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -5958,7 +6021,7 @@ async def sunny_day_alert_command(
     )
 
 
-@app_commands.command(name="썬데이목록알림", description="전체 Sunny Sunday 목록 알림 채널을 설정합니다.")
+@app_commands.command(name=localized_command_name("sunny-list-alert"), description="전체 Sunny Sunday 목록 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -5975,7 +6038,7 @@ async def sunny_list_alert_command(
     )
 
 
-@app_commands.command(name="미라클큐브알림", description="미라클 타임 시작·종료 전 알림 채널을 설정합니다.")
+@app_commands.command(name=localized_command_name("miracle-time-alert"), description="미라클 타임 시작·종료 전 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -5992,7 +6055,7 @@ async def miracle_time_alert_command(
     )
 
 
-@app_commands.command(name="캐시이동알림", description="캐시이동 시작·종료 전 알림 채널을 설정합니다.")
+@app_commands.command(name=localized_command_name("cash-transfer-alert"), description="캐시이동 시작·종료 전 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6009,7 +6072,7 @@ async def cash_shop_transfer_alert_command(
     )
 
 
-@app_commands.command(name="우르스알림", description="우르스 골든타임 시작·종료 알림 채널을 설정합니다.")
+@app_commands.command(name=localized_command_name("ursus-alert"), description="우르스 골든타임 시작·종료 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6026,7 +6089,7 @@ async def ursus_alert_command(
     )
 
 
-@app_commands.command(name="서버알림", description="점검 종료 후 서버 오픈 알림 채널을 설정합니다.")
+@app_commands.command(name=localized_command_name("server-alert"), description="점검 종료 후 서버 오픈 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6053,7 +6116,7 @@ async def server_status_alert_command(
     )
 
 
-@app_commands.command(name="큐브세일알림", description="큐브세일 알림 채널을 설정합니다.")
+@app_commands.command(name=localized_command_name("cube-sale-alert"), description="큐브세일 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6071,7 +6134,7 @@ async def cube_sale_alert_command(
     )
 
 
-@app_commands.command(name="환율기록알림", description="USD/KRW 환율 변동 기록 채널을 설정합니다.")
+@app_commands.command(name=localized_command_name("exchange-log-alert"), description="USD/KRW 환율 변동 기록 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6088,7 +6151,7 @@ async def exchange_log_alert_command(
     )
 
 
-@app_commands.command(name="정보채널", description="시간·환율 음성 채널의 자동 갱신을 설정합니다.")
+@app_commands.command(name=localized_command_name("info-channel"), description="시간·환율 음성 채널의 자동 갱신을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6110,7 +6173,7 @@ async def info_channel_command(
     )
 
 
-@app_commands.command(name="utc채널", description="UTC 시간 음성 채널의 자동 갱신을 설정합니다.")
+@app_commands.command(name=localized_command_name("utc-channel"), description="UTC 시간 음성 채널의 자동 갱신을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)

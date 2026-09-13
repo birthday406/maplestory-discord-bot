@@ -39,7 +39,7 @@ class PolisherTests(unittest.IsolatedAsyncioTestCase):
                     self.assertGreaterEqual(result.getpixel((x, y))[3], 230, (x, y))
 
     async def test_command_opens_without_drawing(self):
-        self.assertEqual(bot.seed_ring_command.name, '연마석')
+        self.assertEqual(bot.seed_ring_command.name, 'polisher')
         self.assertEqual(bot.seed_ring_command.parameters, [])
         interaction = SimpleNamespace(user=SimpleNamespace(id=1),
             response=SimpleNamespace(send_message=AsyncMock()),
