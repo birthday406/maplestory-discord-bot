@@ -214,3 +214,13 @@ class PatchFlowTests(unittest.IsolatedAsyncioTestCase):
         import asyncio
         client = SimpleNamespace(poll_patch_revisions=AsyncMock(side_effect=asyncio.TimeoutError))
         await maple_bot.MapleNewsBot.check_patch_revisions.coro(client)
+
+    async def test_watch_loop_continues_after_openai_error(self):
+        from discord.ext import tasks
+        # 실제 반복 작업에서 첫 GPT 요청 실패 뒤 다음 회차가 실행되는지 확인합니다.
+        client = SimpleNamespace(poll_patch_revisions=AsyncMock(
+            side_effect=[maple_bot.OpenAIError('synthetic API failure'), None]))
+        loop = tasks.loop(seconds=0, count=2)(maple_bot.MapleNewsBot.check_patch_revisions.coro)
+        await loop.start(client)
+        self.assertFalse(loop.failed())
+        self.assertEqual(client.poll_patch_revisions.await_count, 2)

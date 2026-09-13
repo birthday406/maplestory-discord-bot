@@ -4592,6 +4592,14 @@ class PssbCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(maple_bot.pssb_nx_cost(11), 36_000)
         self.assertEqual(maple_bot.pssb_nx_cost(12), 39_600)
 
+    def test_signature_expected_cost_does_not_round_attempts_first(self) -> None:
+        for rate, cost in ((7, "112,857"), (30, "26,333"), (100, "7,900")):
+            with self.subTest(rate=rate):
+                text = maple_bot.frieren_cash_expectation_text(
+                    "signature", [("Test Coupon", rate)], 10
+                )
+                self.assertIn(f"평균 구매 비용: 약 `{cost} NX`", text)
+
     def test_gender_suffix_uses_the_shared_item_name(self) -> None:
         item = pssb_cash_item("Oh My Captain (M) / Oh My Captain (F)")
 
@@ -4928,8 +4936,11 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(field_names[0], "🟢 진행 중")
         self.assertIn("<t:1788962400:F> ~ <t:1791417540:F>", field_values)
         self.assertIn("<t:1791360000:F> ~ <t:1791964800:F>", field_values)
-        self.assertNotIn("시그니처 스타일 컬렉션", field_values)
-        self.assertNotIn("바이올렛 큐브", field_values)
+        self.assertIn("시그니처 스타일 컬렉션", field_values)
+        self.assertIn("바이올렛 큐브", field_values)
+        self.assertTrue(all(len(field.value) <= 1024 for field in embed.fields))
+        self.assertLessEqual(len(embed), 6000)
+        self.assertIsNone(embed.footer.text)
 
     async def test_cash_sale_schedule_command_sends_schedule_embed(self) -> None:
         interaction = SimpleNamespace(

@@ -4776,11 +4776,12 @@ def frieren_cash_expectation_text(
             continue
         seen.add(name)
         probability = rate / 100
-        expected_boxes = round(1 / probability)
+        # 시그니처는 낱개와 세트 단가가 같으므로 정확한 평균 횟수에 단가를 곱합니다.
+        # 횟수를 먼저 반올림하면 기대 비용이 달라지므로 최종 NX만 반올림합니다.
         cost = (
-            signature_nx_cost(expected_boxes)
+            round(SIGNATURE_SINGLE_PRICE / probability)
             if kind == "signature"
-            else wonderberry_nx_cost(expected_boxes)
+            else wonderberry_nx_cost(round(1 / probability))
         )
         success = cumulative_success_probability(probability, draw_count) * 100
         lines.append(
@@ -4986,18 +4987,19 @@ def build_cash_sale_schedule_embed(now: datetime | None = None) -> discord.Embed
     """아직 끝나지 않은 클라이언트 예약 판매 기간만 표시합니다."""
     payload = json.loads(CASH_SALE_SCHEDULE_PATH.read_text(encoding="utf-8"))
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    active: list[tuple[datetime, datetime]] = []
-    upcoming: list[tuple[datetime, datetime]] = []
+    active: list[tuple[datetime, datetime, str]] = []
+    upcoming: list[tuple[datetime, datetime, str]] = []
 
-    # 같은 기간에 여러 상품 행이 있어도 Discord에는 판매 기간을 한 번만 보여줍니다.
+    # 상세 상품 목록 대신 원본에서 확인한 판매 종류를 기간과 함께 표시합니다.
     periods = {
-        (_cash_schedule_moment(entry["start"]), _cash_schedule_moment(entry["end"]))
+        (_cash_schedule_moment(entry["start"]), _cash_schedule_moment(entry["end"]),
+         entry.get("label") or "판매 종류 미확인")
         for entry in payload["entries"]
     }
-    for start, end in sorted(periods):
+    for start, end, label in sorted(periods):
         if end <= current:
             continue
-        (active if start <= current else upcoming).append((start, end))
+        (active if start <= current else upcoming).append((start, end, label))
 
     embed = discord.Embed(
         title="[ 캐시샵 판매 일정 ]",
@@ -5009,26 +5011,22 @@ def build_cash_sale_schedule_embed(now: datetime | None = None) -> discord.Embed
     )
     for title, rows in (("🟢 진행 중", active), ("🗓️ 예정", upcoming)):
         if rows:
-            embed.add_field(
-                name=title,
-                value="\n".join(
-                    f"• <t:{int(start.timestamp())}:F> ~ <t:{int(end.timestamp())}:F>"
-                    for start, end in rows
-                ),
-                inline=False,
-            )
+            # 이름 추가로 Discord 필드의 1,024자 제한을 넘지 않게 나눕니다.
+            value = ""
+            for start, end, label in rows:
+                line = f"**{label}**\n<t:{int(start.timestamp())}:F> ~ <t:{int(end.timestamp())}:F>"
+                if value and len(value) + len(line) + 2 > 1024:
+                    embed.add_field(name=title, value=value, inline=False)
+                    title = "🗓️ 예정 (계속)" if title.startswith("🗓️") else "🟢 진행 중 (계속)"
+                    value = ""
+                value += ("\n\n" if value else "") + line
+            embed.add_field(name=title, value=value, inline=False)
     if not embed.fields:
         embed.add_field(
             name="남은 일정 없음",
             value="현재 클라이언트 자료에서 확인되는 남은 판매 기간이 없습니다.",
             inline=False,
         )
-    embed.set_footer(
-        text=(
-            f"Etc/Commodity.img · {payload['extracted_at']} 추출 · "
-            f"원시 {payload['source_rows']}행"
-        )
-    )
     return embed
 
 
@@ -7604,8 +7602,8 @@ class MapleNewsBot(commands.Bot):
     async def check_patch_revisions(self) -> None:
         try:
             await self.poll_patch_revisions()
-        except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError, KeyError, sqlite3.Error, OSError) as error:
-            # 실패해도 루프를 종료하지 않고 다음 주기에 저장된 변경분부터 재시도합니다.
+        except (OpenAIError, aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, ValueError, KeyError, sqlite3.Error, OSError) as error:
+            # GPT 오류도 반복 작업을 멈추지 않도록 잡고, 다음 주기에 저장된 변경분을 재시도합니다.
             logging.warning('patch_revision phase=failed utc=%s error_type=%s',
                             datetime.now(timezone.utc).isoformat(), type(error).__name__)
 
