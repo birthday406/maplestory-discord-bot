@@ -6,6 +6,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
+from embed_style import embed_title
 import discord
 
 STATE = Path(__file__).with_name('patch-v271-view.json')
@@ -39,7 +40,7 @@ def page(index):
             '죽음의 씨앗: 2,620% → **1,489%**\n죽음의 씨앗 개화: 3,055% → **1,729%**\n\n'
             '**플레게톤**\n피해량: 1,627% → **735%**\n균열: 1,298% → **586%**'
         )
-    embed = discord.Embed(title='패치노트 추가 수정', url=URL, description=text, color=0xF1C40F)
+    embed = discord.Embed(title=embed_title('패치노트 추가 수정'), url=URL, description=text, color=0xF1C40F)
     embed.add_field(name='원문', value=f'[공식 패치노트 확인]({URL})', inline=False)
     embed.set_footer(text=f'v.271 · {index + 1}/4 · 아래에서 직업 선택 · 채널 공용 화면')
     return embed

@@ -9,13 +9,13 @@ class TrafficLightViewTests(unittest.IsolatedAsyncioTestCase):
     async def test_gollux_hell_and_extreme_black_mage(self):
         interaction, view = await self.open_panel()
         result = await self.select(interaction, view.boss_select, '헬럭스')
-        self.assertEqual(result['embed'].title, '🚦 헬럭스 5%')
+        self.assertEqual(result['embed'].title, '<:ppojji_star_small:1548846409791574129> 헬럭스 5%')
         self.assertEqual([option.value for option in view.difficulty_select.options], ['헬'])
         self.assertEqual(result['embed'].thumbnail.url, 'attachment://boss-gollux.webp')
         await self.select(interaction, view.boss_select, '검마')
         self.assertIn('익스트림', [option.value for option in view.difficulty_select.options])
         result = await self.select(interaction, view.difficulty_select, '익스트림')
-        self.assertEqual(result['embed'].title, '🚦 익스트림 검마 5%')
+        self.assertEqual(result['embed'].title, '<:ppojji_star_small:1548846409791574129> 익스트림 검마 5%')
         self.assertIn('4,800,000,000,000K', result['embed'].description)
         self.assertIn('240,000,000,000K', result['embed'].description)
 
@@ -42,14 +42,14 @@ class TrafficLightViewTests(unittest.IsolatedAsyncioTestCase):
     async def test_no_options_opens_group_and_switches_boss_and_difficulty(self):
         interaction, view = await self.open_panel()
         initial = interaction.response.send_message.await_args.kwargs
-        self.assertEqual(initial['embed'].title, '🚦 검밑 보스 5%')
+        self.assertEqual(initial['embed'].title, '<:ppojji_star_small:1548846409791574129> 검밑 보스 5%')
         self.assertTrue(view.difficulty_select.disabled)
         for boss in ('스우', '데미안', '루시드', '윌', '더스크', '진 힐라', '듄켈'):
             self.assertIn(boss, initial['embed'].description)
         self.assertEqual(len(view.boss_select.options), 12)
 
         result = await self.select(interaction, view.boss_select, '발드릭스')
-        self.assertEqual(result['embed'].title, '🚦 노말 발드릭스 5%')
+        self.assertEqual(result['embed'].title, '<:ppojji_star_small:1548846409791574129> 노말 발드릭스 5%')
         self.assertFalse(view.difficulty_select.disabled)
         self.assertEqual([o.value for o in view.difficulty_select.options], ['노말', '하드'])
         result = await self.select(interaction, view.difficulty_select, '하드')
@@ -58,7 +58,7 @@ class TrafficLightViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['embed'].thumbnail.url, 'attachment://' + result['attachments'][0].filename)
 
         result = await self.select(interaction, view.boss_select, '헬럭스')
-        self.assertEqual(result['embed'].title, '🚦 헬럭스 5%')
+        self.assertEqual(result['embed'].title, '<:ppojji_star_small:1548846409791574129> 헬럭스 5%')
         result = await self.select(interaction, view.boss_select, '검밑')
         self.assertEqual(result['attachments'], [])
         self.assertIsNone(result['embed'].thumbnail.url)

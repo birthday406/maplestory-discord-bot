@@ -17,6 +17,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import aiohttp
+from embed_style import embed_title, CALCULATOR_COLOR, CASH_COLOR
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -792,7 +793,7 @@ def format_server_time(now: datetime, zone: ZoneInfo = timezone.utc) -> str:
 
 def build_server_time_embed(now: datetime) -> discord.Embed:
     embed = discord.Embed(
-        title="· 서버시간",
+        title=embed_title("서버시간"),
         description=format_server_time(now),
         color=2_793_880,
     )
@@ -895,8 +896,8 @@ def build_exchange_rate_log_embed(exchange_log: dict) -> discord.Embed:
     )
     return discord.Embed(
         title=(
-            f"[ {date_value.year}년 {date_value.month}월 {date_value.day}일 "
-            "환율 변동 기록 ]"
+            embed_title(f"[ {date_value.year}년 {date_value.month}월 {date_value.day}일 "
+            "환율 변동 기록 ]")
         ),
         description=description,
         color=0x5865F2,
@@ -1273,7 +1274,7 @@ def patch_display_title(post: dict) -> str:
 
 
 async def patch_message(client: commands.Bot, post: dict) -> tuple[str, discord.File | None]:
-    content = f"{patch_display_title(post)}\n{post_url(post)}"
+    content = f"**{embed_title('패치노트')}**\n{patch_display_title(post)}\n{post_url(post)}"
     image_path = post.get("imageThumbnail")
     image = await client.fetch_character_image(thumbnail_url(post)) if image_path else None
     if image is None:
@@ -1522,7 +1523,7 @@ async def send_event_ending_reminders(client, event, channel_ids, label, lead_se
             if label == "캐시이동":
                 # /캐시이동과 같은 안내·이미지를 재사용하고 알림 제목만 구분합니다.
                 embed = build_cash_shop_transfer_embed(client.patch_events)
-                embed.title = f"{LADY_BLAIR_EMOJI} 캐시 보관함 이동 이벤트 · 종료 임박"
+                embed.title = embed_title("캐시 보관함 이동 이벤트 · 종료 임박")
                 attachment = discord.File(CASH_SHOP_TRANSFER_IMAGE_PATH)
                 try:
                     await channel.send(embed=embed, file=attachment,
@@ -1678,7 +1679,8 @@ def build_sunny_sunday_embed(
 ) -> discord.Embed:
     # 전체 일정과 주간 자동 알림, /썬데이 명령어가 같은 모양을 사용합니다.
     embed = discord.Embed(
-        title=title,
+        title=embed_title("썬데이 메이플"),
+        description=title.replace("☀️", "").strip(),
         url=url,
         color=CATEGORY_COLORS["update"],
     )
@@ -1697,21 +1699,24 @@ def build_cash_shop_transfer_embed(schedule: dict) -> discord.Embed:
     event = schedule["cash_shop_transfer"]
     start = event["start_timestamp"]
     end = event["end_timestamp"]
+    # 날짜와 남은 시간을 분리해 모바일 줄바꿈을 줄입니다.
+    now = datetime.now(timezone.utc).timestamp()
+    remaining = f"시작: <t:{start}:R>" if now < start else f"종료: <t:{end}:R>"
     embed = discord.Embed(
-        title=f"{LADY_BLAIR_EMOJI} 캐시 보관함 이동 이벤트",
+        title=embed_title("캐시 보관함 이동 이벤트"),
         url=schedule["url"],
+        # 모바일에서도 읽기 쉽도록 요일을 빼고 조건을 짧게 표시합니다.
         description=(
-            f"**시작**　<t:{start}:F> (<t:{start}:R>)\n"
-            f"**종료**　<t:{end}:F> (<t:{end}:R>)\n\n"
-            "◆ **참여 조건**　Lv.101 이상\n"
-            "　제로 캐릭터는 스토리 퀘스트 Act 2 완료 필요\n\n"
-            "캐시샵의 캐시 보관함에서 **Cash Transfer** 버튼을 눌러 "
-            "다른 직업군 캐릭터로 아이템을 옮길 수 있습니다."
+            f"**기간**\n<t:{start}:f>부터\n<t:{end}:f>까지\n{remaining}\n\n"
+            "**참여 조건**\nLv.101 이상\n제로: 스토리 Act 2 완료\n\n"
+            "캐시샵의 **Cash Transfer** 버튼으로\n"
+            "다른 직업군 캐릭터에게 이동"
         ),
         color=0x3498DB,
     )
     embed.set_author(name="MapleStory | CASH SHOP TRANSFER")
-    embed.set_image(url=f"attachment://{CASH_SHOP_TRANSFER_IMAGE_PATH.name}")
+    # 블레어는 본문 아래 큰 이미지 대신 오른쪽 썸네일로 표시합니다.
+    embed.set_thumbnail(url=f"attachment://{CASH_SHOP_TRANSFER_IMAGE_PATH.name}")
     return embed
 
 
@@ -1740,7 +1745,7 @@ def build_ursus_embed(
         for start, end in windows
     )
     embed = discord.Embed(
-        title="우르스 골든타임",
+        title=embed_title("우르스 골든타임"),
         description=f"{message}\n{schedule}",
         color=color,
     )
@@ -1755,7 +1760,7 @@ def build_server_status_embed(
     """명령어와 점검 종료 알림에서 같은 주요 월드 상태를 보여줍니다."""
     all_open = all(statuses.values())
     embed = discord.Embed(
-        title="메이플스토리 서버 오픈" if opened else "메이플스토리 서버 상태",
+        title=embed_title("메이플스토리 서버 오픈" if opened else "메이플스토리 서버 상태"),
         url=SERVER_STATUS_PAGE_URL,
         description=(
             "**주요 월드가 모두 열렸습니다.**"
@@ -2828,9 +2833,10 @@ class SeedRingSimulatorView(UserOwnedView):
 
     def content(self):
         outcome = "강화 전" if self.result is None else ("강화 성공" if self.result["success"] else "강화 실패")
-        return (f"연마석 시뮬레이터 · {outcome} · Lv.{self.level} → Lv.{self.level + 1}\n"
-                f"{SEED_RING_LEVELS[self.level]['stone']} {self.stone_count}개 · "
-                f"시도 {self.attempts}회 / 성공 {self.successes}회 / 누적 연마석 {self.stones_used}개")
+        return (f"**{embed_title('연마석 시뮬레이터')}**\n"
+                f"{outcome} · Lv.{self.level} → Lv.{self.level + 1}\n"
+                f"{SEED_RING_LEVELS[self.level]['stone']} {self.stone_count}개\n\n"
+                f"누적 시도　**{self.attempts}회**\n성공　**{self.successes}회**\n누적 연마석　**{self.stones_used}개**")
 
     async def refresh(self, interaction):
         self.update_options()
@@ -2928,7 +2934,7 @@ def build_miracle_time_embed(
     title: str = f"{BONUS_CUBE_EMOJI} 미라클 타임 일정",
 ) -> discord.Embed:
     embed = discord.Embed(
-        title=title,
+        title=embed_title(title),
         url=schedule["url"],
         description=(
             "대상 장비에 큐브를 사용할 때 **잠재능력 등급 상승 확률이 2배**가 됩니다.\n"
@@ -2997,14 +3003,14 @@ async def hexa_calculator(
         core_type.value, current_level, target_level
     )
     embed = discord.Embed(
-        title=f"{HEXA_EMOJI} HEXA 매트릭스 강화 계산",
+        title=embed_title(f"{HEXA_EMOJI} HEXA 매트릭스 강화 계산"),
         description=(
             f"**{core_type.name}**\n"
-            f"◆ **{current_level} → {target_level}** 강화 비용\n\n"
+            f"Lv.{current_level} → Lv.{target_level}\n\n"
             f"{SOL_ERDA_EMOJI} 솔 에르다　**{sol_erda:,}개**\n"
             f"{FRAGMENT_EMOJI} 솔 에르다 조각　**{fragments:,}개**"
         ),
-        color=0x3498DB,
+        color=CALCULATOR_COLOR,
     )
     await send_calculator_embed(interaction, embed)
 
@@ -3038,14 +3044,14 @@ async def extreme_growth_potion_command(
         count_text += f" (Lv.200 도달로 {len(level_gains)}개 사용)"
 
     embed = discord.Embed(
-        title=f"{EGP_EMOJI} 익스트림 성장의 비약 시뮬레이터",
+        title=embed_title(f"{EGP_EMOJI} 익스트림 성장의 비약 시뮬레이터"),
         description=(
-            f"**사용 전**　Lv.{current_level}\n"
-            f"**입력 개수**　{count_text}\n\n"
+            f"사용 전　Lv.{current_level}\n"
+            f"입력 개수　{count_text}\n\n"
             + "\n".join(result_lines)
-            + f"\n\n◆ **최종 결과**　Lv.{result_level}"
+            + f"\n\n**최종 결과**　Lv.{result_level}"
         ),
-        color=0x57F287,
+        color=CALCULATOR_COLOR,
     )
     await interaction.response.send_message(embed=embed)
 
@@ -3113,17 +3119,17 @@ async def growth_potion_calculator(
         count_text += f" (Lv.300 도달로 {used_count}개 적용)"
 
     embed = discord.Embed(
-        title=f"{GROWTH_POTION_EMOJIS[potion.value]} 성장의 비약 계산기",
+        title=embed_title(f"{GROWTH_POTION_EMOJIS[potion.value]} 성장의 비약 계산기"),
         description=(
-            f"**비약**　{potion.name}\n"
-            f"**사용 전**　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
-            f"**하이퍼 버닝**　{hyper_burning_name}\n"
-            f"**비욘드 버닝**　{beyond_burning_name}\n"
-            f"**사용 개수**　{count_text}\n\n"
-            f"◆ **사용 후**　{result_text}\n"
-            f"◆ **지급 경험치**　{gained_exp:,}"
+            f"**{potion.name}**\n\n"
+            f"사용 전　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
+            f"하이퍼 버닝　{hyper_burning_name}\n"
+            f"비욘드 버닝　{beyond_burning_name}\n"
+            f"사용 개수　{count_text}\n\n"
+            f"사용 후　**{result_text}**\n"
+            f"획득 경험치　**{gained_exp:,}**"
         ),
-        color=0x57F287,
+        color=CALCULATOR_COLOR,
     )
     embed.set_footer(text="입력한 경험치 퍼센트를 실제 경험치로 환산한 근사 결과입니다.")
     await send_calculator_embed(interaction, embed)
@@ -3208,9 +3214,15 @@ class CalculatorView(UserOwnedView):
         for parameter in self.calculator.parameters:
             selected = self.selections.get(parameter.name)
             value = selected.name if selected else self.numbers.get(parameter.name, "미입력")
-            lines.append(f"**{parameter.display_name}**　{value}")
-        return discord.Embed(title=f"{self.calculator.name} 계산 설정",
-            description="\n".join(lines) + "\n\n종류를 선택하고 **수치 입력 → 계산하기**를 눌러주세요.", color=0x3498DB)
+            lines.append(f"{parameter.display_name}　{value}")
+        # 설정 화면도 현재 선택한 비약·던전에 맞는 전용 이모지를 사용합니다.
+        titles = {"hexa": f"{HEXA_EMOJI} HEXA 강화 계산", "symbol-calculator": "심볼 성장 계산"}
+        if "potion" in self.selections:
+            titles[self.calculator.name] = f"{GROWTH_POTION_EMOJIS[self.selections['potion'].value]} 성장의 비약 계산"
+        if "dungeon" in self.selections:
+            titles[self.calculator.name] = f"{EPIC_DUNGEON_EMOJIS[self.selections['dungeon'].value]} 에픽 던전 경험치 계산"
+        return discord.Embed(title=embed_title(titles.get(self.calculator.name, f"{self.calculator.name} 계산")),
+            description="\n".join(lines) + "\n\n종류를 선택하고 **수치 입력 → 계산하기**를 눌러주세요.", color=CALCULATOR_COLOR)
 
     async def interaction_check(self, interaction):
         if self.expired or self.is_finished():
@@ -3333,8 +3345,8 @@ class ExpCouponView(UserOwnedView):
         numbers = "아래 **수치 입력** 버튼으로 시작레벨·경험치·개수를 입력해주세요."
         if self.values:
             level, percent, count = self.values
-            numbers = f"**시작레벨**　{level}\n**경험치**　{percent:g}%\n**개수**　{count:,}개"
-        embed = discord.Embed(title="EXP 쿠폰 계산 설정", description=f"**쿠폰**　{self.coupon}\n**버닝**　{self.burning}\n\n{numbers}", color=0xF1C40F)
+            numbers = f"시작 레벨　{level}\n경험치　{percent:g}%\n사용 개수　{count:,}개"
+        embed = discord.Embed(title=embed_title(f"{EXP_COUPON_EMOJIS[self.coupon]} EXP 교환권 계산"), description=f"{self.coupon} · 버닝 {self.burning if self.burning != 'X' else '미적용'}\n\n{numbers}", color=CALCULATOR_COLOR)
         embed.set_footer(text="설정 후 계산하기를 누르세요. 10분 동안 사용하지 않으면 만료됩니다.")
         return embed
 
@@ -3414,16 +3426,15 @@ def build_exp_coupon_result(coupon, current_level, current_exp_percent, count, b
         count_text += f" ({stop_reason}로 {used_count:,}개 적용)"
 
     embed = discord.Embed(
-        title=f"{EXP_COUPON_EMOJIS[coupon]} {coupon} 계산기",
+        title=embed_title(f"{EXP_COUPON_EMOJIS[coupon]} EXP 교환권 계산"),
         description=(
-            f"**교환권**　{coupon}\n"
-            f"**사용 전**　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
-            f"**버닝**　{burning_name}\n"
-            f"**입력 개수**　{count_text}\n\n"
-            f"◆ **사용 후**　{result_text}\n"
-            f"◆ **지급 경험치**　{gained_exp:,}"
+            f"{coupon} · 버닝 {burning_name if burning_name != 'X' else '미적용'}\n\n"
+            f"사용 전　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
+            f"입력 개수　{count_text}\n\n"
+            f"사용 후　**{result_text}**\n"
+            f"획득 경험치　**{gained_exp:,}**"
         ),
-        color=0xF1C40F,
+        color=CALCULATOR_COLOR,
     )
     embed.set_footer(text="입력한 경험치 퍼센트를 실제 경험치로 환산한 근사 결과입니다.")
     return embed
@@ -3479,21 +3490,15 @@ async def epic_dungeon_calculator(
 
     dungeon_info = EPIC_DUNGEONS[dungeon.value]
     embed = discord.Embed(
-        title=(
-            f"{EPIC_DUNGEON_EMOJIS[dungeon.value]}\u2003"
-            "에픽 던전 경험치 계산기"
-        ),
+        title=embed_title(f"{EPIC_DUNGEON_EMOJIS[dungeon.value]} 에픽 던전 경험치 계산기"),
         description=(
-            f"**던전**　{dungeon.name}\n"
-            f"**사용 전**　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
-            f"**경험치 보너스**　{experience_bonus.name}\n\n"
-            f"◆ **기본 경험치**　{base_exp:,}\n"
-            f"◆ **적용 경험치**　{gained_exp:,}\n"
-            f"◆ **완료 후**　{result_text}\n\n"
-            f"{SOL_ERDA_EMOJI} **솔 에르다 보상**　"
-            f"{dungeon_info['sol_erda_reward']}\n"
-            f"{FRAGMENT_EMOJI} **솔 에르다 조각**　"
-            f"{dungeon_info['fragment_reward']}개"
+            f"{dungeon.name} · 경험치 보너스 {experience_bonus.name}\n\n"
+            f"사용 전　Lv.{current_level} ({current_exp_percent:.3f}%)\n"
+            f"기본 경험치　{base_exp:,}\n"
+            f"획득 경험치　**{gained_exp:,}**\n"
+            f"완료 후　**{result_text}**\n\n"
+            f"{SOL_ERDA_EMOJI} 솔 에르다　**{dungeon_info['sol_erda_reward'].removeprefix('솔 에르다 ')}**\n"
+            f"{FRAGMENT_EMOJI} 솔 에르다 조각　**{dungeon_info['fragment_reward']}개**"
         ),
         color=0x5865F2,
     )
@@ -3631,28 +3636,28 @@ async def symbol_growth_calculator(
                 ).timestamp()
             )
             weekly_lines.append(
-                f"◆ **{label}**　{weekly_days:,}일 · "
+                f"**{label}**　{weekly_days:,}일 · "
                 f"<t:{weekly_timestamp}:D> (<t:{weekly_timestamp}:R>)"
             )
         weekly_completion_text = "\n" + "\n".join(weekly_lines)
 
     embed = discord.Embed(
-        title="🔮 아케인·어센틱 심볼 계산기",
+        title=embed_title("🔮 아케인·어센틱 심볼 계산기"),
         description=(
-            f"**심볼**　{symbol_type} · {region.name}\n"
-            f"**성장 구간**　Lv.{current_level} → Lv.{target_level}\n"
-            f"**현재 성장치**　{current_growth:,} / {current_level_requirement:,}\n"
-            f"**보약**　{potion_level_name} (+{potion_bonus}개)\n\n"
-            f"**엘라노스**　{elanos_name}\n\n"
-            f"◆ **추가 필요 심볼**　{required_symbols:,}개\n"
-            f"◆ **강화 비용**　{meso_cost:,} 메소\n"
-            f"◆ **일일퀘만 수행**　{completion_text}"
+            f"심볼　{symbol_type} · {region.name}\n"
+            f"성장 구간　Lv.{current_level} → Lv.{target_level}\n"
+            f"현재 성장치　{current_growth:,} / {current_level_requirement:,}\n"
+            f"보약　{potion_level_name} (+{potion_bonus}개)\n"
+            f"엘라노스　{elanos_name}\n\n"
+            f"**추가 필요 심볼**　{required_symbols:,}개\n"
+            f"**강화 비용**　{meso_cost:,} 메소\n"
+            f"**일일퀘만 수행**　{completion_text}"
             f"{weekly_completion_text}\n\n"
-            f"**평소 일일 획득**　{base_daily_symbols}개\n"
-            f"**선택 조건 일일 획득**　{selected_daily_symbols}개\n"
-            f"**엘라노스 종료**　<t:{event_end_timestamp}:F>"
+            f"평소 일일 획득　{base_daily_symbols}개\n"
+            f"선택 조건 일일 획득　{selected_daily_symbols}개\n"
+            f"엘라노스 종료　<t:{event_end_timestamp}:F>"
         ),
-        color=0x9B59B6,
+        color=CALCULATOR_COLOR,
     )
     footer_text = "오늘 일일 퀘스트를 아직 받지 않은 성장치 기준입니다."
     if symbol_type == "아케인 심볼":
@@ -3828,7 +3833,7 @@ async def item_search_command(
     category_name = ITEM_CATEGORY_NAMES.get(item["category"], item["category"])
     kms_name = item["kms_name"] or "KMS 동일 ID 없음"
     embed = discord.Embed(
-        title="캐시 아이템 검색",
+        title=embed_title("캐시 아이템 검색"),
         description=(
             f'**GMS 이름**　{item["gms_name"]}\n'
             f"**KMS 이름**　{kms_name}\n"
@@ -3899,7 +3904,7 @@ async def appearance_search_command(
 
     kms_name = item["kms_name"] or "KMS 동일 ID 없음"
     embed = discord.Embed(
-        title="외형 검색",
+        title=embed_title("외형 검색"),
         description=(
             f"**종류**　{appearance_type.name}\n"
             f'**GMS 이름**　{item["gms_name"]}\n'
@@ -3971,7 +3976,7 @@ def cached_character_image(path: Path, key: str, data: bytes | None = None) -> b
 
 def build_help_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="📚 전체 명령어 안내",
+        title=embed_title("📚 전체 명령어 안내"),
         description="원하는 명령어를 입력하면 필요한 선택 항목이 나옵니다.",
         color=0x5865F2,
     )
@@ -3999,7 +4004,7 @@ async def admin_help_command(interaction: discord.Interaction) -> None:
     if interaction.guild is None or not interaction.permissions.administrator:
         await interaction.response.send_message("이 안내는 서버 관리자만 사용할 수 있습니다.", ephemeral=True)
         return
-    embed = discord.Embed(title="🛠 관리자 명령어", description="설정 명령어 안내입니다. 이 화면을 열어도 설정은 바뀌지 않습니다.", color=0x5865F2)
+    embed = discord.Embed(title=embed_title("🛠 관리자 명령어"), description="설정 명령어 안내입니다. 이 화면을 열어도 설정은 바뀌지 않습니다.", color=0x5865F2)
     for name, value in (
         ("설정 확인", "`/알림설정확인` — 현재 서버 설정 확인"),
         ("공지·이벤트 알림", "`/공지알림`\n`/썬데이알림` · `/썬데이목록알림`\n`/미라클큐브알림` · `/캐시이동알림` · `/큐브세일알림`"),
@@ -4067,7 +4072,7 @@ def build_command_stats_embed(command_stats: dict) -> discord.Embed:
         key=lambda item: (-item[1]["count"], item[0]),
     )[:10]
     embed = discord.Embed(
-        title="명령어 사용 통계",
+        title=embed_title("명령어 사용 통계"),
         description=(
             f"**전체 사용:** {command_stats.get('total', 0):,}회\n"
             f"**사용자 수:** {len(command_stats.get('users', {})):,}명"
@@ -4131,9 +4136,9 @@ def build_traffic_light_embed(boss: str, difficulty: str | None = None) -> disco
                 f"{format_boss_hp_as_k(minimum_damage)}"
             )
         embed = discord.Embed(
-            title="🚦 검밑 보스 5%",
+            title=embed_title("🚦 검밑 보스 5%"),
             description="\n".join(lines),
-            color=0x57F287,
+            color=CALCULATOR_COLOR,
         )
         return embed
 
@@ -4144,12 +4149,12 @@ def build_traffic_light_embed(boss: str, difficulty: str | None = None) -> disco
     # 헬럭스 표기 자체에 난이도가 포함되어 있으므로 '헬'을 중복해서 붙이지 않습니다.
     title_boss_name = boss if boss == "헬럭스" else f"{difficulty} {boss}"
     embed = discord.Embed(
-        title=f"🚦 {title_boss_name} 5%",
+        title=embed_title(f"🚦 {title_boss_name} 5%"),
         description=(
             f"**총 체력**　{total_hp_k}\n"
             f"**5% 최소 피해량**　{minimum_damage_k}"
         ),
-        color=0x57F287,
+        color=CALCULATOR_COLOR,
     )
     thumbnail_path = BOSS_THUMBNAIL_PATHS.get(boss)
     if thumbnail_path is not None:
@@ -4296,18 +4301,17 @@ def cumulative_success_probability(probability: float, attempts: int) -> float:
 def familiar_expectation_text(
     result: tuple[str, str, bool], expectation: dict, draw_count: int
 ) -> str:
-    """DB에서 읽은 현재 두 줄 조합의 확률·기대 횟수·희귀도를 표시합니다."""
+    """선택된 잠재능력과 확률을 간결한 항목 목록으로 표시합니다."""
     first_line, second_line, double_prime = result
     second_rank = "유니크" if double_prime else "에픽"
     return (
-        f"**1번째 줄**　{first_line}\n"
-        f"**2번째 줄 ({second_rank})**　{second_line}\n\n"
-        f"**1회 시행 시 목표 달성 확률**\n"
-        f"`{expectation['probability'] * 100:.10f}%`\n\n"
-        f"**실제 희귀도**　상위 `{expectation['rarity_percentile']:.2f}%`\n"
-        f"**평균 필요 횟수**　약 `{expectation['expected_attempts']:,.0f}회`\n"
-        f"**내 {draw_count:,}회 이내 달성 확률**　상위 `"
-        f"{cumulative_success_probability(expectation['probability'], draw_count) * 100:.2f}%`"
+        f"1번째 줄　{first_line}\n"
+        f"2번째 줄 ({second_rank})　{second_line}\n\n"
+        f"목표 달성 확률　**{expectation['probability'] * 100:.10f}%**\n"
+        f"실제 희귀도　상위 **{expectation['rarity_percentile']:.2f}%**\n"
+        f"평균 횟수　**{expectation['expected_attempts']:,.0f}회**\n"
+        f"{draw_count:,}회 내 달성 확률　**"
+        f"{cumulative_success_probability(expectation['probability'], draw_count) * 100:.2f}%**"
     )
 
 
@@ -4316,9 +4320,9 @@ def build_familiar_result(
 ) -> tuple[str, discord.File, tuple[str, str, bool]]:
     """퍼밀리어 잠재능력을 새로 추첨하고 카드 이미지까지 만듭니다."""
     first_line, second_line, double_prime = draw_unique_familiar_potential()
-    content = (
-        "✨ **더블 프라임!**\n" if double_prime else ""
-    ) + f"누적 횟수: {draw_count:,}회"
+    content = f"**{embed_title('퍼밀리어 시뮬레이터')}**\n" + (
+        "**더블 프라임!**\n" if double_prime else ""
+    ) + f"누적 사용　**{draw_count:,}회**"
     filename = "familiar-result.png"
     result = (first_line, second_line, double_prime)
     return (
@@ -4359,7 +4363,8 @@ class FamiliarSimulatorView(UserOwnedView):
     ) -> None:
         expectation = interaction.client.familiar_expectation_store.get(self.result)
         await interaction.response.send_message(
-            familiar_expectation_text(self.result, expectation, self.draw_count),
+            embed=discord.Embed(title=embed_title("퍼밀리어 기대값"),
+                description=familiar_expectation_text(self.result, expectation, self.draw_count), color=CASH_COLOR),
             ephemeral=True,
         )
 
@@ -4953,7 +4958,7 @@ async def cash_shop_command(interaction: discord.Interaction) -> None:
         return
 
     embed = discord.Embed(
-        title="[ 캐시샵 업데이트 ]",
+        title=embed_title("[ 캐시샵 업데이트 ]"),
         description=(
             f"[공식 캐시샵 업데이트]({latest['url']})"
             + (
@@ -4962,7 +4967,7 @@ async def cash_shop_command(interaction: discord.Interaction) -> None:
                 else ""
             )
         ),
-        color=0x4E5058,
+        color=CASH_COLOR,
     )
     # 첨부 파일을 사용하면 외부 이미지 주소가 만료되어도 썸네일이 계속 표시됩니다.
     embed.set_thumbnail(url="attachment://cash-shop-update.png")
@@ -5002,22 +5007,22 @@ def build_cash_sale_schedule_embed(now: datetime | None = None) -> discord.Embed
         (active if start <= current else upcoming).append((start, end, label))
 
     embed = discord.Embed(
-        title="[ 캐시샵 판매 일정 ]",
+        title=embed_title("[ 캐시샵 판매 일정 ]"),
         description=(
-            f"**{payload['source_version']} 클라이언트 예약 데이터**에서 확인된 판매 기간입니다.\n"
-            "**공식 판매 확정 전 정보**이며 실제 일정은 변경되거나 취소될 수 있습니다."
+            f"{payload['source_version']} · 진행 중·예정 판매\n"
+            "공식 판매 확정 전 정보로, 실제 일정은 변경되거나 취소될 수 있습니다."
         ),
         color=0x9B59B6,
     )
-    for title, rows in (("🟢 진행 중", active), ("🗓️ 예정", upcoming)):
+    for title, rows in (("진행 중", active), ("예정", upcoming)):
         if rows:
             # 이름 추가로 Discord 필드의 1,024자 제한을 넘지 않게 나눕니다.
             value = ""
             for start, end, label in rows:
-                line = f"**{label}**\n<t:{int(start.timestamp())}:F> ~ <t:{int(end.timestamp())}:F>"
+                line = f"**{label}**\n시작: <t:{int(start.timestamp())}:F>\n종료: <t:{int(end.timestamp())}:F>"
                 if value and len(value) + len(line) + 2 > 1024:
                     embed.add_field(name=title, value=value, inline=False)
-                    title = "🗓️ 예정 (계속)" if title.startswith("🗓️") else "🟢 진행 중 (계속)"
+                    title = "예정 (계속)" if title.startswith("예정") else "진행 중 (계속)"
                     value = ""
                 value += ("\n\n" if value else "") + line
             embed.add_field(name=title, value=value, inline=False)
@@ -5105,10 +5110,10 @@ async def known_issues_command(interaction: discord.Interaction) -> None:
 
     title = re.sub(r"^\[[^]]+\]\s*", "", article["title"])
     embed = discord.Embed(
-        title="[ 알려진 이슈 ]",
+        title=embed_title("[ 알려진 이슈 ]"),
         description=(
-            f"**{title}**\n\n"
-            f"**현재 알려진 이슈**\n{summary}\n\n"
+            f"{title}\n\n"
+            f"{summary}\n\n"
             f"[공식 Known Issues 확인]({article['html_url']})"
         ),
         url=article["html_url"],
@@ -5152,7 +5157,7 @@ class PatchQuestionModal(discord.ui.Modal, title='패치노트 질문'):
                 json_output=True,
             )
             answer, quotes = validated_answer(result, source)
-            embed = discord.Embed(title='패치노트 질문', description=answer,
+            embed = discord.Embed(title=embed_title('패치노트 질문'), description=answer,
                                   url=post_url(post), color=CATEGORY_COLORS['update'])
             embed.add_field(name='확인한 패치', value=patch_display_title(post)[:1000], inline=False)
             for quote in quotes:
@@ -5554,7 +5559,7 @@ async def nickname_trace_command(
         key=("POSSIBLE", "HIGH", "VERY HIGH").index,
     )
     await interaction.response.send_message(
-        "**닉네임 변경 기록**\n"
+        f"**{embed_title('닉네임 변경 기록')}**\n"
         + " → ".join(discord.utils.escape_markdown(name) for name in names)
         + f"\n현재 닉네임: **{discord.utils.escape_markdown(names[-1])}**"
         + f"\n신뢰도: **{confidence}**",
@@ -5690,7 +5695,7 @@ async def ranking_command(
     )
     filename = "ranking-card.png"
     await interaction.followup.send(
-        content="최신 조회에 실패하여 기존 기록을 표시합니다. 카드의 기록 날짜를 확인해주세요." if refresh_failed else None,
+        content=f"**{embed_title('캐릭터 랭킹')}**" + ("\n최신 조회에 실패하여 기존 기록을 표시합니다. 카드의 기록 날짜를 확인해주세요." if refresh_failed else ""),
         file=discord.File(
             ranking_image,
             filename=filename,
@@ -5834,11 +5839,10 @@ def build_event_notice_embed(kind, entries, uncertain, now_timestamp):
         description = f"확인한 공식 공지에 진행 중이거나 예정된 {label} 이벤트가 없습니다."
     if uncertain:
         description = "일부 공식 공지의 일정 형식을 확인하지 못했습니다. 이벤트 유무는 원문을 확인해주세요."
-    embed = discord.Embed(title=title, description=f"{description}\n[공식 공지 확인]({SITE_URL})", color=color)
+    embed = discord.Embed(title=embed_title(title), description=f"{description}\n[공식 공지 확인]({SITE_URL})", color=color)
     if kind == "cube_sale":
-        # 제목 앞에 실제 큐브 그림을 표시하도록 기존 큐브 이미지 주소를 재사용합니다.
-        embed.title = None
-        embed.set_author(name=label, icon_url=str(discord.PartialEmoji.from_str(BONUS_CUBE_EMOJI).url))
+        # 큐브 아이콘을 일반 제목에 넣어 다른 명령어와 같은 크기로 표시합니다.
+        embed.title = embed_title(f"{BONUS_CUBE_EMOJI} {label}")
     for entry in active[:10]:
         status = "진행 중" if entry["start"] <= now_timestamp else "예정"
         embed.add_field(name=f"{status} · {entry['title']}"[:256], value=(
@@ -5926,7 +5930,7 @@ async def alert_settings_command(interaction: discord.Interaction) -> None:
         return
 
     lines = [
-        "**이 서버의 알림 설정**",
+        f"**{embed_title('알림 설정')}**",
         "현재 서버에서 확인 가능한 채널만 표시합니다. ON은 저장된 설정이며 전송 성공을 보장하지 않습니다.",
     ]
     for kind, label in (
@@ -7205,7 +7209,7 @@ class MapleNewsBot(commands.Bot):
         # 홈페이지 점검 ID를 같은 점검의 기준으로 사용합니다. 정보가 없으면 UTC 날짜별로 제한합니다.
         cycle = (f"maintenance:{watch['post_id']}" if watch.get('post_id')
                  else 'discord-day:' + row['created_at'][:10])
-        embed = discord.Embed(title="메이플스토리 서버 오픈", color=0x2ECC71,
+        embed = discord.Embed(title=embed_title("메이플스토리 서버 오픈"), color=0x2ECC71,
                               description="**메이플스토리 서버가 열렸습니다.**\n공식 공지에서 접속 재개를 확인했습니다.",
                               url=f"{CHANNEL_URL}/{row['id']}")
         embed.set_author(name="MapleStory | SERVER STATUS")
@@ -7324,9 +7328,10 @@ class MapleNewsBot(commands.Bot):
         update_alert_channel(self.alert_channels, info_type, channel.id, enabled)
         self.persist_state()
         await interaction.followup.send(
-            f"{channel.mention}의 {label} 자동 갱신을 "
-            f"{'켰습니다' if enabled else '껐습니다'}.",
-            ephemeral=True,
+            embed=discord.Embed(title=embed_title(f"{label} 설정"),
+                description=f"채널　{channel.mention}\n자동 갱신　**{'사용 중' if enabled else '사용 안 함'}**\n\n설정이 저장됐습니다.",
+                color=CALCULATOR_COLOR),
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
         )
 
     async def configure_alert_channel(
@@ -7457,10 +7462,12 @@ class MapleNewsBot(commands.Bot):
             else:
                 self.server_alert_roles.pop(str(channel.id), None)
         self.persist_state()
-        role_text = f" ({role.mention} 멘션)" if enabled and role is not None else ""
         await interaction.followup.send(
-            f"{channel.mention}의 {alert_name}을 {'켰습니다' if enabled else '껐습니다'}{role_text}.",
-            ephemeral=True,
+            embed=discord.Embed(title=embed_title(f"{alert_name} 설정"),
+                description=f"채널　{channel.mention}\n알림 상태　**{'사용 중' if enabled else '사용 안 함'}**"
+                + (f"\n멘션 역할　{role.mention}" if enabled and role is not None else "")
+                + "\n\n설정이 저장됐습니다.", color=CALCULATOR_COLOR),
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
         )
 
     async def _poll_page_revisions(
@@ -7534,7 +7541,7 @@ class MapleNewsBot(commands.Bot):
                 link_label = '공식 Known Issues 확인'
             # 원문 링크도 본문 끝에서 빈 줄 하나로 구분해 확인한 시안과 맞춥니다.
             description = summary.rstrip() + f"\n\n[{link_label}]({revision['url']})"
-            embed = discord.Embed(title=heading, description=description,
+            embed = discord.Embed(title=embed_title(heading), description=description,
                                   url=revision['url'], color=CATEGORY_COLORS['update'])
             embed.set_author(name=author)
             for channel_id in targets.intersection(channels):
@@ -7818,7 +7825,7 @@ class MapleNewsBot(commands.Bot):
                 # 한국어 요약을 한 번만 생성하고 모든 공지 채널에서 공유합니다.
                 korean_summary = format_news_summary(await self.summarize(detail))
                 embed = discord.Embed(
-                    title=post["name"],
+                    title=embed_title(post["name"]),
                     description=korean_summary[:4_096],
                     url=post_url(post),
                     # 카테고리마다 다른 색을 써서 공지 성격을 한눈에 구분합니다.

@@ -542,7 +542,7 @@ class NewsFilteringTests(unittest.TestCase):
             datetime(2026, 9, 3, 6, 32, tzinfo=timezone.utc)
         )
 
-        self.assertEqual(embed.title, "· 서버시간")
+        self.assertEqual(embed.title, '<:ppojji_star_small:1548846409791574129> 서버시간')
         self.assertIn("9월 3일 AM 06:32", embed.description)
         self.assertEqual(
             [field.name for field in embed.fields],
@@ -2883,7 +2883,7 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
         send_kwargs = interaction.response.send_message.await_args.kwargs
         self.assertIs(send_kwargs["file"], image_file)
         self.assertEqual(
-            send_kwargs["embed"].image.url,
+            send_kwargs["embed"].thumbnail.url,
             "attachment://cash-shop-transfer.png",
         )
 
@@ -2970,7 +2970,7 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
         send_kwargs = channel.send.await_args.kwargs
         self.assertIs(send_kwargs["file"], image_file)
         self.assertEqual(
-            send_kwargs["embed"].image.url,
+            send_kwargs["embed"].thumbnail.url,
             "attachment://cash-shop-transfer.png",
         )
         self.assertEqual(event["notified_channel_ids"], [111])
@@ -3100,20 +3100,20 @@ class TrafficLightTests(unittest.IsolatedAsyncioTestCase):
 
     def test_selected_boss_five_percent_requirement(self) -> None:
         embed = maple_bot.build_traffic_light_embed("발드릭스", "하드")
-        self.assertEqual(embed.title, "🚦 하드 발드릭스 5%")
+        self.assertEqual(embed.title, '<:ppojji_star_small:1548846409791574129> 하드 발드릭스 5%')
         self.assertIn("**총 체력**　20,270,000,000,000K", embed.description)
         self.assertIn("**5% 최소 피해량**　1,010,000,000,000K", embed.description)
 
     def test_black_mage_below_group_shows_all_seven_bosses(self) -> None:
         embed = maple_bot.build_traffic_light_embed("검밑")
-        self.assertEqual(embed.title, "🚦 검밑 보스 5%")
+        self.assertEqual(embed.title, '<:ppojji_star_small:1548846409791574129> 검밑 보스 5%')
         for boss in ("스우", "데미안", "루시드", "윌", "더스크", "진 힐라", "듄켈"):
             self.assertIn(boss, embed.description)
         self.assertIsNone(embed.thumbnail.url)
 
     def test_single_difficulty_and_thumbnail_rendering(self) -> None:
         embed = maple_bot.build_traffic_light_embed("헬럭스", "헬")
-        self.assertEqual(embed.title, "🚦 헬럭스 5%")
+        self.assertEqual(embed.title, '<:ppojji_star_small:1548846409791574129> 헬럭스 5%')
         embed = maple_bot.build_traffic_light_embed("루시드", "하드")
         self.assertEqual(embed.thumbnail.url, "attachment://boss-lucid.webp")
 
@@ -3252,7 +3252,7 @@ class ExtremeGrowthPotionTests(unittest.TestCase):
 
 
 class ExtremeGrowthPotionCommandTests(unittest.IsolatedAsyncioTestCase):
-    async def test_result_uses_custom_egp_emoji_without_table_footer(self) -> None:
+    async def test_result_preserves_egp_emoji_without_table_footer(self) -> None:
         interaction = SimpleNamespace(
             response=SimpleNamespace(send_message=AsyncMock())
         )
@@ -3385,8 +3385,8 @@ class GrowthPotionCommandTests(unittest.IsolatedAsyncioTestCase):
 
         calculator.assert_called_once_with(potion.value, 245, 0, 1, False, False)
         embed = interaction.response.send_message.await_args.kwargs["embed"]
-        self.assertIn("하이퍼 버닝**　미적용", embed.description)
-        self.assertIn("비욘드 버닝**　미적용", embed.description)
+        self.assertIn("하이퍼 버닝　미적용", embed.description)
+        self.assertIn("비욘드 버닝　미적용", embed.description)
 
     async def test_korean_burning_choices_are_converted_to_boolean(self) -> None:
         interaction = SimpleNamespace(
@@ -3416,8 +3416,8 @@ class GrowthPotionCommandTests(unittest.IsolatedAsyncioTestCase):
         )
         embed = interaction.response.send_message.await_args.kwargs["embed"]
         self.assertIn("<:MGP:1536686939049168967>", embed.title)
-        self.assertIn("하이퍼 버닝**　적용", embed.description)
-        self.assertIn("비욘드 버닝**　미적용", embed.description)
+        self.assertIn("하이퍼 버닝　적용", embed.description)
+        self.assertIn("비욘드 버닝　미적용", embed.description)
 
 
 class ExpCouponTests(unittest.IsolatedAsyncioTestCase):
@@ -3487,7 +3487,7 @@ class ExpCouponTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ExpCouponCommandTests(unittest.IsolatedAsyncioTestCase):
-    async def test_result_uses_selected_coupon_emoji(self) -> None:
+    async def test_result_preserves_selected_coupon_emoji(self) -> None:
         for coupon, emoji in {"EXP 교환권": "<:EV:1536691867293323274>",
                               "상급 EXP 교환권": "<:AEV:1536691857692565554>"}.items():
             panel = maple_bot.ExpCouponView(123, "X")
@@ -3495,7 +3495,7 @@ class ExpCouponCommandTests(unittest.IsolatedAsyncioTestCase):
             interaction = SimpleNamespace(response=SimpleNamespace(edit_message=AsyncMock()))
             await panel.calculate.callback(interaction)
             embed = interaction.response.edit_message.await_args.kwargs["embed"]
-            self.assertEqual(embed.title, f"{emoji} {coupon} 계산기")
+            self.assertEqual(embed.title, f"{emoji} EXP 교환권 계산")
             panel.stop()
 
 
@@ -3559,7 +3559,7 @@ class EpicDungeonTests(unittest.TestCase):
 
 
 class EpicDungeonCommandTests(unittest.IsolatedAsyncioTestCase):
-    async def test_result_uses_selected_dungeon_emoji(self) -> None:
+    async def test_result_preserves_selected_dungeon_emoji(self) -> None:
         expected_emojis = {
             "하이마운틴": "<:HMountain:1536686575558205540>",
             "앵글러컴퍼니": "<:Angler:1536686640045756446>",
@@ -3723,8 +3723,8 @@ class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
 
         embed = interaction.response.send_message.await_args.kwargs["embed"]
         self.assertIn("아케인 심볼 · 소멸의 여로", embed.description)
-        self.assertIn("현재 성장치**　10 / 12", embed.description)
-        self.assertIn("엘라노스**　적용", embed.description)
+        self.assertIn("현재 성장치　10 / 12", embed.description)
+        self.assertIn("엘라노스　적용", embed.description)
         self.assertIn("이번 주 주간퀘 함", embed.description)
         self.assertIn("이번 주 주간퀘 안 함", embed.description)
 
@@ -3799,10 +3799,10 @@ class SymbolCalculatorCommandTests(unittest.IsolatedAsyncioTestCase):
         )
         first_embed = interactions[0].response.send_message.await_args.kwargs["embed"]
         last_embed = interactions[2].response.send_message.await_args.kwargs["embed"]
-        self.assertIn("**보약**　없음", first_embed.description)
-        self.assertIn("**엘라노스**　미적용", first_embed.description)
-        self.assertIn("**보약**　4레벨", last_embed.description)
-        self.assertIn("**엘라노스**　적용", last_embed.description)
+        self.assertIn("보약　없음", first_embed.description)
+        self.assertIn("엘라노스　미적용", first_embed.description)
+        self.assertIn("보약　4레벨", last_embed.description)
+        self.assertIn("엘라노스　적용", last_embed.description)
 
 
 class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
@@ -3840,7 +3840,7 @@ class NewsPollingTests(unittest.IsolatedAsyncioTestCase):
             await maple_bot.patch_command.callback(interaction)
 
         interaction.followup.send.assert_awaited_once_with(
-            expected, file=files[0], suppress_embeds=True
+            "**<:ppojji_star_small:1548846409791574129> 패치노트**\n" + expected, file=files[0], suppress_embeds=True
         )
         self.assertEqual(file_class.call_count, 1)
         self.assertEqual(file_class.call_args_list[0].kwargs["filename"], "patch-thumbnail.jpg")
@@ -4074,7 +4074,7 @@ class CommandStatsTests(unittest.IsolatedAsyncioTestCase):
         await command_stats_command.callback(allowed)
         self.assertEqual(
             allowed.response.send_message.await_args.kwargs["embed"].title,
-            "명령어 사용 통계",
+            '<:ppojji_star_small:1548846409791574129> 명령어 사용 통계',
         )
         self.assertTrue(allowed.response.send_message.await_args.kwargs["ephemeral"])
 
@@ -4328,7 +4328,7 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         message = interaction.response.send_message.await_args.kwargs
         self.assertEqual(maple_bot.familiar_command.name, "familiar")
         self.assertNotIn("embed", message)
-        self.assertEqual(message["content"], "누적 횟수: 1회")
+        self.assertEqual(message["content"], "**<:ppojji_star_small:1548846409791574129> 퍼밀리어 시뮬레이터**\n누적 사용　**1회**")
         self.assertEqual(message["file"].filename, "familiar-result.png")
         self.assertEqual(message["view"].children[0].label, "다시 뽑기")
         self.assertIsNone(message["view"].children[0].emoji)
@@ -4394,10 +4394,10 @@ class FamiliarSimulatorTests(unittest.IsolatedAsyncioTestCase):
         await view.children[1].callback(interaction)
 
         message = interaction.response.send_message.await_args
-        self.assertIn("공격력 +6%", message.args[0])
-        self.assertIn("상위 `12.34%`", message.args[0])
-        self.assertIn("10,000회", message.args[0])
-        self.assertIn("내 1회 이내 달성 확률", message.args[0])
+        self.assertIn("공격력 +6%", message.kwargs["embed"].description)
+        self.assertIn("상위 **12.34%**", message.kwargs["embed"].description)
+        self.assertIn("10,000회", message.kwargs["embed"].description)
+        self.assertIn("1회 내 달성 확률", message.kwargs["embed"].description)
         self.assertTrue(message.kwargs["ephemeral"])
 
     async def test_other_user_can_check_expectation_but_not_reroll(self) -> None:
@@ -4860,7 +4860,7 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
         await known_issues_command.callback(interaction)
 
         embed = interaction.followup.send.await_args.kwargs["embed"]
-        self.assertEqual(embed.title, "[ 알려진 이슈 ]")
+        self.assertEqual(embed.title, '<:ppojji_star_small:1548846409791574129> 알려진 이슈')
         self.assertIn(article["html_url"], embed.description)
         self.assertIn("v.271", embed.description)
         self.assertIn("현재 알려진 문제", embed.description)
@@ -4911,7 +4911,7 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
 
         arguments = interaction.response.send_message.await_args
         embed = arguments.kwargs["embed"]
-        self.assertEqual(embed.title, "[ 캐시샵 업데이트 ]")
+        self.assertEqual(embed.title, '<:ppojji_star_small:1548846409791574129> 캐시샵 업데이트')
         self.assertIn("https://example.com/latest-cash-shop", embed.description)
         self.assertNotIn("masonym.dev", embed.description)
         self.assertIn("cash-shop)\n\n· 블랙 프라이데이", embed.description)
@@ -4928,14 +4928,14 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
             datetime(2026, 9, 12, 12, tzinfo=timezone.utc)
         )
 
-        self.assertEqual(embed.title, "[ 캐시샵 판매 일정 ]")
-        self.assertIn("v.271 클라이언트 예약 데이터", embed.description)
+        self.assertEqual(embed.title, '<:ppojji_star_small:1548846409791574129> 캐시샵 판매 일정')
+        self.assertIn("v.271 · 진행 중·예정 판매", embed.description)
         self.assertIn("공식 판매 확정 전", embed.description)
         field_names = [field.name for field in embed.fields]
         field_values = "\n".join(field.value for field in embed.fields)
-        self.assertEqual(field_names[0], "🟢 진행 중")
-        self.assertIn("<t:1788962400:F> ~ <t:1791417540:F>", field_values)
-        self.assertIn("<t:1791360000:F> ~ <t:1791964800:F>", field_values)
+        self.assertEqual(field_names[0], "진행 중")
+        self.assertIn("시작: <t:1788962400:F>\n종료: <t:1791417540:F>", field_values)
+        self.assertIn("시작: <t:1791360000:F>\n종료: <t:1791964800:F>", field_values)
         self.assertIn("시그니처 스타일 컬렉션", field_values)
         self.assertIn("바이올렛 큐브", field_values)
         self.assertTrue(all(len(field.value) <= 1024 for field in embed.fields))
@@ -5002,7 +5002,7 @@ class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
         current_embed = current_interaction.response.send_message.await_args.kwargs[
             "embed"
         ]
-        self.assertEqual(current_embed.title, "☀️ 이번 주 썬데이 메이플 ☀️")
+        self.assertEqual(current_embed.title, '<:ppojji_star_small:1548846409791574129> 썬데이 메이플')
 
     async def test_events_report_none_after_checking_official_posts(self) -> None:
         for command, event_name in (

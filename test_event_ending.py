@@ -30,7 +30,7 @@ class EndingReminderTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("종료 임박", sent["embed"].title)
                 self.assertIn("참여 조건", sent["embed"].description)
                 self.assertIn("<t:200000:R>", sent["embed"].description)
-                self.assertEqual(sent["embed"].image.url, "attachment://" + maple_bot.CASH_SHOP_TRANSFER_IMAGE_PATH.name)
+                self.assertEqual(sent["embed"].thumbnail.url, "attachment://" + maple_bot.CASH_SHOP_TRANSFER_IMAGE_PATH.name)
                 self.assertIs(sent["file"], attachment.return_value)
                 attachment.return_value.close.assert_called_once()
 

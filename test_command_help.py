@@ -32,3 +32,18 @@ class CommandHelpTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('/공지알림', str(sent.kwargs['embed'].to_dict()))
             else:
                 self.assertNotIn('embed', sent.kwargs)
+
+
+class EmbedTitleLimitTests(unittest.TestCase):
+    def test_long_official_title_fits_without_duplicate_star(self):
+        from embed_style import embed_title, STAR_EMOJI
+        title = embed_title("가" * 300)
+        self.assertLessEqual(len(title), 256)
+        self.assertTrue(title.startswith(STAR_EMOJI + " "))
+        self.assertEqual(embed_title(title), title)
+        self.assertIsNone(embed_title(None))
+
+    def test_existing_custom_emoji_is_preserved_without_a_star(self):
+        from embed_style import embed_title
+        title = "<:HEXA:1534436226751529031> HEXA 강화 계산"
+        self.assertEqual(embed_title(title), title)

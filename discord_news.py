@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from embed_style import embed_title
 import discord
 from translation_corrections import source_glossary
 
@@ -191,7 +192,7 @@ def make_embeds(row, text, pending=False):
     if len(text) > 5400:
         text = '전체 공지는 첨부한 텍스트 파일에서 확인해주세요.'
     chunks = [text[i:i + 2700] for i in range(0, len(text), 2700)] or ['첨부 이미지 공지입니다.']
-    embeds = [discord.Embed(title='MapleStory 공식 Discord 소식' if i == 0 else None,
+    embeds = [discord.Embed(title=embed_title('MapleStory 공식 Discord 소식' if i == 0 else None),
                            description=chunk, url=f"{CHANNEL_URL}/{row['id']}", color=notice_color(row['body']))
               for i, chunk in enumerate(chunks)]
     embeds[0].set_footer(text='번역 준비 중 · 표시 시각 UTC' if pending else '공식 announcements · 표시 시각 UTC')

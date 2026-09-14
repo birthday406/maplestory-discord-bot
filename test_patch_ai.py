@@ -142,7 +142,7 @@ class PatchFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('marked resolved', request['instructions'])
             embed = channel.send.await_args.kwargs['embed']
             self.assertEqual(embed.author.name, 'MapleStory | KNOWN ISSUES UPDATE')
-            self.assertEqual(embed.title, '⚠️ v.271 알려진 문제 추가 수정')
+            self.assertEqual(embed.title, '<:ppojji_star_small:1548846409791574129> v.271 알려진 문제 추가 수정')
             self.assertIn('[공식 Known Issues 확인]', embed.description)
             self.assertEqual(store.pending(), [])
 
@@ -178,7 +178,7 @@ class PatchFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('Do not include a 핵심', request['instructions'])
             embed = ok.send.call_args.kwargs['embed']
             self.assertEqual(embed.author.name, 'MapleStory | PATCH UPDATE')
-            self.assertEqual(embed.title, '📝 v.271 패치노트 추가 수정')
+            self.assertEqual(embed.title, '<:ppojji_star_small:1548846409791574129> v.271 패치노트 추가 수정')
             self.assertIn('bold 변경 전:', request['instructions'])
             self.assertIn('bold 변경 후:', request['instructions'])
             self.assertIn('then one blank line', request['instructions'])
