@@ -15,6 +15,7 @@ polisher-seam-fixed-preview.png
 
 # Runtime data and Python cache files
 state.json
+state.json.pending
 ranking.db
 ranking.db-shm
 ranking.db-wal

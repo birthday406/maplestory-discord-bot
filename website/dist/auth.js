@@ -20,7 +20,7 @@ async function account() {
       return;
     }
     document.querySelector('#account-status').textContent = authInfo.user.name + '님, 로그인되었습니다.';
-    body.innerHTML = '<h2>관리자 권한이 있는 서버</h2><p>서버를 선택해 채널과 현재 설정을 확인하세요. 이 화면에서는 설정을 변경하지 않습니다.</p><div id="real-guilds">목록을 불러오는 중…</div><button id="logout">로그아웃</button>';
+    body.innerHTML = '<h2>관리자 권한이 있는 서버</h2><p>서버를 선택해 채널별 설정을 확인하세요. 알림과 시간·환율 채널 설정을 변경할 수 있습니다.</p><div id="real-guilds">목록을 불러오는 중…</div><button id="logout">로그아웃</button>';
     document.querySelector('#logout').onclick = async () => {
       try {
         const out = await fetch('/auth/logout', {method:'POST', headers:{'X-CSRF-Token':authInfo.csrf}});
@@ -68,28 +68,99 @@ async function showGuild(guild, connected) {
     }
     const data = await response.json();
     if (!root.contains(content)) return;
-    status.textContent='현재 봇 설정 · 읽기 전용 · 확인 '+new Date(data.checkedAt).toLocaleString();
+    status.textContent='현재 봇 설정 · 확인 '+new Date(data.checkedAt).toLocaleString();
     if (!data.channels.length) { content.textContent='표시할 텍스트·음성 채널이 없습니다.'; return; }
-    const label = document.createElement('label'); label.textContent='채널 선택'; label.htmlFor='live-channel';
-    const select = document.createElement('select'); select.id='live-channel';
-    for (const channel of data.channels) {
-      const option = document.createElement('option'); option.value=channel.id;
-      option.textContent=(channel.type==='voice'?'◷ ':'# ')+channel.name; select.append(option);
-    }
-    const details=document.createElement('div'); details.className='setting-block live-details';
-    content.append(label,select,details);
-    function draw() {
-      const channel=data.channels.find(c=>c.id===select.value); details.replaceChildren();
-      const title=document.createElement('h2'); title.textContent='사용 중인 기능'; details.append(title);
-      for (const text of (channel.enabled.length?channel.enabled:['이 채널에 설정된 기능이 없습니다.'])) {
-        const line=document.createElement('p'); line.textContent=text; details.append(line);
+    // 알림 종류마다 채널을 독립적으로 선택하며, 다른 카드의 미저장 입력은 유지합니다.
+    const hints={sunny_day:'ON: 진행 중인 썬데이를 바로 전송합니다. OFF: 이 채널의 기존 당일 메시지도 삭제합니다.',sunny_list:'ON으로 저장하면 보관된 썬데이 목록을 바로 전송합니다.',server:'공식 Game is up 안내가 올라오면 선택한 역할을 멘션합니다. 저장 시에는 멘션하지 않습니다.',exchange_log:'ON으로 저장하면 현재 환율 기록을 바로 전송합니다.',info_time:'ON: 음성 채널 이름을 시간으로 바꾸고 자동 갱신합니다. OFF: 갱신만 중단합니다.',info_utc:'ON: 음성 채널 이름을 UTC 시간으로 바꾸고 자동 갱신합니다. OFF: 갱신만 중단합니다.',info_exchange:'ON: 음성 채널 이름을 환율로 바꾸고 자동 갱신합니다. OFF: 갱신만 중단합니다.'};
+    const introduction=document.createElement('p');
+    introduction.textContent='각 기능에서 받을 채널을 선택하고 저장하세요. 선택한 채널에만 적용되며, 다른 채널의 알림은 그대로 유지됩니다.';
+    content.append(introduction);
+    const cards=[];
+    function refreshSummaries() {
+      for(const card of cards) {
+        const enabled=card.channels.filter(c=>c.settings?.[card.kind]);
+        card.summary.textContent='사용 중: '+(enabled.length?enabled.map(c=>(c.type==='voice'?'◷ ':'# ')+c.name).join(', '):'없음');
+        for(const option of card.select.options) {
+          const channel=card.channels.find(c=>c.id===option.value);
+          if(channel) option.textContent=(channel.type==='voice'?'◷ ':'# ')+channel.name+(channel.settings?.[card.kind]?' · 사용 중':'');
+        }
       }
-      if(channel.mentionRole) { const line=document.createElement('p'); line.textContent='서버 오픈 멘션 역할: @'+channel.mentionRole; details.append(line); }
-      const required = channel.type==='voice' ? [['view','채널 보기'],['manage','채널 관리']] : [['view','채널 보기'],['send','메시지 보내기'],['embed','링크 첨부'],['attach','파일 첨부']];
-      const missing=required.filter(([key])=>!channel.permissions[key]).map(([,label])=>label);
-      const permission=document.createElement('p'); permission.textContent=missing.length?'샤벳의 부족한 권한: '+missing.join(' · '):'샤벳의 기본 채널 권한이 준비되어 있습니다.';
-      details.append(permission);
     }
-    select.onchange=draw; draw();
+    for(const [kind,settingLabel] of Object.entries(data.settingLabels || {news:'공지 알림'})) {
+      const channels=data.channels.filter(c=>(c.type==='voice')===kind.startsWith('info_'));
+      const box=document.createElement('fieldset');box.className='setting-block feature-setting';
+      const title=document.createElement('h2');title.textContent=settingLabel;
+      const summary=document.createElement('p');summary.className='feature-summary';
+      const hint=document.createElement('p');hint.className='feature-hint';hint.textContent=hints[kind] || '다음 알림부터 적용됩니다. 과거 알림은 다시 보내지 않습니다.';
+      const controls=document.createElement('div');controls.className='feature-controls';
+      const channelLabel=document.createElement('label');channelLabel.textContent=kind.startsWith('info_')?'표시할 음성 채널':'알림 받을 채널';channelLabel.htmlFor='channel-'+kind;
+      const select=document.createElement('select');select.id='channel-'+kind;
+      const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent=channels.length?'채널 선택':'선택할 수 있는 채널 없음';select.append(placeholder);
+      for(const channel of channels){const option=document.createElement('option');option.value=channel.id;select.append(option);}
+      select.value=channels.find(c=>c.settings?.[kind])?.id || '';
+      channelLabel.append(select);
+      const stateLabel=document.createElement('label');stateLabel.className='feature-state';stateLabel.htmlFor='toggle-'+kind;
+      const toggle=document.createElement('input');toggle.id='toggle-'+kind;toggle.type='checkbox';
+      stateLabel.append(toggle,document.createTextNode('알림 사용'));
+      if(kind.startsWith('info_'))stateLabel.lastChild.textContent='자동 갱신';
+      const roleLabel=document.createElement('label');roleLabel.textContent='멘션 역할';roleLabel.htmlFor='role-'+kind;
+      const roles=document.createElement('select');roles.id='role-'+kind;
+      const empty=document.createElement('option');empty.value='';empty.textContent='역할 선택';roles.append(empty);
+      for(const role of data.roles || []){const option=document.createElement('option');option.value=role.id;option.textContent='@'+role.name;roles.append(option);}
+      roleLabel.append(roles);
+      const save=document.createElement('button');save.className='primary';save.textContent='저장';
+      const feedback=document.createElement('p');feedback.setAttribute('role','status');
+      const permission=document.createElement('p');permission.className='feature-permission';
+      function update() {
+        const channel=channels.find(c=>c.id===select.value);
+        const current=channel?.settings?.[kind] || false;
+        roles.disabled=!toggle.checked || !channel;
+        toggle.disabled=!channel;
+        save.disabled=data.readOnly || !channel || (toggle.checked===current && (kind!=='server' || !toggle.checked || roles.value===(channel.roleId||''))) || (kind==='server' && toggle.checked && !roles.value);
+      }
+      function selectChannel() {
+        const channel=channels.find(c=>c.id===select.value);
+        toggle.checked=channel?.settings?.[kind] || false;
+        roles.value=channel?.roleId || '';
+        feedback.textContent='';
+        const required=kind.startsWith('info_')?[['view','채널 보기'],['manage','채널 관리']]:[['view','채널 보기'],['send','메시지 보내기'],['embed','링크 첨부']];
+        if(['sunny_day','sunny_list','cash_transfer','ursus'].includes(kind))required.push(['attach','파일 첨부']);
+        const missing=channel?required.filter(([key])=>!channel.permissions[key]).map(([,label])=>label):[];
+        permission.textContent=missing.length?'부족한 봇 권한: '+missing.join(' · '):'';
+        update();
+      }
+      select.onchange=selectChannel;
+      toggle.onchange=()=>{feedback.textContent='';update();};
+      roles.onchange=()=>{feedback.textContent='';update();};
+      save.onclick=async()=>{
+        const channel=channels.find(c=>c.id===select.value);
+        if(!channel || save.disabled)return;
+        const next=toggle.checked;
+        const payload={channelId:channel.id,enabled:next,previous:channel.settings?.[kind] || false};
+        if(kind==='server')Object.assign(payload,{roleId:next?roles.value:null,previousRoleId:channel.roleId});
+        // 한 번의 저장 클릭으로 적용합니다. 전송 중에는 중복 입력을 막습니다.
+        for(const card of cards)card.box.disabled=true;
+        back.disabled=true;feedback.textContent='저장 중…';
+        try {
+          const response=await fetch('/api/guilds/'+encodeURIComponent(guild.id)+'/alerts/'+encodeURIComponent(kind),{method:'PATCH',headers:{'Content-Type':'application/json','X-CSRF-Token':authInfo.csrf},body:JSON.stringify(payload)});
+          if(!root.contains(content))return;
+          if(!response.ok){
+            const messages={400:'채널·역할 또는 다른 시간 표시 설정을 확인해주세요.',401:'로그인이 만료됐어요. 다시 로그인해주세요.',403:'관리자 또는 봇의 채널 권한을 확인해주세요.',409:'다른 곳에서 설정이 바뀌었어요. 서버 목록으로 돌아가 다시 조회해주세요.',500:'저장 결과를 확인하지 못했습니다. 다시 조회해주세요.',503:'봇이 연결 중이거나 저장 기능이 아직 적용되지 않았습니다.'};
+            feedback.textContent=messages[response.status]||'저장 결과를 다시 조회해주세요.';save.disabled=true;return;
+          }
+          const result=await response.json();
+          channel.settings ||= {};channel.settings[kind]=result.enabled;
+          if(kind==='server'){channel.roleId=payload.roleId;channel.mentionRole=next?roles.selectedOptions[0].textContent.replace(/^@/,''):null;}
+          if(result.channelName)channel.name=result.channelName;
+          refreshSummaries();update();
+          feedback.textContent=result.warning || channel.name+' · '+(result.enabled?'ON':'OFF')+' 저장 완료';
+        } catch {feedback.textContent='연결이 끊겨 저장 결과를 확인하지 못했습니다. 다시 조회해주세요.';save.disabled=true;}
+        finally {for(const card of cards)card.box.disabled=false;back.disabled=false;}
+      };
+      controls.append(channelLabel,stateLabel);if(kind==='server')controls.append(roleLabel);controls.append(save);
+      box.append(title,summary,hint,controls,permission,feedback);content.append(box);
+      cards.push({kind,channels,box,summary,select});selectChannel();
+    }
+    refreshSummaries();
   } catch { if(root.contains(content)) status.textContent='연결이 끊겼어요. 서버 목록에서 다시 선택해주세요.'; }
 }

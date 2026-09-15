@@ -27,7 +27,7 @@ def is_admin(guild):
         return False
 
 
-def create_app(client_id="", client_secret="", discord_request=None, *, guild_snapshot=None):
+def create_app(client_id="", client_secret="", discord_request=None, *, guild_snapshot=None, save_news=None, save_alert=None):
     sessions, pending = {}, {}
 
     async def call(method, path, *, token=None, data=None):
@@ -153,6 +153,48 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
         response.del_cookie("sherbet_session")
         return response
 
+    async def update_news(request):
+        item = session(request)
+        if request.headers.get('Origin') != ORIGIN or not secrets.compare_digest(request.headers.get('X-CSRF-Token',''), item['csrf']):
+            raise web.HTTPForbidden(text='저장 요청을 확인할 수 없습니다. 다시 로그인해주세요.')
+        gid = request.match_info['guild_id']
+        if not gid.isascii() or not gid.isdigit() or len(gid)>20:
+            raise web.HTTPBadRequest(text='잘못된 서버입니다.')
+        if request.content_type != 'application/json':
+            raise web.HTTPBadRequest(text='잘못된 요청 형식입니다.')
+        try:
+            data = await request.json()
+        except ValueError:
+            raise web.HTTPBadRequest(text='잘못된 요청 형식입니다.')
+        kind = request.match_info.get('kind', 'news')
+        fields = {'channelId','enabled','previous'}
+        if kind == 'server':
+            fields |= {'roleId','previousRoleId'}
+        if not isinstance(data,dict) or set(data) != fields:
+            raise web.HTTPBadRequest(text='공지 채널과 상태를 확인해주세요.')
+        cid = data['channelId']
+        if not isinstance(cid,str) or not cid.isascii() or not cid.isdigit() or len(cid)>20 or type(data['enabled']) is not bool or type(data['previous']) is not bool:
+            raise web.HTTPBadRequest(text='잘못된 설정값입니다.')
+        if not any(g['id']==gid for g in await admin_guilds(item)):
+            raise web.HTTPForbidden(text='이 서버의 관리자 권한을 확인할 수 없습니다.')
+        from channel_settings import WEB_SETTINGS
+        if kind not in WEB_SETTINGS:
+            raise web.HTTPBadRequest(text='지원하지 않는 설정입니다.')
+        if kind == 'server':
+            for key in ('roleId','previousRoleId'):
+                value=data[key]
+                if value is not None and (not isinstance(value,str) or not value.isascii() or not value.isdigit() or len(value)>20):
+                    raise web.HTTPBadRequest(text='잘못된 역할입니다.')
+            if save_alert is None:
+                raise web.HTTPServiceUnavailable(text='설정 저장이 연결되지 않았습니다.')
+            return web.json_response(await save_alert(int(gid),int(cid),data['enabled'],data['previous'],kind,
+                int(data['roleId']) if data['roleId'] else None, int(data['previousRoleId']) if data['previousRoleId'] else None))
+        if save_alert is not None:
+            return web.json_response(await save_alert(int(gid),int(cid),data['enabled'],data['previous'],kind))
+        if kind != 'news' or save_news is None:
+            raise web.HTTPServiceUnavailable(text='설정 저장이 연결되지 않았습니다.')
+        return web.json_response(await save_news(int(gid),int(cid),data['enabled'],data['previous']))
+
     async def static(request):
         # 공개 파일만 명시적으로 제공해 서버 코드나 환경 파일이 노출되지 않게 합니다.
         name = request.match_info.get("name", "index.html")
@@ -164,6 +206,8 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
     app.add_routes([web.get("/api/session", status), web.get("/auth/login", login),
                     web.get("/auth/callback", callback), web.get("/api/guilds", guilds),
                     web.get("/api/guilds/{guild_id}", guild_detail),
+                    web.patch("/api/guilds/{guild_id}/news", update_news),
+                    web.patch("/api/guilds/{guild_id}/alerts/{kind}", update_news),
                     web.post("/auth/logout", logout), web.get("/", static), web.get("/{name}", static)])
     return app
 

@@ -6339,7 +6339,9 @@ def save_state(
     command_stats: dict | None = None,
 ) -> None:
     # 봇을 껐다 켜도 중복 알림을 막을 수 있도록 공지 번호를 파일에 저장합니다.
-    STATE_PATH.write_text(
+    # 완성된 파일만 교체해 저장 실패로 기존 설정 파일이 잘리는 것을 방지합니다.
+    pending_path = STATE_PATH.with_name(STATE_PATH.name + ".pending")
+    pending_path.write_text(
         json.dumps(
             {
                 "sent_ids": None if sent_ids is None else sorted(sent_ids)[-500:],
@@ -6367,6 +6369,7 @@ def save_state(
         ),
         encoding="utf-8",
     )
+    os.replace(pending_path, STATE_PATH)
 
 
 class MapleNewsBot(commands.Bot):
@@ -7315,10 +7318,11 @@ class MapleNewsBot(commands.Bot):
             self.maintenance_watch['completed'] = True
             self.persist_state()
 
-    async def delete_sunny_day_message(self, channel: discord.TextChannel) -> None:
+    async def delete_sunny_day_message(self, channel: discord.TextChannel) -> bool:
         # 당일 알림을 끄면 그 채널에 남아 있는 임시 주간 메시지도 함께 제거합니다.
         if self.sunny_sunday is None:
-            return
+            return True
+        completed = True
         for entry in self.sunny_sunday["entries"]:
             message_id = entry["message_ids"].get(str(channel.id))
             if message_id is None:
@@ -7328,228 +7332,134 @@ class MapleNewsBot(commands.Bot):
             except discord.NotFound:
                 pass
             except discord.HTTPException:
+                completed = False
                 logging.exception(
                     "Failed to delete Sunny Sunday message %s.", message_id
                 )
                 continue
             del entry["message_ids"][str(channel.id)]
+        return completed
 
-    async def configure_info_channel(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.VoiceChannel,
-        info_type: str,
-        enabled: bool,
-    ) -> None:
-        """관리자가 고른 음성 채널을 시간·UTC 또는 환율 표시 채널로 설정합니다."""
-        if interaction.guild is None or not interaction.permissions.administrator:
-            await interaction.response.send_message(
-                "이 설정은 서버 관리자만 변경할 수 있습니다.", ephemeral=True
-            )
-            return
-        if channel.guild.id != interaction.guild.id:
-            await interaction.response.send_message(
-                "현재 서버의 음성 채널만 선택할 수 있습니다.", ephemeral=True
-            )
-            return
-
-        label = {
-            INFO_TIME: "시간 채널",
-            INFO_UTC: "UTC 채널",
-            INFO_EXCHANGE: "환율 채널",
-        }[info_type]
-        already_enabled = channel.id in self.alert_channels[info_type]
-        if enabled == already_enabled:
-            state = "이미 켜져" if enabled else "이미 꺼져"
-            await interaction.response.send_message(
-                f"{channel.mention}의 {label} 자동 갱신이 {state} 있습니다.",
-                ephemeral=True,
-            )
-            return
-
-        if enabled:
-            other_types = {INFO_TIME, INFO_UTC, INFO_EXCHANGE} - {info_type}
-            if any(channel.id in self.alert_channels[item] for item in other_types):
-                await interaction.response.send_message(
-                    "같은 채널에 시간·UTC·환율을 동시에 표시할 수 없습니다.",
-                    ephemeral=True,
-                )
-                return
-            bot_member = channel.guild.me
-            permissions = channel.permissions_for(bot_member) if bot_member else None
-            if permissions is None or not (
-                permissions.view_channel and permissions.manage_channels
-            ):
-                await interaction.response.send_message(
-                    "선택한 채널에서 봇의 채널 보기·채널 관리 권한을 확인해주세요.",
-                    ephemeral=True,
-                )
-                return
-
-        await interaction.response.defer(ephemeral=True)
-        if enabled:
-            try:
-                if info_type == INFO_TIME:
-                    name = format_time_channel_name(datetime.now(timezone.utc))
-                elif info_type == INFO_UTC:
-                    name = format_utc_channel_name(datetime.now(timezone.utc))
-                else:
-                    name = format_exchange_channel_name(
-                        await self.fetch_usd_exchange_rate()
-                    )
-                await channel.edit(name=name, reason=f"{label} 자동 갱신 ON")
-            except (aiohttp.ClientError, discord.HTTPException, asyncio.TimeoutError, TimeoutError, ValueError):
-                logging.exception("Failed to enable %s for channel %s.", label, channel.id)
-                await interaction.followup.send(
-                    "채널 이름을 갱신하지 못했습니다. 권한이나 환율 페이지 상태를 확인해주세요.",
-                    ephemeral=True,
-                )
-                return
-
-        update_alert_channel(self.alert_channels, info_type, channel.id, enabled)
-        self.persist_state()
-        await interaction.followup.send(
-            embed=discord.Embed(title=embed_title(f"{label} 설정"),
-                description=f"채널　{channel.mention}\n자동 갱신　**{'사용 중' if enabled else '사용 안 함'}**\n\n설정이 저장됐습니다.",
-                color=CALCULATOR_COLOR),
-            ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
-        )
-
-    async def configure_alert_channel(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.TextChannel,
-        enabled: bool,
-        alert_type: str,
-        alert_name: str,
-        role: discord.Role | None = None,
-    ) -> None:
-        # Discord 명령 표시 권한과 별개로 실행 순간의 실제 관리자 권한도 검사합니다.
-        if interaction.guild is None or not interaction.permissions.administrator:
-            await interaction.response.send_message(
-                "이 설정은 서버 관리자만 변경할 수 있습니다.", ephemeral=True
-            )
-            return
-        if channel.guild.id != interaction.guild.id:
-            await interaction.response.send_message(
-                "현재 서버의 텍스트 채널만 선택할 수 있습니다.", ephemeral=True
-            )
-            return
-
-        if alert_type == ALERT_SERVER and enabled:
-            if role is None:
-                await interaction.response.send_message(
-                    "서버 오픈 알림을 켤 때는 멘션할 역할을 선택해주세요.", ephemeral=True
-                )
-                return
-            if role.guild.id != interaction.guild.id or role.is_default():
-                await interaction.response.send_message(
-                    "현재 서버의 일반 역할만 선택할 수 있습니다.", ephemeral=True
-                )
-                return
-
-        already_enabled = channel.id in self.alert_channels[alert_type]
-        same_server_role = (
-            alert_type != ALERT_SERVER
-            or not enabled
-            or self.server_alert_roles.get(str(channel.id)) == role.id
-        )
-        if enabled == already_enabled and same_server_role:
-            state = "이미 켜져" if enabled else "이미 꺼져"
-            await interaction.response.send_message(
-                f"{channel.mention}의 {alert_name}이 {state} 있습니다.", ephemeral=True
-            )
-            return
-
-        if enabled:
-            bot_member = channel.guild.me
-            permissions = channel.permissions_for(bot_member) if bot_member else None
-            needs_attachment = alert_type in {
-                ALERT_SUNNY_DAY,
-                ALERT_SUNNY_LIST,
-                ALERT_CASH_TRANSFER,
-                ALERT_URSUS,
-            }
-            if permissions is None or not (
-                permissions.view_channel
-                and permissions.send_messages
-                and permissions.embed_links
-                and (permissions.attach_files or not needs_attachment)
-            ):
-                await interaction.response.send_message(
-                    "선택한 채널에서 봇의 채널 보기·메시지 보내기·링크 첨부"
-                    + ("·파일 첨부" if needs_attachment else "")
-                    + " 권한을 확인해주세요.",
-                    ephemeral=True,
-                )
-                return
-
-        await interaction.response.defer(ephemeral=True)
-        if (
-            enabled
-            and alert_type in {ALERT_SUNNY_DAY, ALERT_SUNNY_LIST}
-            and self.sunny_sunday is not None
-        ):
-            try:
-                if alert_type == ALERT_SUNNY_LIST:
-                    await self.send_sunny_sunday_to_channel(
-                        channel,
-                        f"☀️ {self.sunny_sunday['title']} ☀️",
-                        self.sunny_sunday["entries"],
-                    )
-                elif alert_type == ALERT_SUNNY_DAY:
-                    now_timestamp = int(datetime.now(timezone.utc).timestamp())
-                    entry = current_sunny_sunday_entry(
-                        self.sunny_sunday["entries"], now_timestamp
-                    )
-                    if (
-                        entry is not None
-                        and entry["timestamp"] <= now_timestamp
-                        < entry["timestamp"] + SUNNY_SUNDAY_DURATION_SECONDS
-                    ):
-                        message = await self.send_sunny_sunday_to_channel(
-                            channel, "☀️ 이번 주 Sunny Sunday ☀️", [entry]
-                        )
-                        entry["message_ids"][str(channel.id)] = message.id
-            except discord.HTTPException:
-                await interaction.followup.send(
-                    "선택한 채널에 테스트 알림을 보내지 못했습니다.", ephemeral=True
-                )
-                return
-        elif enabled and alert_type == ALERT_EXCHANGE_LOG:
-            try:
-                self.exchange_log, _ = record_exchange_rate(
-                    self.exchange_log,
-                    await self.fetch_usd_exchange_rate(),
-                    datetime.now(timezone.utc),
-                )
-                message = await channel.send(
-                    embed=build_exchange_rate_log_embed(self.exchange_log)
-                )
-                self.exchange_log["message_ids"][str(channel.id)] = message.id
-            except (aiohttp.ClientError, discord.HTTPException, asyncio.TimeoutError, TimeoutError, ValueError):
-                logging.exception("Failed to enable exchange log for %s.", channel.id)
-                await interaction.followup.send(
-                    "선택한 채널에 환율 기록을 보내지 못했습니다.", ephemeral=True
-                )
-                return
-        elif not enabled and alert_type == ALERT_SUNNY_DAY:
-            await self.delete_sunny_day_message(channel)
-
-        update_alert_channel(self.alert_channels, alert_type, channel.id, enabled)
-        if alert_type == ALERT_SERVER:
+    async def apply_channel_setting(self, channel, kind, enabled, permissions, *,
+                                    role=None, expected=None, previous_role=None):
+        """홈페이지와 Discord가 동일한 검사·저장·즉시 동작을 사용합니다."""
+        from channel_settings import SettingConflict, SIMPLE_ALERTS, set_news_alert
+        if kind not in CHANNEL_SETTING_TYPES:
+            raise ValueError("지원하지 않는 설정입니다.")
+        voice = kind in {INFO_TIME, INFO_UTC, INFO_EXCHANGE}
+        if not isinstance(channel, discord.VoiceChannel if voice else discord.TextChannel):
+            raise ValueError("설정 종류에 맞는 텍스트 또는 음성 채널을 선택해주세요.")
+        # 설정 변경끼리만 순서를 지켜 중복 클릭의 즉시 전송을 막습니다.
+        if not hasattr(self, '_channel_settings_lock'):
+            self._channel_settings_lock = asyncio.Lock()
+        async with self._channel_settings_lock:
+            channels = self.alert_channels[kind]
+            current = channel.id in channels
+            old_role = self.server_alert_roles.get(str(channel.id))
+            if expected is not None and (current != expected or (
+                    kind == ALERT_SERVER and old_role != previous_role)):
+                raise SettingConflict("다른 곳에서 설정이 바뀌었습니다. 다시 조회해주세요.")
             if enabled:
-                self.server_alert_roles[str(channel.id)] = role.id
-            else:
-                self.server_alert_roles.pop(str(channel.id), None)
-        self.persist_state()
-        await interaction.followup.send(
-            embed=discord.Embed(title=embed_title(f"{alert_name} 설정"),
-                description=f"채널　{channel.mention}\n알림 상태　**{'사용 중' if enabled else '사용 안 함'}**"
-                + (f"\n멘션 역할　{role.mention}" if enabled and role is not None else "")
-                + "\n\n설정이 저장됐습니다.", color=CALCULATOR_COLOR),
-            ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
-        )
+                if voice and any(channel.id in self.alert_channels[k] for k in
+                                 {INFO_TIME, INFO_UTC, INFO_EXCHANGE} - {kind}):
+                    raise ValueError("같은 채널에 시간·UTC·환율을 동시에 표시할 수 없습니다.")
+                if kind == ALERT_SERVER and (role is None or role.guild.id != channel.guild.id or role.is_default()):
+                    raise ValueError("서버 오픈 알림에는 현재 서버의 일반 역할을 선택해주세요.")
+                needs_files = kind in {ALERT_SUNNY_DAY, ALERT_SUNNY_LIST, ALERT_CASH_TRANSFER, ALERT_URSUS}
+                if permissions is None or not permissions.view_channel or (
+                        voice and not permissions.manage_channels) or (
+                        not voice and not (permissions.send_messages and permissions.embed_links
+                                           and (not needs_files or permissions.attach_files))):
+                    raise PermissionError("샤벳의 채널 보기·메시지/파일 첨부 또는 채널 관리 권한을 확인해주세요.")
+            new_role = role.id if enabled and kind == ALERT_SERVER else None
+            changed = current != enabled or (kind == ALERT_SERVER and old_role != new_role)
+            result = {'channelId':str(channel.id), 'enabled':enabled, 'changed':changed, 'warning':None}
+            if not changed:
+                return result
+            if kind in SIMPLE_ALERTS:
+                result['changed'] = set_news_alert(self, channel.id, enabled, permissions, kind=kind)
+                return result
+            update_alert_channel(self.alert_channels, kind, channel.id, enabled)
+            if kind == ALERT_SERVER:
+                if new_role is None:
+                    self.server_alert_roles.pop(str(channel.id), None)
+                else:
+                    self.server_alert_roles[str(channel.id)] = new_role
+            try:
+                self.persist_state()
+            except Exception:
+                # 저장 실패 시 알림을 보내지 않으며 메모리 설정도 원래대로 복원합니다.
+                update_alert_channel(self.alert_channels, kind, channel.id, current)
+                if kind == ALERT_SERVER:
+                    if old_role is None:
+                        self.server_alert_roles.pop(str(channel.id), None)
+                    else:
+                        self.server_alert_roles[str(channel.id)] = old_role
+                raise
+            try:
+                if voice and enabled:
+                    if kind == INFO_TIME:
+                        name = format_time_channel_name(datetime.now(timezone.utc))
+                    elif kind == INFO_UTC:
+                        name = format_utc_channel_name(datetime.now(timezone.utc))
+                    else:
+                        name = format_exchange_channel_name(await self.fetch_usd_exchange_rate())
+                    await channel.edit(name=name, reason="홈페이지 또는 명령어에서 자동 갱신 ON")
+                    result['channelName'] = name
+                elif enabled and kind in {ALERT_SUNNY_DAY, ALERT_SUNNY_LIST} and self.sunny_sunday is not None:
+                    if kind == ALERT_SUNNY_LIST:
+                        await self.send_sunny_sunday_to_channel(channel,
+                            f"☀️ {self.sunny_sunday['title']} ☀️", self.sunny_sunday['entries'])
+                    else:
+                        now = int(datetime.now(timezone.utc).timestamp())
+                        entry = current_sunny_sunday_entry(self.sunny_sunday['entries'], now)
+                        if entry is not None and entry['timestamp'] <= now < entry['timestamp'] + SUNNY_SUNDAY_DURATION_SECONDS:
+                            message = await self.send_sunny_sunday_to_channel(channel, "☀️ 이번 주 Sunny Sunday ☀️", [entry])
+                            entry['message_ids'][str(channel.id)] = message.id
+                            self.persist_state()
+                elif enabled and kind == ALERT_EXCHANGE_LOG:
+                    self.exchange_log, _ = record_exchange_rate(self.exchange_log,
+                        await self.fetch_usd_exchange_rate(), datetime.now(timezone.utc))
+                    message = await channel.send(embed=build_exchange_rate_log_embed(self.exchange_log))
+                    self.exchange_log['message_ids'][str(channel.id)] = message.id
+                    self.persist_state()
+                elif not enabled and kind == ALERT_SUNNY_DAY:
+                    if not await self.delete_sunny_day_message(channel):
+                        result['warning'] = "당일 알림은 껐지만 기존 메시지 일부를 삭제하지 못했습니다. 채널의 메시지와 샤벳 권한을 확인해주세요."
+                    self.persist_state()
+            except (aiohttp.ClientError, discord.HTTPException, asyncio.TimeoutError, TimeoutError, ValueError, OSError):
+                logging.exception("Immediate channel setting action failed: %s %s", channel.id, kind)
+                result['warning'] = "설정은 저장됐지만 즉시 전송·이름 변경 또는 후속 기록을 확인하지 못했습니다. 채널을 확인해주세요. 같은 요청을 자동 재전송하지 않습니다."
+            return result
+
+    async def configure_info_channel(self, interaction, channel, info_type, enabled):
+        await self.configure_alert_channel(interaction, channel, enabled, info_type,
+                                           CHANNEL_SETTING_TYPES[info_type])
+
+    async def configure_alert_channel(self, interaction, channel, enabled, alert_type, alert_name, role=None):
+        if interaction.guild is None or not interaction.permissions.administrator:
+            await interaction.response.send_message("이 설정은 서버 관리자만 변경할 수 있습니다.", ephemeral=True)
+            return
+        if channel.guild.id != interaction.guild.id:
+            await interaction.response.send_message("현재 서버의 채널만 선택할 수 있습니다.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        permissions = channel.permissions_for(channel.guild.me) if channel.guild.me else None
+        try:
+            result = await self.apply_channel_setting(channel, alert_type, enabled, permissions, role=role)
+        except (ValueError, PermissionError) as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        except OSError:
+            await interaction.followup.send("저장에 실패했습니다. 기존 설정을 유지합니다.", ephemeral=True)
+            return
+        description = f"채널　{channel.mention}\n상태　**{'사용 중' if enabled else '사용 안 함'}**"
+        if enabled and role is not None:
+            description += f"\n멘션 역할　{role.mention}"
+        description += "\n\n" + (result['warning'] or ("설정이 저장됐습니다." if result['changed'] else "이미 같은 설정입니다."))
+        await interaction.followup.send(embed=discord.Embed(title=embed_title(f"{alert_name} 설정"),
+            description=description, color=CALCULATOR_COLOR), ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none())
 
     async def _poll_page_revisions(
         self,

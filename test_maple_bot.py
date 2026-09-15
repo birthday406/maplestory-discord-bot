@@ -3005,7 +3005,7 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
             embed_links=True,
             attach_files=True,
         )
-        channel = SimpleNamespace(
+        channel = Mock(spec=maple_bot.discord.TextChannel,
             id=222,
             guild=guild,
             mention="#sunny",
@@ -3029,6 +3029,7 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 ALERT_SUNNY_DAY: set(),
                 ALERT_SUNNY_LIST: set(),
             },
+            server_alert_roles={},
             sunny_sunday=schedule,
             send_sunny_sunday_to_channel=AsyncMock(
                 return_value=SimpleNamespace(id=1001)
@@ -3037,6 +3038,7 @@ class AlertDeliveryTests(unittest.IsolatedAsyncioTestCase):
             persist_state=Mock(),
         )
 
+        bot.apply_channel_setting = lambda *args, **kwargs: maple_bot.MapleNewsBot.apply_channel_setting(bot, *args, **kwargs)
         await maple_bot.MapleNewsBot.configure_alert_channel(
             bot, interaction, channel, True, ALERT_SUNNY_LIST, "썬데이 목록 알림"
         )
