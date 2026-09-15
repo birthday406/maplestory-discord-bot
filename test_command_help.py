@@ -6,20 +6,35 @@ import maple_bot as bot
 
 
 class CommandHelpTests(unittest.IsolatedAsyncioTestCase):
-    async def test_general_help_shows_all_categories_privately_without_menu(self):
-        interaction = SimpleNamespace(user=SimpleNamespace(id=1), response=SimpleNamespace(send_message=AsyncMock()))
+    async def test_help_opens_privately_and_all_categories_return_home(self):
+        interaction = SimpleNamespace(user=SimpleNamespace(id=1), response=SimpleNamespace(send_message=AsyncMock(), edit_message=AsyncMock()))
         await bot.help_command.callback(interaction)
         sent = interaction.response.send_message.call_args.kwargs
         self.assertTrue(sent['ephemeral'])
-        self.assertLessEqual(len(sent['embed'].fields), 6)
-        self.assertNotIn('/공지알림', str(sent['embed'].to_dict()))
-        self.assertNotIn('/패치질문', str(sent['embed'].to_dict()))
-        self.assertNotIn('view', sent)
-        self.assertIn('/심볼계산기', str(sent['embed'].to_dict()))
-        for rows in bot.HELP_CATEGORIES.values():
+        view = sent['view']
+        self.addCleanup(view.stop)
+        self.assertNotIn('/심볼계산기', sent['embed'].description)
+        self.assertEqual(set(bot.HELP_INTROS), set(bot.HELP_CATEGORIES))
+        self.assertTrue(await view.interaction_check(interaction))
+        stranger = SimpleNamespace(user=SimpleNamespace(id=2), response=SimpleNamespace(send_message=AsyncMock()))
+        self.assertFalse(await view.interaction_check(stranger))
+        self.assertTrue(stranger.response.send_message.call_args.kwargs['ephemeral'])
+        for category, rows in bot.HELP_CATEGORIES.items():
+            view.category._values = [category]
+            await view.category.callback(interaction)
+            result = interaction.response.edit_message.call_args.kwargs
+            text = result['embed'].description
             for name, _ in rows:
-                self.assertIn(name, str(sent['embed'].to_dict()))
-        self.assertLess(len(sent['embed']), 6000)
+                self.assertIn(name, text)
+            self.assertIn(bot.HELP_EXAMPLES[category], text)
+            self.assertNotIn('/공지알림', text)
+            self.assertLessEqual(len(text), 4096)
+            self.assertEqual([o.value for o in view.category.options if o.default], [category])
+            self.assertIs(result['view'], view)
+        view.category._values = ['home']
+        await view.category.callback(interaction)
+        self.assertEqual(interaction.response.edit_message.call_args.kwargs['embed'].to_dict(), sent['embed'].to_dict())
+        self.assertEqual(view.timeout, 900)
 
     async def test_admin_help_rechecks_permission_and_rejects_dm(self):
         for guild, allowed in [(None, True), (object(), False), (object(), True)]:
@@ -29,7 +44,7 @@ class CommandHelpTests(unittest.IsolatedAsyncioTestCase):
             sent = interaction.response.send_message.call_args
             self.assertTrue(sent.kwargs['ephemeral'])
             if guild is not None and allowed:
-                self.assertIn('/공지알림', str(sent.kwargs['embed'].to_dict()))
+                self.assertIn('/채널설정', str(sent.kwargs['embed'].to_dict()))
             else:
                 self.assertNotIn('embed', sent.kwargs)
 

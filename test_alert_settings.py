@@ -86,7 +86,7 @@ class AlertSettingsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(content.count(channel.mention), 1)
 
     async def test_command_registered_with_admin_and_guild_restrictions(self):
-        command = maple_bot.alert_settings_command
+        command = maple_bot.channel_settings_command
         self.assertTrue(command.guild_only)
         self.assertTrue(command.default_permissions.administrator)
         self.assertFalse(command.allowed_installs.user)
@@ -100,3 +100,58 @@ class AlertSettingsTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(maple_bot.aiohttp, "ClientSession"):
             await maple_bot.MapleNewsBot.setup_hook(bot)
         bot.tree.add_command.assert_any_call(command)
+        registered = [call.args[0].name for call in bot.tree.add_command.call_args_list]
+        self.assertNotIn("news-alert", registered)
+        self.assertNotIn("alert-settings", registered)
+        self.assertNotIn("info-channel", registered)
+
+
+class UnifiedChannelSettingsTests(unittest.IsolatedAsyncioTestCase):
+    def interaction(self):
+        return SimpleNamespace(guild=SimpleNamespace(id=1), permissions=SimpleNamespace(administrator=True),
+            client=SimpleNamespace(configure_alert_channel=AsyncMock(), configure_info_channel=AsyncMock()),
+            response=SimpleNamespace(send_message=AsyncMock()))
+
+    async def test_each_kind_routes_to_existing_storage(self):
+        for kind in maple_bot.CHANNEL_SETTING_TYPES:
+            for action in ("on", "off"):
+                interaction = self.interaction()
+                info = kind in {maple_bot.INFO_TIME, maple_bot.INFO_UTC, maple_bot.INFO_EXCHANGE}
+                channel = Mock(spec=maple_bot.discord.VoiceChannel if info else maple_bot.discord.TextChannel)
+                await maple_bot.channel_settings_command.callback(interaction,
+                    maple_bot.app_commands.Choice(name=kind,value=kind), channel,
+                    maple_bot.app_commands.Choice(name=action,value=action))
+                if info:
+                    interaction.client.configure_info_channel.assert_awaited_once_with(interaction,channel,kind,action=="on")
+                    interaction.client.configure_alert_channel.assert_not_called()
+                else:
+                    interaction.client.configure_alert_channel.assert_awaited_once_with(interaction,channel,action=="on",kind,maple_bot.CHANNEL_SETTING_TYPES[kind],None)
+                    interaction.client.configure_info_channel.assert_not_called()
+
+    async def test_empty_command_is_read_only_and_invalid_input_never_saves(self):
+        interaction = self.interaction()
+        with patch.object(maple_bot.alert_settings_command, '_callback', new=AsyncMock()) as status:
+            await maple_bot.channel_settings_command.callback(interaction)
+            status.assert_awaited_once_with(interaction)
+        choice = maple_bot.app_commands.Choice
+        for kwargs in ({'kind':choice(name='공지',value=maple_bot.ALERT_NEWS)},
+                       {'kind':choice(name='공지',value=maple_bot.ALERT_NEWS),'channel':Mock(spec=maple_bot.discord.VoiceChannel),'action':choice(name='켜기',value='on')},
+                       {'kind':choice(name='UTC',value=maple_bot.INFO_UTC),'channel':Mock(spec=maple_bot.discord.TextChannel),'action':choice(name='켜기',value='on')}):
+            await maple_bot.channel_settings_command.callback(interaction,**kwargs)
+        interaction.client.configure_alert_channel.assert_not_called()
+        interaction.client.configure_info_channel.assert_not_called()
+        self.assertEqual(interaction.response.send_message.await_count,3)
+        for guild,admin in ((None,True),(object(),False)):
+            interaction = self.interaction();interaction.guild=guild;interaction.permissions.administrator=admin
+            await maple_bot.channel_settings_command.callback(interaction)
+            interaction.client.configure_alert_channel.assert_not_called()
+            self.assertTrue(interaction.response.send_message.call_args.kwargs['ephemeral'])
+
+    async def test_server_role_is_forwarded_and_unrelated_role_rejected(self):
+        interaction=self.interaction();channel=Mock(spec=maple_bot.discord.TextChannel);role=object()
+        choice=maple_bot.app_commands.Choice
+        await maple_bot.channel_settings_command.callback(interaction,choice(name='서버',value=maple_bot.ALERT_SERVER),channel,choice(name='켜기',value='on'),role)
+        self.assertIs(interaction.client.configure_alert_channel.call_args.args[-1],role)
+        interaction.client.configure_alert_channel.reset_mock()
+        await maple_bot.channel_settings_command.callback(interaction,choice(name='공지',value=maple_bot.ALERT_NEWS),channel,choice(name='켜기',value='on'),role)
+        interaction.client.configure_alert_channel.assert_not_called()

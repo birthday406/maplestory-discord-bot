@@ -278,18 +278,7 @@ COMMAND_NAME_LOCALIZATIONS = {
     "hotweek": "핫위크",
     "cube-sale": "큐브세일",
     "miracle-time": "미라클큐브",
-    "alert-settings": "알림설정확인",
-    "news-alert": "공지알림",
-    "sunny-alert": "썬데이알림",
-    "sunny-list-alert": "썬데이목록알림",
-    "miracle-time-alert": "미라클큐브알림",
-    "cash-transfer-alert": "캐시이동알림",
-    "ursus-alert": "우르스알림",
-    "server-alert": "서버알림",
-    "cube-sale-alert": "큐브세일알림",
-    "exchange-log-alert": "환율기록알림",
-    "info-channel": "정보채널",
-    "utc-channel": "utc채널",
+    "channel-settings": "채널설정",
 }
 
 
@@ -3974,16 +3963,58 @@ def cached_character_image(path: Path, key: str, data: bytes | None = None) -> b
 
 
 
-def build_help_embed() -> discord.Embed:
-    embed = discord.Embed(
-        title=embed_title("📚 전체 명령어 안내"),
-        description="원하는 명령어를 입력하면 필요한 선택 항목이 나옵니다.",
-        color=0x5865F2,
-    )
-    for category, rows in HELP_CATEGORIES.items():
-        embed.add_field(name=category, value='\n'.join(f'`{name}` — {description}' for name, description in rows), inline=False)
-    embed.set_footer(text="본인에게만 표시됩니다 · 관리자 설정 안내는 /관리자")
+HELP_INTROS = {
+    "공지·이벤트": "패치 소식과 진행 중인 이벤트 확인",
+    "랭킹·아이템": "캐릭터 랭킹과 아이템·외형 검색",
+    "계산기": "성장에 필요한 경험치와 재료 계산",
+    "시뮬레이터": "게임 재화를 쓰지 않고 미리 체험",
+    "편의": "자주 쓰는 문구와 플레이 가이드",
+}
+HELP_EXAMPLES = {
+    "공지·이벤트": "`/썬데이`를 입력하면 이번 주 혜택을 볼 수 있어요.",
+    "랭킹·아이템": "`/랭킹`을 입력하고 닉네임 칸에 캐릭터 이름을 넣어주세요.",
+    "계산기": "`/헥사` → 코어 선택 → 수치 입력 → 계산하기",
+    "시뮬레이터": "`/스스비` → 횟수 선택 → 결과 확인\n결과 화면에서 다시 뽑기와 기대값을 확인할 수 있어요.",
+    "편의": "`/심볼`을 입력한 뒤 필요한 문구의 복사 버튼을 눌러주세요.",
+}
+
+
+def build_help_embed(category: str | None = None) -> discord.Embed:
+    # 처음에는 분류만 보여주고 선택한 분류의 명령어를 같은 자리에서 펼칩니다.
+    if category is None:
+        description = "GMS 소식부터 성장 계산까지, 뽀찌에서 확인하세요.\n아래 메뉴에서 필요한 기능을 골라주세요.\n\n" + "\n\n".join(
+            f"**{name}**\n{intro}" for name, intro in HELP_INTROS.items()
+        )
+        title = "뽀찌 사용 안내"
+    else:
+        description = HELP_INTROS[category] + "\n\n" + "\n".join(
+            f"`{name}` — {detail}" for name, detail in HELP_CATEGORIES[category]
+        ) + f"\n\n**이렇게 사용해요**\n{HELP_EXAMPLES[category]}"
+        title = f"사용 안내 · {category}"
+    embed = discord.Embed(title=embed_title(title), description=description, color=CALCULATOR_COLOR)
+    embed.set_footer(text="본인에게만 표시 · 서버 설정은 /관리자 · 15분 후 /명령어로 다시 열기")
     return embed
+
+
+class HelpView(UserOwnedView):
+    """도움말 분류를 바꾸며 명령어를 찾아보는 개인 메뉴입니다."""
+
+    def __init__(self, user_id: int):
+        super().__init__(user_id, timeout=900)
+        self.category.options = [discord.SelectOption(label="처음 화면", value="home", default=True)] + [
+            discord.SelectOption(label=name, value=name, description=intro)
+            for name, intro in HELP_INTROS.items()
+        ]
+
+    @discord.ui.select(placeholder="어떤 기능을 찾으세요?")
+    async def category(self, interaction: discord.Interaction, select: discord.ui.Select):
+        selected = select.values[0]
+        # 현재 선택을 메뉴에도 남겨 어느 분류를 보고 있는지 알 수 있게 합니다.
+        for option in select.options:
+            option.default = option.value == selected
+        await interaction.response.edit_message(
+            embed=build_help_embed(None if selected == "home" else selected), view=self
+        )
 
 
 @app_commands.command(name=localized_command_name("help"), description="일반 사용자 명령어를 분류별로 안내합니다.")
@@ -3991,7 +4022,7 @@ def build_help_embed() -> discord.Embed:
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def help_command(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(
-        embed=build_help_embed(), ephemeral=True,
+        embed=build_help_embed(), view=HelpView(interaction.user.id), ephemeral=True,
     )
 
 
@@ -4006,10 +4037,10 @@ async def admin_help_command(interaction: discord.Interaction) -> None:
         return
     embed = discord.Embed(title=embed_title("🛠 관리자 명령어"), description="설정 명령어 안내입니다. 이 화면을 열어도 설정은 바뀌지 않습니다.", color=0x5865F2)
     for name, value in (
-        ("설정 확인", "`/알림설정확인` — 현재 서버 설정 확인"),
-        ("공지·이벤트 알림", "`/공지알림`\n`/썬데이알림` · `/썬데이목록알림`\n`/미라클큐브알림` · `/캐시이동알림` · `/큐브세일알림`"),
-        ("상태·시간 알림", "`/우르스알림` · `/서버알림` · `/환율기록알림`"),
-        ("정보 채널", "`/정보채널` — 시간·환율\n`/utc채널` — UTC 시간"),
+        ("설정 확인", "`/채널설정` — 이 서버의 모든 채널 설정 확인"),
+        ("알림 켜기·끄기", "`/채널설정` → 종류·채널·동작 선택\n선택한 종류와 채널만 변경합니다."),
+        ("서버 오픈 멘션", "서버 오픈 알림을 켤 때 역할도 선택해주세요."),
+        ("시간·환율 표시", "시간·UTC·환율 표시는 음성 채널을 선택해주세요.\n해당 채널에서 봇의 채널 관리 권한이 필요합니다."),
     ):
         embed.add_field(name=name, value=value, inline=False)
     embed.set_footer(text="서버 관리자 전용 · 본인에게만 표시됩니다")
@@ -5916,7 +5947,7 @@ INFO_CHANNEL_TYPE_CHOICES = [
 ]
 
 
-@app_commands.command(name=localized_command_name("alert-settings"), description="현재 서버의 알림·정보 채널 설정을 확인합니다.")
+@app_commands.command(name="alert-settings", description="현재 서버의 알림·정보 채널 설정을 확인합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -5930,8 +5961,8 @@ async def alert_settings_command(interaction: discord.Interaction) -> None:
         return
 
     lines = [
-        f"**{embed_title('알림 설정')}**",
-        "현재 서버에서 확인 가능한 채널만 표시합니다. ON은 저장된 설정이며 전송 성공을 보장하지 않습니다.",
+        f"**{embed_title('채널 설정')}**",
+        "변경: /채널설정 종류·채널·동작 선택\n현재 서버의 저장된 설정입니다. ON은 실제 전송 성공을 보장하지 않습니다.",
     ]
     for kind, label in (
         (ALERT_NEWS, "공지 알림"),
@@ -5978,6 +6009,57 @@ async def alert_settings_command(interaction: discord.Interaction) -> None:
         )
 
 
+CHANNEL_SETTING_TYPES = {
+    ALERT_NEWS: "공지 알림", ALERT_SUNNY_DAY: "썬데이 당일 알림",
+    ALERT_SUNNY_LIST: "썬데이 목록 알림", ALERT_MIRACLE_TIME: "미라클 타임 알림",
+    ALERT_CASH_TRANSFER: "캐시이동 알림", ALERT_URSUS: "우르스 알림",
+    ALERT_SERVER: "서버 오픈 알림", ALERT_CUBE_SALE: "큐브세일 (채널 예약만 지원)",
+    ALERT_EXCHANGE_LOG: "환율 기록 알림", INFO_TIME: "시간 표시 (음성 채널)",
+    INFO_UTC: "UTC 표시 (음성 채널)", INFO_EXCHANGE: "환율 표시 (음성 채널)",
+}
+
+
+@app_commands.command(name=localized_command_name("channel-settings"), description="알림·정보 채널 설정을 한 곳에서 확인하고 변경합니다.")
+@app_commands.allowed_installs(guilds=True, users=False)
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+@app_commands.rename(kind="종류", channel="채널", action="동작", role="역할")
+@app_commands.describe(kind="설정할 알림 또는 정보 종류", channel="알림은 텍스트, 시간·환율 표시는 음성 채널", action="선택한 종류와 채널만 켜거나 끕니다", role="서버 오픈 알림을 켤 때 멘션할 역할")
+@app_commands.choices(kind=[app_commands.Choice(name=label, value=kind) for kind, label in CHANNEL_SETTING_TYPES.items()], action=ALERT_ACTION_CHOICES)
+async def channel_settings_command(
+    interaction: discord.Interaction,
+    kind: app_commands.Choice[str] | None = None,
+    channel: discord.TextChannel | discord.VoiceChannel | None = None,
+    action: app_commands.Choice[str] | None = None,
+    role: discord.Role | None = None,
+) -> None:
+    # 조회와 변경 모두 현재 서버 관리자인지 먼저 확인합니다.
+    if interaction.guild is None or not interaction.permissions.administrator:
+        await interaction.response.send_message("이 명령어는 서버 관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+    if kind is None and channel is None and action is None and role is None:
+        await alert_settings_command.callback(interaction)
+        return
+    if kind is None or channel is None or action is None:
+        await interaction.response.send_message("변경하려면 종류·채널·동작을 모두 선택해주세요. 설정 확인은 /채널설정만 입력하세요.", ephemeral=True)
+        return
+    if kind.value not in CHANNEL_SETTING_TYPES or action.value not in {"on", "off"}:
+        await interaction.response.send_message("목록에서 종류와 동작을 다시 선택해주세요.", ephemeral=True)
+        return
+    if role is not None and (kind.value != ALERT_SERVER or action.value != "on"):
+        await interaction.response.send_message("역할은 서버 오픈 알림을 켤 때만 선택해주세요.", ephemeral=True)
+        return
+    is_info = kind.value in {INFO_TIME, INFO_UTC, INFO_EXCHANGE}
+    if not isinstance(channel, discord.VoiceChannel if is_info else discord.TextChannel):
+        await interaction.response.send_message("시간·환율 표시에는 음성 채널을 선택해주세요." if is_info else "알림을 받을 텍스트 채널을 선택해주세요.", ephemeral=True)
+        return
+    # 기존 저장·권한 검사 함수를 공유해 이전 채널 설정을 그대로 사용합니다.
+    if is_info:
+        await interaction.client.configure_info_channel(interaction, channel, kind.value, action.value == "on")
+    else:
+        await interaction.client.configure_alert_channel(interaction, channel, action.value == "on", kind.value, CHANNEL_SETTING_TYPES[kind.value], role)
+
+
 async def run_alert_setting_command(
     interaction: discord.Interaction,
     channel: discord.TextChannel,
@@ -5991,7 +6073,7 @@ async def run_alert_setting_command(
     )
 
 
-@app_commands.command(name=localized_command_name("news-alert"), description="번역 공지 알림 채널을 설정합니다.")
+@app_commands.command(name="news-alert", description="번역 공지 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6008,7 +6090,7 @@ async def news_alert_command(
     )
 
 
-@app_commands.command(name=localized_command_name("sunny-alert"), description="당일 Sunny Sunday 알림 채널을 설정합니다.")
+@app_commands.command(name="sunny-alert", description="당일 Sunny Sunday 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6025,7 +6107,7 @@ async def sunny_day_alert_command(
     )
 
 
-@app_commands.command(name=localized_command_name("sunny-list-alert"), description="전체 Sunny Sunday 목록 알림 채널을 설정합니다.")
+@app_commands.command(name="sunny-list-alert", description="전체 Sunny Sunday 목록 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6042,7 +6124,7 @@ async def sunny_list_alert_command(
     )
 
 
-@app_commands.command(name=localized_command_name("miracle-time-alert"), description="미라클 타임 시작·종료 전 알림 채널을 설정합니다.")
+@app_commands.command(name="miracle-time-alert", description="미라클 타임 시작·종료 전 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6059,7 +6141,7 @@ async def miracle_time_alert_command(
     )
 
 
-@app_commands.command(name=localized_command_name("cash-transfer-alert"), description="캐시이동 시작·종료 전 알림 채널을 설정합니다.")
+@app_commands.command(name="cash-transfer-alert", description="캐시이동 시작·종료 전 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6076,7 +6158,7 @@ async def cash_shop_transfer_alert_command(
     )
 
 
-@app_commands.command(name=localized_command_name("ursus-alert"), description="우르스 골든타임 시작·종료 알림 채널을 설정합니다.")
+@app_commands.command(name="ursus-alert", description="우르스 골든타임 시작·종료 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6093,7 +6175,7 @@ async def ursus_alert_command(
     )
 
 
-@app_commands.command(name=localized_command_name("server-alert"), description="점검 종료 후 서버 오픈 알림 채널을 설정합니다.")
+@app_commands.command(name="server-alert", description="점검 종료 후 서버 오픈 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6120,7 +6202,7 @@ async def server_status_alert_command(
     )
 
 
-@app_commands.command(name=localized_command_name("cube-sale-alert"), description="큐브세일 알림 채널을 설정합니다.")
+@app_commands.command(name="cube-sale-alert", description="큐브세일 알림 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6138,7 +6220,7 @@ async def cube_sale_alert_command(
     )
 
 
-@app_commands.command(name=localized_command_name("exchange-log-alert"), description="USD/KRW 환율 변동 기록 채널을 설정합니다.")
+@app_commands.command(name="exchange-log-alert", description="USD/KRW 환율 변동 기록 채널을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6155,7 +6237,7 @@ async def exchange_log_alert_command(
     )
 
 
-@app_commands.command(name=localized_command_name("info-channel"), description="시간·환율 음성 채널의 자동 갱신을 설정합니다.")
+@app_commands.command(name="info-channel", description="시간·환율 음성 채널의 자동 갱신을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6177,7 +6259,7 @@ async def info_channel_command(
     )
 
 
-@app_commands.command(name=localized_command_name("utc-channel"), description="UTC 시간 음성 채널의 자동 갱신을 설정합니다.")
+@app_commands.command(name="utc-channel", description="UTC 시간 음성 채널의 자동 갱신을 설정합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -6409,18 +6491,7 @@ class MapleNewsBot(commands.Bot):
             cube_sale_command,
             miracle_time_command,
             server_status_command,
-            alert_settings_command,
-            news_alert_command,
-            sunny_day_alert_command,
-            sunny_list_alert_command,
-            miracle_time_alert_command,
-            cash_shop_transfer_alert_command,
-            ursus_alert_command,
-            server_status_alert_command,
-            cube_sale_alert_command,
-            exchange_log_alert_command,
-            info_channel_command,
-            utc_channel_command,
+            channel_settings_command,
         ):
             self.tree.add_command(command)
         self.add_command(quick_copy_symbol_prefix_command)
