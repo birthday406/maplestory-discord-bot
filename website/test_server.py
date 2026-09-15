@@ -327,5 +327,34 @@ class SettingOperationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bot.alert_channels['info_utc'],{11})
 
 
+class PublicOriginTests(AioHTTPTestCase):
+    async def get_application(self):
+        self.remote=AsyncMock(side_effect=[{'access_token':'test-only','expires_in':3600},{'id':'1','username':'example'}])
+        return create_app('example-id','example-secret',self.remote,public_origin='https://sherbet.example')
+
+    async def test_https_login_uses_registered_origin_and_secure_cookie(self):
+        res=await self.client.get('/auth/login',headers={'Host':'sherbet.example'},allow_redirects=False)
+        self.assertEqual(res.status,302)
+        query=parse_qs(urlsplit(res.headers['Location']).query)
+        self.assertEqual(query['redirect_uri'],['https://sherbet.example/auth/callback'])
+        self.assertTrue(res.cookies['sherbet_login']['secure'])
+        denied=await self.client.get('/api/session',headers={'Host':'other.example'})
+        self.assertEqual(denied.status,403)
+
+    async def test_https_session_cookie_is_secure(self):
+        login=await self.client.get('/auth/login',headers={'Host':'sherbet.example'},allow_redirects=False)
+        state=parse_qs(urlsplit(login.headers['Location']).query)['state'][0]
+        callback=await self.client.get('/auth/callback',params={'state':state,'code':'test-only'},
+            headers={'Host':'sherbet.example'},cookies={'sherbet_login':login.cookies['sherbet_login'].value},allow_redirects=False)
+        self.assertEqual(callback.status,302)
+        self.assertTrue(callback.cookies['sherbet_session']['secure'])
+        self.assertTrue(callback.cookies['sherbet_session']['httponly'])
+
+    async def test_public_http_or_embedded_path_is_rejected(self):
+        for origin in ['http://sherbet.example','https://sherbet.example/path','https://user@sherbet.example','https://sherbet.example?x=1']:
+            with self.assertRaises(ValueError):
+                create_app(public_origin=origin)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -2,9 +2,10 @@
 import asyncio
 import os
 import secrets
+import re
 import time
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import aiohttp
 from aiohttp import web
@@ -27,7 +28,16 @@ def is_admin(guild):
         return False
 
 
-def create_app(client_id="", client_secret="", discord_request=None, *, guild_snapshot=None, save_news=None, save_alert=None):
+def create_app(client_id="", client_secret="", discord_request=None, *, guild_snapshot=None, save_news=None, save_alert=None, public_origin=None):
+    # 외부 요청 헤더로 주소를 추측하지 않고 운영자가 정한 주소만 사용합니다.
+    origin = (public_origin or ORIGIN).rstrip('/')
+    address = urlsplit(origin)
+    if origin != ORIGIN and (address.scheme != 'https' or not re.fullmatch(r'[a-z0-9.-]+(?::[0-9]{1,5})?', address.netloc) or address.path or address.query or address.fragment):
+        raise ValueError('공개 주소는 경로 없는 HTTPS 도메인이어야 합니다.')
+    if address.port is not None and not 1 <= address.port <= 65535:
+        raise ValueError('올바른 포트가 필요합니다.')
+    callback_url = origin + '/auth/callback'
+    secure = address.scheme == 'https'
     sessions, pending = {}, {}
 
     async def call(method, path, *, token=None, data=None):
@@ -43,8 +53,8 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
 
     @web.middleware
     async def safety(request, handler):
-        # 로컬 연결 전용: 다른 Host와 교차 출처 요청을 허용하지 않습니다.
-        if request.host != "127.0.0.1:8766":
+        # 등록한 Host 이외의 주소와 교차 출처 요청은 허용하지 않습니다.
+        if request.host != address.netloc:
             return web.json_response({"error": "허용되지 않은 주소입니다."}, status=403)
         now = time.monotonic()
         for table in (sessions, pending):
@@ -69,7 +79,7 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
 
     async def status(request):
         item = sessions.get(request.cookies.get("sherbet_session", ""))
-        return web.json_response({"ready": bool(client_id and client_secret), "callback": CALLBACK,
+        return web.json_response({"ready": bool(client_id and client_secret), "callback": callback_url,
                                   "user": item["user"] if item else None,
                                   "csrf": item["csrf"] if item else None})
 
@@ -82,9 +92,9 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
         pending.pop(request.cookies.get("sherbet_login", ""), None)
         pending[binding] = {"state": state, "until": time.monotonic() + 600}
         response = redirect("https://discord.com/oauth2/authorize?" + urlencode({
-            "client_id": client_id, "redirect_uri": CALLBACK, "response_type": "code",
+            "client_id": client_id, "redirect_uri": callback_url, "response_type": "code",
             "scope": "identify guilds", "state": state}))
-        response.set_cookie("sherbet_login", binding, httponly=True, samesite="Lax", max_age=600, path="/auth")
+        response.set_cookie("sherbet_login", binding, httponly=True, secure=secure, samesite="Lax", max_age=600, path="/auth")
         return response
 
     async def callback(request):
@@ -102,7 +112,7 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
             raise web.HTTPTooManyRequests()
         result = await call("POST", "/oauth2/token", data={"client_id": client_id,
                             "client_secret": client_secret, "grant_type": "authorization_code",
-                            "code": code, "redirect_uri": CALLBACK})
+                            "code": code, "redirect_uri": callback_url})
         token = result["access_token"]
         user = await call("GET", "/users/@me", token=token)
         sid = secrets.token_urlsafe(32)
@@ -113,7 +123,7 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
                          "until": time.monotonic() + min(3600, max(0, int(result["expires_in"])))}
         response = redirect("/#account")
         response.del_cookie("sherbet_login", path="/auth")
-        response.set_cookie("sherbet_session", sid, httponly=True, samesite="Lax", max_age=3600)
+        response.set_cookie("sherbet_session", sid, httponly=True, secure=secure, samesite="Lax", max_age=3600)
         return response
 
     async def admin_guilds(item):
@@ -146,7 +156,7 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
 
     async def logout(request):
         item = session(request)
-        if request.headers.get("Origin") != ORIGIN or not secrets.compare_digest(request.headers.get("X-CSRF-Token", ""), item["csrf"]):
+        if request.headers.get("Origin") != origin or not secrets.compare_digest(request.headers.get("X-CSRF-Token", ""), item["csrf"]):
             raise web.HTTPForbidden()
         sessions.pop(request.cookies.get("sherbet_session", ""), None)
         response = web.json_response({"ok": True})
@@ -155,7 +165,7 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
 
     async def update_news(request):
         item = session(request)
-        if request.headers.get('Origin') != ORIGIN or not secrets.compare_digest(request.headers.get('X-CSRF-Token',''), item['csrf']):
+        if request.headers.get('Origin') != origin or not secrets.compare_digest(request.headers.get('X-CSRF-Token',''), item['csrf']):
             raise web.HTTPForbidden(text='저장 요청을 확인할 수 없습니다. 다시 로그인해주세요.')
         gid = request.match_info['guild_id']
         if not gid.isascii() or not gid.isdigit() or len(gid)>20:
@@ -224,4 +234,4 @@ if __name__ == "__main__":
         cid = input("샤벳 Application ID: ").strip()
         secret = getpass("OAuth2 Client Secret (화면에 표시되지 않음): ")
     # 콜백 URL에는 인증 코드가 포함되므로 접근 로그를 남기지 않습니다.
-    web.run_app(create_app(cid, secret), host="127.0.0.1", port=8766, access_log=None)
+    web.run_app(create_app(cid, secret, public_origin=os.environ.get('SHERBET_PUBLIC_ORIGIN')), host="127.0.0.1", port=8766, access_log=None)
