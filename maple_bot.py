@@ -6498,6 +6498,13 @@ class MapleNewsBot(commands.Bot):
         self.add_command(time_prefix_command)
         await self.tree.sync()
         self.persist_state()
+        # 선택 기능인 홈페이지가 실패해도 기존 공지 봇은 계속 동작합니다.
+        if os.environ.get("SHERBET_WEBSITE_ENABLED") == "1":
+            from website.bot_view import start_website
+            try:
+                self._website_runner = await start_website(self, CHANNEL_SETTING_TYPES)
+            except Exception:
+                logging.error("홈페이지 조회 서버를 시작하지 못했습니다. 설정과 포트를 확인해주세요.")
 
     def persist_state(self) -> None:
         save_state(
@@ -6632,6 +6639,9 @@ class MapleNewsBot(commands.Bot):
             self.detect_nickname_changes_daily.start()
 
     async def close(self) -> None:
+        website_runner = getattr(self, "_website_runner", None)
+        if website_runner is not None:
+            await website_runner.cleanup()
         self.check_patch_revisions.cancel()
         self.check_discord_news.cancel()
         relay = getattr(self, '_discord_news_relay', None)
