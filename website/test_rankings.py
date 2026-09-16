@@ -19,6 +19,9 @@ class PublicRankingsTests(AioHTTPTestCase):
             CREATE TABLE ranking_snapshots (name_key TEXT,snapshot_date TEXT,level INT,exp INT);
             INSERT INTO characters VALUES ('sample','Sample',45,'Hero',280,100,'2026-09-15',9000,1000),('first','First',45,'Bishop',290,0,'2026-09-14',0,0),('other','Other',1,'Hero',300,0,'2026-09-15',0,0);
             INSERT INTO ranking_snapshots VALUES ('sample','2026-09-13',280,10),('sample','2026-09-15',280,100);''')
+            for column in ('image_url TEXT', 'ranking INTEGER', 'legion_rank INTEGER', 'achievement_rank INTEGER'):
+                db.execute('ALTER TABLE characters ADD COLUMN ' + column)
+            db.execute("UPDATE characters SET image_url='https://example.com/avatar.png',ranking=12,legion_rank=34,achievement_rank=56 WHERE name_key='sample'")
         return create_app(ranking_path=self.path)
 
     async def get(self, query=''):
@@ -33,6 +36,11 @@ class PublicRankingsTests(AioHTTPTestCase):
         self.assertEqual(scania['rows'],[])
         data=await (await self.get('?nickname=sAmPlE')).json()
         self.assertEqual(data['character']['name'],'Sample')
+        self.assertEqual(data['character']['image_url'],'https://example.com/avatar.png')
+        self.assertEqual(data['character']['ranking'],12)
+        self.assertEqual(data['character']['legion_rank'],34)
+        self.assertEqual(data['character']['achievement_rank'],56)
+        self.assertGreater(data['character']['requiredExp'],100)
         self.assertEqual(data['gains'],[{'date':'2026-09-15','days':2,'exp':90}])
         self.assertNotIn('discord',str(data).lower())
         with sqlite3.connect(self.path) as db:

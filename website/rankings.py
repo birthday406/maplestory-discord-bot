@@ -21,12 +21,12 @@ def read_ranking(path, world, nickname):
         deadline = time.monotonic() + 3
         db.set_progress_handler(lambda: int(time.monotonic() > deadline), 10000)
         db.execute('BEGIN')
-        columns = 'name,world_id,job_name,level,exp,updated_date'
+        columns = 'name,world_id,job_name,level,exp,updated_date,image_url'
         if not nickname:
             rows = db.execute(f'SELECT {columns} FROM characters WHERE world_id=? AND level>=260 '
                 'ORDER BY level DESC,exp DESC,name_key LIMIT 100', (world,)).fetchall()
             return {'world': WORLDS[world], 'rows': [dict(r) for r in rows]}
-        row = db.execute(f'SELECT {columns},legion_level,achievement_score FROM characters WHERE name_key=?',
+        row = db.execute(f'SELECT {columns},ranking,legion_level,legion_rank,achievement_score,achievement_rank FROM characters WHERE name_key=?',
                          (nickname.casefold(),)).fetchone()
         if row is None:
             raise web.HTTPNotFound(text='저장된 캐릭터가 없습니다. 자동 수집 대상은 Lv.260 이상입니다.')
@@ -44,6 +44,7 @@ def read_ranking(path, world, nickname):
                           'exp': after - before if before is not None and after is not None and after >= before else None})
         level = character['level']
         character['remainingExp'] = max(0, LEVEL_EXP[level-200] - character['exp']) if 200 <= level < 300 else None
+        character['requiredExp'] = LEVEL_EXP[level-200] if 200 <= level < 300 else None
         character['world'] = WORLDS.get(character['world_id'], str(character['world_id']))
         return {'character': character, 'gains': gains}
 

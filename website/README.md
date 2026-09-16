@@ -79,7 +79,7 @@ python deploy/configure-website.py --self-test
 
 2026-09-15 `3aeab56`으로 운영에 적용했습니다. DB 백업·전체 무결성 검사 후 재시작했으며 공개 캐릭터 검색, 4개 월드의 100명 목록, OAuth 준비와 Discord 재연결을 확인했습니다.
 
-`#rankings`에서 공개 캐릭터 검색과 Kronos·Scania·Bera·Hyperion 경험치 상위 100명을 조회합니다. `/api/rankings?world=45`와 `/api/rankings?nickname=이름`은 로그인 없이 저장된 게임 정보만 반환합니다. 각 행에 실제 기준일을 표시합니다. 수집 중에는 기준일이 섞일 수 있어 공식 실시간 순위를 보장하지 않습니다.
+`#rankings`에서 공개 캐릭터 검색과 Kronos·Scania·Bera·Hyperion 경험치 상위 100명을 조회합니다. `/api/rankings?world=45`와 `/api/rankings?nickname=이름`은 로그인 없이 저장된 게임 정보만 반환합니다. 목록 상단에 기준일을 한 번 표시하고 날짜가 섞이면 범위와 갱신 중 안내를 표시합니다. 수집 중에는 기준일이 섞일 수 있어 공식 실시간 순위를 보장하지 않습니다.
 
 운영 봇의 RankingStore 경로를 읽기 전용으로 연결합니다. 월드 정렬 인덱스 `idx_characters_web_ranking`은 초기화 시 추가되므로 **운영 적용 전에 수동 DB 백업과 복원 가능 여부를 확인**해야 합니다. SQL 실행 3초 제한·동시 DB 조회 1개·최대 128개 응답의 60초 캐시·IP별 분당 30회 제한을 둡니다. 공개 캐릭터와 최근 기록은 동일한 읽기 트랜잭션으로 조회합니다.
 
@@ -111,3 +111,7 @@ Discord 개발자 페이지의 이용약관·개인정보처리방침 링크는 
 6. 공개 전 로그인·설정 API의 요청 제한, 개인정보 안내와 실제 초대·지원 링크를 검토합니다. HTTPS 인증서·Host·로그인·권한 거부·설정 저장 검증 후 공개합니다.
 
 참고: [Caddy 자동 HTTPS](https://caddyserver.com/docs/automatic-https), [Discord OAuth2](https://docs.discord.com/developers/topics/oauth2).
+
+### 랭킹 상세·모바일 화면
+
+순위표에 캐릭터 사진을 표시하고 이름·사진을 누르면 `#rankings?world=45&nickname=이름` 상세 화면으로 이동합니다. 저장된 공개 순위·유니온·업적·경험치 기록을 보여주며, 수집하지 않는 장비·상세 스탯은 제공하지 않습니다. 홈의 초대·대시보드 버튼은 간격과 화살표를 통일하고 모바일에서는 세로로 배치합니다.
