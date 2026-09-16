@@ -92,7 +92,7 @@ async def start_website(bot, labels):
         return await save_news_setting(bot,gid,cid,enabled,previous)
     async def save_alert(gid,cid,enabled,previous,kind,role_id=None,previous_role=None):
         return await save_news_setting(bot,gid,cid,enabled,previous,kind,role_id,previous_role)
-    runner = web.AppRunner(create_app(cid, secret, guild_snapshot=snapshot, save_news=save, save_alert=save_alert, public_origin=os.environ.get('SHERBET_PUBLIC_ORIGIN')), access_log=None)
+    runner = web.AppRunner(create_app(cid, secret, guild_snapshot=snapshot, save_news=save, save_alert=save_alert, public_origin=os.environ.get('SHERBET_PUBLIC_ORIGIN'), ranking_path=bot.ranking_store.path), access_log=None)
     await runner.setup()
     try:
         await web.TCPSite(runner, '127.0.0.1', 8766).start()

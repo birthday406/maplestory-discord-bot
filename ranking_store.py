@@ -118,6 +118,10 @@ class RankingStore:
                     first_seen_date TEXT NOT NULL
                 );
 
+                -- 웹 순위표가 전체 캐릭터를 매번 정렬하지 않도록 월드·경험치 순서를 미리 만듭니다.
+                CREATE INDEX IF NOT EXISTS idx_characters_web_ranking
+                ON characters (world_id, level DESC, exp DESC, name_key);
+
                 CREATE TABLE IF NOT EXISTS nickname_changes (
                     old_name_key TEXT NOT NULL,
                     old_name TEXT NOT NULL,

@@ -21,7 +21,7 @@ function render(){
  banner.hidden=page!=='preview'&&page!=='account';
  banner.textContent=page==='account'?'실제 서버 설정 · 저장하면 선택한 Discord 채널에 적용됩니다.':'가상 시안 · 여기서 저장한 설정은 실제 Discord에 적용되지 않습니다.';
  document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',a.hash==='#'+page||(page==='account'&&a.hash==='#dashboard')));
- if(page==='commands')commands();else if(page==='account')account();else if(page==='updates')updatesPage();else if(page==='terms'||page==='privacy')policyPage(page);else if(page==='preview')dashboard();else home();
+ if(page==='commands')commands();else if(page==='rankings')rankingsPage();else if(page==='account')account();else if(page==='updates')updatesPage();else if(page==='terms'||page==='privacy')policyPage(page);else if(page==='preview')dashboard();else home();
 }
 // 이동을 취소하면 주소만 복구해 확인 창이 반복해서 뜨지 않게 합니다.
 window.addEventListener('hashchange',()=>{if(dirty&&!leave()){history.replaceState(null,'','#preview');return}load();render()});
@@ -31,6 +31,7 @@ function home(){app.innerHTML=`<section class="hero"><div><span class="eyebrow">
 function commands(){app.innerHTML=`<div class="heading"><div><span class="eyebrow">FIND YOUR NEXT COMMAND</span><h1>무엇을 도와드릴까요?</h1><p>필요한 명령어를 찾고, 사용 방법을 확인하세요.</p></div><input class="search" type="search" id="search" placeholder="명령어 또는 기능 검색" aria-label="명령어 검색"></div><div class="commands-layout"><div class="filters">${['전체',...Object.keys(commandData),'관리자'].map(c=>`<button data-filter="${c}" class="${filter===c?'active':''}">${c}</button>`).join('')}</div><div class="command-list" id="results"></div></div>`;$('#search').value=query;$('#search').oninput=e=>{query=e.target.value;results()};document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;commands()});results()}
 function results(){const groups={...commandData,'관리자':[['/채널설정','옵션 없이 설정 조회 · 종류·채널·동작을 골라 알림 변경'],['/관리자','서버 관리자용 설정 안내']]};const rows=Object.entries(groups).flatMap(([g,rows])=>rows.map(([name,desc])=>({g,name,desc}))).filter(r=>(filter==='전체'||filter===r.g)&&(r.name+' '+r.desc).toLowerCase().includes(query.toLowerCase()));$('#results').replaceChildren();if(!rows.length){$('#results').innerHTML='<div class="empty">검색 결과가 없어요. 다른 이름으로 찾아보세요.</div>';return}rows.forEach(r=>{const card=document.createElement('article');card.className='command-card';const code=document.createElement('code');code.textContent=r.name;const desc=document.createElement('p');desc.textContent=r.desc;const label=document.createElement('span');label.className='caption';label.textContent=r.g;card.append(label,code,desc);// 준비된 실제 결과만 보여주고 빈 이미지 자리는 만들지 않습니다.
 if(r.name==='/시그니처 · /원더베리') {
+  showSalePeriod(card);
   for(const [file,label] of [['example-signature.png','시그니처 5회 결과 예시'],['example-wonderberry.png','원더베리 결과 예시']]) {
     const figure=document.createElement('figure');figure.className='command-example';
     const img=document.createElement('img');img.src=file;img.alt=label;img.loading='lazy';

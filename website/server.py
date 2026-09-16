@@ -30,7 +30,7 @@ def is_admin(guild):
         return False
 
 
-def create_app(client_id="", client_secret="", discord_request=None, *, guild_snapshot=None, save_news=None, save_alert=None, public_origin=None):
+def create_app(client_id="", client_secret="", discord_request=None, *, guild_snapshot=None, save_news=None, save_alert=None, public_origin=None, ranking_path=None):
     # 외부 요청 헤더로 주소를 추측하지 않고 운영자가 정한 주소만 사용합니다.
     origin = (public_origin or ORIGIN).rstrip('/')
     address = urlsplit(origin)
@@ -70,10 +70,10 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
                     peer = str(ipaddress.ip_address(request.headers.get('CF-Connecting-IP', peer)))
                 except ValueError:
                     pass
-            group = 'login' if request.path == '/auth/login' else 'api'
+            group = 'login' if request.path == '/auth/login' else ('ranking' if request.path == '/api/rankings' else 'api')
             key = (peer, group)
             started, count = requests.get(key, (now, 0))
-            limit = 10 if group == 'login' else 120
+            limit = {'login': 10, 'ranking': 30, 'api': 120}[group]
             if count >= limit or (key not in requests and len(requests) >= 4000):
                 return web.json_response({'error': '요청이 많습니다. 잠시 후 다시 시도해주세요.'}, status=429,
                     headers={'Retry-After': str(max(1, int(started + 60 - now) + 1)), 'Cache-Control': 'no-store'})
@@ -229,11 +229,15 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
     async def static(request):
         # 공개 파일만 명시적으로 제공해 서버 코드나 환경 파일이 노출되지 않게 합니다.
         name = request.match_info.get("name", "index.html")
-        if name not in {"index.html", "app.js", "commands.js", "auth.js", "style.css", "sherbet.png", "policies.json", "updates.json", "example-signature.png", "example-wonderberry.png"}:
+        if name not in {"index.html", "app.js", "commands.js", "auth.js", "rankings.js", "sales.json", "style.css", "sherbet.png", "policies.json", "updates.json", "example-signature.png", "example-wonderberry.png"}:
             raise web.HTTPNotFound()
         return web.FileResponse(ROOT / name)
 
     app = web.Application(middlewares=[safety], client_max_size=4096)
+    from website.rankings import ranking_handler
+    async def unavailable(request):
+        raise web.HTTPServiceUnavailable(text='랭킹 조회가 연결되지 않았습니다.')
+    app.router.add_get('/api/rankings', ranking_handler(ranking_path) if ranking_path is not None else unavailable)
     app.add_routes([web.get("/api/session", status), web.get("/auth/login", login),
                     web.get("/auth/callback", callback), web.get("/api/guilds", guilds),
                     web.get("/api/guilds/{guild_id}", guild_detail),

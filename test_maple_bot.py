@@ -4681,6 +4681,12 @@ class FrierenCashRateTests(unittest.TestCase):
 
 
 class FrierenCashCommandTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # 기존 추첨 테스트는 판매 중인 시각으로 고정해 실제 날짜에 따라 깨지지 않게 합니다.
+        guard = patch('maple_bot.frieren_sale_period', return_value=(True, '판매 기간 예시'))
+        guard.start()
+        self.addCleanup(guard.stop)
+
     @staticmethod
     def interaction(fetch_name: str, rates: list[tuple]) -> SimpleNamespace:
         return SimpleNamespace(
@@ -4768,6 +4774,22 @@ class FrierenCashCommandTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ScheduleCommandTests(unittest.IsolatedAsyncioTestCase):
+    def test_frieren_sale_boundaries(self):
+        for instant, expected in [('2026-09-09T20:07:59+00:00',False),('2026-09-09T20:08:00+00:00',True),
+                                  ('2026-10-07T23:59:59+00:00',True),('2026-10-08T00:00:00+00:00',False)]:
+            self.assertEqual(maple_bot.frieren_sale_period(datetime.fromisoformat(instant))[0],expected)
+
+    async def test_expired_frieren_command_and_old_button_do_not_fetch_or_draw(self):
+        for kind, method in [('signature','fetch_signature_rates'),('wonderberry','fetch_wonderberry_rates')]:
+            interaction=FrierenCashCommandTests.interaction(method, [])
+            with patch('maple_bot.frieren_sale_period', return_value=(False,'종료 기간')):
+                await maple_bot.run_frieren_cash_simulator(interaction,kind,1)
+                view=maple_bot.FrierenCashSimulatorView(123,kind,1,[])
+                await view.children[0].callback(interaction)
+            getattr(interaction.client,method).assert_not_awaited()
+            self.assertEqual(view.draw_count,1)
+            self.assertEqual(interaction.followup.send.await_count,2)
+
     def test_current_known_issues_excludes_resolved_section(self) -> None:
         body = (
             '<h2>Current Known Issues</h2><ul><li>Current issue</li></ul>'

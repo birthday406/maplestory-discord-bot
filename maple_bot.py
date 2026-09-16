@@ -4801,6 +4801,24 @@ def create_wonderberry_result_image(
     return output
 
 
+def frieren_sale_period(now=None):
+    """봇과 홈페이지가 같은 판매 기간을 사용하며 종료 순간부터 추첨을 막습니다."""
+    sale = json.loads((Path(__file__).parent / 'website/dist/sales.json').read_text(encoding='utf-8'))
+    start = datetime.fromisoformat(sale['start'].replace('Z', '+00:00'))
+    end = datetime.fromisoformat(sale['endExclusive'].replace('Z', '+00:00'))
+    now = now or datetime.now(timezone.utc)
+    text = (f"시작: <t:{int(start.timestamp())}:f> (점검 완료 공지 기준)\n"
+            f"종료: <t:{int(end.timestamp()) - 1}:f>")
+    return start <= now < end, text
+
+
+async def check_frieren_sale(interaction):
+    active, period = frieren_sale_period()
+    if not active:
+        await interaction.followup.send('현재 진행 중인 프리렌 판매가 아닙니다.\n\n' + period, ephemeral=True)
+    return active
+
+
 def build_frieren_cash_embed(kind: str, results: list[tuple], draw_count: int) -> discord.Embed:
     """시그니처·원더베리 결과명과 누적 비용을 한 임베드로 표시합니다."""
     if kind == "signature":
@@ -4824,6 +4842,7 @@ def build_frieren_cash_embed(kind: str, results: list[tuple], draw_count: int) -
         )
         cost = wonderberry_nx_cost(draw_count)
     embed = discord.Embed(title=title, url=url, description=description, color=color)
+    embed.add_field(name='판매 기간', value=frieren_sale_period()[1], inline=False)
     embed.set_footer(
         text=f"누적 횟수: {draw_count:,}회\n지금까지 낭비한 돈: {cost:,} NX"
     )
@@ -4891,6 +4910,8 @@ class FrierenCashSimulatorView(UserOwnedView):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         await interaction.response.defer()
+        if not await check_frieren_sale(interaction):
+            return
         try:
             if self.kind == "signature":
                 rates = await interaction.client.fetch_signature_rates()
@@ -4904,6 +4925,9 @@ class FrierenCashSimulatorView(UserOwnedView):
                 "공식 확률표를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
+            return
+        # 확률표를 기다리는 사이에 판매가 끝났다면 결과를 갱신하지 않습니다.
+        if not await check_frieren_sale(interaction):
             return
         self.results = results
         self.draw_count += self.count
@@ -4937,6 +4961,8 @@ async def run_frieren_cash_simulator(
 ) -> None:
     """공식 확률표 조회부터 추첨·전송까지 두 명령의 공통 흐름을 실행합니다."""
     await interaction.response.defer()
+    if not await check_frieren_sale(interaction):
+        return
     try:
         if kind == "signature":
             rates = await interaction.client.fetch_signature_rates()
@@ -4952,6 +4978,8 @@ async def run_frieren_cash_simulator(
         )
         return
 
+    if not await check_frieren_sale(interaction):
+        return
     embed = build_frieren_cash_embed(kind, results, count)
     view = FrierenCashSimulatorView(interaction.user.id, kind, count, results)
     try:

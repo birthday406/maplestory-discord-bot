@@ -201,7 +201,8 @@ def make_embeds(row, text, pending=False):
     embeds = [discord.Embed(title=embed_title('MapleStory 공식 Discord 소식' if i == 0 else None),
                            description=chunk, url=f"{CHANNEL_URL}/{row['id']}", color=notice_color(row['body']))
               for i, chunk in enumerate(chunks)]
-    embeds[0].set_footer(text='번역 준비 중 · 표시 시각 UTC' if pending else '공식 announcements · 표시 시각 UTC')
+    if pending:
+        embeds[0].set_footer(text='번역 준비 중')
     for index, url in enumerate(row['images'][:8]):
         if index >= len(embeds):
             embeds.append(discord.Embed(url=f"{CHANNEL_URL}/{row['id']}", color=notice_color(row['body'])))

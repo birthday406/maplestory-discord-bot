@@ -14,6 +14,10 @@ def message(mid='1547812204580179969', body='Maintenance starts soon.'):
 
 
 class DiscordNewsTests(unittest.IsolatedAsyncioTestCase):
+    def test_completed_notice_has_no_source_footer(self):
+        self.assertFalse(make_embeds(message(), '번역')[0].footer.text)
+        self.assertEqual(make_embeds(message(), '원문', pending=True)[0].footer.text,'번역 준비 중')
+
     def test_only_explicit_current_game_up_opens_servers(self):
         from discord_news import is_game_up
         for body in ('Game is up!', 'Hi Maplers,\n\nThe **game is now up**!'):
