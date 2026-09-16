@@ -208,7 +208,7 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
     async def static(request):
         # 공개 파일만 명시적으로 제공해 서버 코드나 환경 파일이 노출되지 않게 합니다.
         name = request.match_info.get("name", "index.html")
-        if name not in {"index.html", "app.js", "commands.js", "auth.js", "style.css", "sherbet.png"}:
+        if name not in {"index.html", "app.js", "commands.js", "auth.js", "style.css", "sherbet.png", "policies.json"}:
             raise web.HTTPNotFound()
         return web.FileResponse(ROOT / name)
 

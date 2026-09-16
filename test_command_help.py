@@ -6,6 +6,23 @@ import maple_bot as bot
 
 
 class CommandHelpTests(unittest.IsolatedAsyncioTestCase):
+    async def test_policy_buttons_show_shared_documents_privately(self):
+        import json
+        from pathlib import Path
+        data = json.loads((Path(bot.__file__).parent / 'website/dist/policies.json').read_text(encoding='utf-8'))
+        view = bot.HelpView(1)
+        self.addCleanup(view.stop)
+        interaction = SimpleNamespace(response=SimpleNamespace(send_message=AsyncMock()))
+        for key in ('terms', 'privacy'):
+            button = next(child for child in view.children if getattr(child, 'custom_id', '') == 'policy:' + key)
+            await button.callback(interaction)
+            result = interaction.response.send_message.call_args.kwargs
+            self.assertTrue(result['ephemeral'])
+            self.assertIn(data[key]['title'], result['embed'].title)
+            for section in data[key]['sections']:
+                self.assertIn(section['body'], result['embed'].description)
+            self.assertLessEqual(len(result['embed'].description), 4096)
+
     async def test_help_opens_privately_and_all_categories_return_home(self):
         interaction = SimpleNamespace(user=SimpleNamespace(id=1), response=SimpleNamespace(send_message=AsyncMock(), edit_message=AsyncMock()))
         await bot.help_command.callback(interaction)

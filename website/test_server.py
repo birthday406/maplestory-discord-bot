@@ -9,6 +9,14 @@ from website.server import create_app, is_admin, ORIGIN
 
 
 class LoginTests(AioHTTPTestCase):
+    async def test_public_policies_without_discord_login(self):
+        response = await self.request('GET', '/policies.json')
+        self.assertEqual(response.status, 200)
+        data = await response.json()
+        self.assertIn('sections', data['privacy'])
+        self.assertIn('sections', data['terms'])
+        self.remote.assert_not_awaited()
+
     async def get_application(self):
         self.remote = AsyncMock()
         return create_app("example-id", "example-secret", self.remote)

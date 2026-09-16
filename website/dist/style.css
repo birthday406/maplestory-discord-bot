@@ -25,3 +25,6 @@ fieldset.live-details {min-width:0; margin:20px 0; padding:22px; border:1px soli
 .feature-state input {width:18px;height:18px;accent-color:var(--pink);}
 .feature-permission {font-size:13px;color:#edc78d;}
 @media(max-width:600px){.feature-controls label{flex-basis:100%;}.feature-controls .feature-state{flex-basis:auto;}.feature-controls button{margin-left:auto;}}
+
+/* 약관은 긴 문장도 모바일에서 읽기 편하게 줄 길이를 제한합니다. */
+.policy-page{max-width:850px;margin:32px auto 64px;line-height:1.85}.policy-page h2{font-size:1.1rem;margin:28px 0 8px}.policy-page p{white-space:pre-line;overflow-wrap:anywhere}.policy-page a,footer a{overflow-wrap:anywhere}.footer-links{display:flex;flex-wrap:wrap;gap:16px}footer{flex-wrap:wrap;gap:20px}footer small{line-height:1.8}

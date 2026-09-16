@@ -7,6 +7,29 @@ from maple_bot import MapleNewsBot, format_news_summary
 
 
 class NewsProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cash_update_summary_excludes_ongoing_and_ending_sales(self):
+        bot = SimpleNamespace(openai=SimpleNamespace(responses=SimpleNamespace(
+            create=AsyncMock(return_value=SimpleNamespace(output_text='- 로얄 스타일 업데이트')))))
+        await MapleNewsBot.summarize(bot, {
+            'name': 'Cash Shop Update for September 16', 'category': 'sale',
+            'body': '<h1>Royal Styles Update</h1><p>3,300 NX</p>'
+                    '<h1>DAILY DEALS</h1><p>Premium Coloring Prism: 5,900 NX</p>'
+                    '<h1><strong>ONGOING&nbsp; SALES</strong></h1><h1>Genesis Pass</h1><p>30,000 NX</p>'
+                    '<h1>SALES ENDING THIS WEEK</h1><p>Old Royal Styles</p>'})
+        source = bot.openai.responses.create.call_args.kwargs['input']
+        self.assertIn('Royal Styles Update', source)
+        self.assertIn('Premium Coloring Prism: 5,900 NX', source)
+        self.assertNotIn('Genesis Pass', source)
+        self.assertNotIn('Old Royal Styles', source)
+        self.assertNotIn('3-5', bot.openai.responses.create.call_args.kwargs['instructions'])
+
+    async def test_cash_update_without_section_boundary_is_not_summarized_as_new(self):
+        bot = SimpleNamespace(openai=SimpleNamespace(responses=SimpleNamespace(create=AsyncMock())))
+        with self.assertRaisesRegex(ValueError, 'Cash Shop'):
+            await MapleNewsBot.summarize(bot, {'name': 'Cash Shop Update for September 16',
+                                              'body': '<p>Genesis Pass: 30,000 NX</p>'})
+        bot.openai.responses.create.assert_not_awaited()
+
     def test_summary_bullets_have_one_blank_line(self):
         source = '- **첫 항목**\n* 둘째\n\n\n• 셋째\n  이어지는 내용'
         expected = '- **첫 항목**\n\n- 둘째\n\n- 셋째\n  이어지는 내용'

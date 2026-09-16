@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from discord_news import NewsStore, NewsRelay, is_link_only_notice, validate_message, translate_or_original, deliver_all, make_embeds
 
@@ -119,6 +119,70 @@ class DiscordNewsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError): validate_message(row)
         row = message(); row['images'] = ['http://localhost/private']
         with self.assertRaises(ValueError): validate_message(row)
+
+    async def test_cash_shop_promotion_and_separate_banner_are_not_reposted(self):
+        from discord_news import process_event
+        url = 'https://www.nexon.com/maplestory/news/sale/44528/cash-shop-update-for-september-16'
+        row = message('1549555981942398987', f'Hi Maplers! :spiritBongo:\n\nTake a look at the **Cash Shop Update** for **September 16th** [HERE]({url}), featuring Royal Styles and more!')
+        row.update(links=[url], created_at='2026-09-15T23:02:15.453Z')
+        self.assertTrue(is_link_only_notice(row, {44528}))
+        self.assertFalse(is_link_only_notice(row, set()))
+        for extra in ('\nMaintenance has been extended.', ' Cubes have been disabled.', '\nGame is up!'):
+            self.assertFalse(is_link_only_notice({**row, 'body': row['body'] + extra}, {44528}))
+        banner = message('1549555931342180442', '')
+        banner.update(images=['https://cdn.discordapp.com/attachments/1/2/image.png'], created_at='2026-09-15T23:02:03.389Z')
+        with tempfile.TemporaryDirectory() as folder:
+            store = NewsStore(Path(folder) / 'news.db')
+            store.observe([message()], '2026-09-15T23:00:00Z')
+            store.observe([banner, row], '2026-09-15T23:02:16Z')
+            bot = SimpleNamespace(sent_ids={44528})
+            with patch('discord_news.deliver_all', new_callable=AsyncMock) as delivery:
+                for event in store.pending():
+                    await process_event(bot, store, event, [SimpleNamespace(id=1)])
+                delivery.assert_not_awaited()
+            self.assertFalse(store.pending())
+
+    async def test_standalone_image_waits_then_is_preserved_after_restart(self):
+        from datetime import datetime, timezone, timedelta
+        from discord_news import process_event
+        now = datetime.now(timezone.utc)
+        banner = message('1549555931342180442', '')
+        banner.update(images=['https://cdn.discordapp.com/attachments/1/2/image.png'], created_at=now.isoformat())
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'news.db'
+            store = NewsStore(path)
+            store.observe([message()], (now - timedelta(seconds=2)).isoformat())
+            store.observe([banner], now.isoformat())
+            bot = SimpleNamespace(sent_ids=set())
+            with patch('discord_news.deliver_all', new_callable=AsyncMock) as delivery:
+                await process_event(bot, store, store.pending()[0], [SimpleNamespace(id=1)])
+                delivery.assert_not_awaited()
+                store = NewsStore(path)
+                with patch('discord_news.datetime') as clock:
+                    clock.fromisoformat = datetime.fromisoformat
+                    clock.now.return_value = now + timedelta(seconds=61)
+                    await process_event(bot, store, store.pending()[0], [SimpleNamespace(id=1)])
+                delivery.assert_awaited_once()
+                self.assertEqual(delivery.call_args.args[2]['current']['images'], banner['images'])
+            self.assertFalse(store.pending())
+
+    async def test_image_before_unknown_or_unrelated_notice_is_preserved(self):
+        from discord_news import process_event
+        url = 'https://www.nexon.com/maplestory/news/update/44597/title'
+        for author, created, known in [('Miso', '2026-09-11T03:33:18Z', set()),
+                                       ('Potaro', '2026-09-11T03:33:18Z', {44597}),
+                                       ('Miso', '2026-09-11T03:35:18Z', {44597})]:
+            with self.subTest(author=author, created=created, known=known), tempfile.TemporaryDirectory() as folder:
+                store = NewsStore(Path(folder) / 'news.db')
+                banner = message('1547812204580179970', '')
+                banner['images'] = ['https://cdn.discordapp.com/attachments/1/2/image.png']
+                row = message('1547812204580179971', f'Patch Notes is [HERE]({url})')
+                row.update(author=author, created_at=created, links=[url])
+                store.observe([message()], '2026-09-11T03:30:00Z')
+                store.observe([banner, row], '2026-09-11T03:36:00Z')
+                with patch('discord_news.deliver_all', new_callable=AsyncMock) as delivery:
+                    await process_event(SimpleNamespace(sent_ids=known), store, store.pending()[0], [SimpleNamespace(id=1)])
+                    delivery.assert_awaited_once()
 
     async def test_timeout_keeps_translation_alive_for_edit(self):
         ready = asyncio.Event()

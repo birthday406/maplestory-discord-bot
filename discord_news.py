@@ -64,7 +64,13 @@ def is_link_only_notice(row, sent_ids):
         return False
     text = re.sub(r'\[([^]]+)\]\(https://[^)]+\)', r'\1', row['body'])
     text = re.sub(r'https://\S+|@(?:News|CS Updates)', '', text)
+    # 글씨 강조와 인사말의 장식 이모지는 소개 문구 판정에 영향을 주지 않습니다.
+    text = re.sub(r'<a?:\w+:\d+>|:[A-Za-z0-9_]+:', '', text).replace('*', '')
     text = re.sub(r'(?i)\b(?:hi|hello)\s+maplers[!,.:\s]*', '', text).strip()
+    if re.fullmatch(
+        r'Take a look at the Cash Shop Update for [a-z]+ \d+(?:st|nd|rd|th)? '
+        r'HERE, featuring Royal Styles and more[!.\s]*', text, re.I):
+        return True
     # 단순 링크 소개의 짧고 명확한 형태만 제외합니다. 애매하면 소식을 보존합니다.
     return bool(re.fullmatch(
         r'(?:the\s+)?(?:v\.?\s*\d+\s*[-:]?\s*)?'
@@ -239,6 +245,23 @@ async def process_event(bot, store, event, channels):
         return
     if not channels:
         return
+    if not row['body'].strip() and row['images']:
+        # 같은 작성자가 배너 다음에 본문을 따로 올리는 경우만 최대 60초 기다립니다.
+        # 중복 소개임이 확인되지 않으면 이미지 공지를 그대로 보존합니다.
+        with store.connect() as db:
+            following = db.execute('SELECT data FROM source WHERE CAST(id AS INTEGER)>? '
+                                   'ORDER BY CAST(id AS INTEGER) LIMIT 1', (int(row['id']),)).fetchone()
+        created = datetime.fromisoformat(row['created_at'].replace('Z', '+00:00'))
+        if following:
+            companion = json.loads(following[0])
+            gap = (datetime.fromisoformat(companion['created_at'].replace('Z', '+00:00')) - created).total_seconds()
+            if (0 <= gap <= 60 and row['author'] != 'MapleStory'
+                    and companion['author'] == row['author']
+                    and is_link_only_notice(companion, set(bot.sent_ids or ()))):
+                store.done(event['id'])
+                return
+        elif (datetime.now(timezone.utc) - created).total_seconds() < 60:
+            return
     if is_link_only_notice(row, set(bot.sent_ids or ())):
         store.done(event['id'])
         return
