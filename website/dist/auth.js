@@ -1,5 +1,17 @@
 // 실제 로그인과 가상 설정 화면을 구분합니다. 로그인 토큰은 브라우저에 저장하지 않습니다.
 let authInfo = null;
+// 어느 화면에서도 현재 로그인 상태를 알 수 있게 상단 버튼을 갱신합니다.
+function showAccountName(info) {
+  const button = document.querySelector('#login');
+  button.textContent = info?.user ? info.user.name + ' · 내 서버' : 'Discord 로그인 ↗';
+}
+async function refreshAccountName() {
+  try {
+    const response = await fetch('/api/session');
+    if (response.ok) showAccountName(await response.json());
+  } catch { /* 네트워크 오류가 나도 메뉴와 공개 문서는 계속 사용할 수 있습니다. */ }
+}
+refreshAccountName();
 async function account() {
   const root = document.querySelector('#app');
   root.innerHTML = '<div class="heading"><div><span class="eyebrow">DISCORD ACCOUNT</span><h1>Discord 연결</h1><p id="account-status" role="status">연결 상태를 확인하고 있어요.</p></div></div><section id="account-body" class="setting-block" style="padding:24px"></section>';
@@ -8,6 +20,7 @@ async function account() {
     const response = await fetch('/api/session');
     if (!response.ok) throw new Error();
     authInfo = await response.json();
+    showAccountName(authInfo);
     // 이동 중 응답이 도착하면 다른 화면에 계정 정보를 그리지 않습니다.
     if (location.hash !== '#account') return;
     if (!authInfo.user) {

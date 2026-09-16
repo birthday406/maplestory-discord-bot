@@ -28,3 +28,8 @@ fieldset.live-details {min-width:0; margin:20px 0; padding:22px; border:1px soli
 
 /* 약관은 긴 문장도 모바일에서 읽기 편하게 줄 길이를 제한합니다. */
 .policy-page{max-width:850px;margin:32px auto 64px;line-height:1.85}.policy-page h2{font-size:1.1rem;margin:28px 0 8px}.policy-page p{white-space:pre-line;overflow-wrap:anywhere}.policy-page a,footer a{overflow-wrap:anywhere}.footer-links{display:flex;flex-wrap:wrap;gap:16px}footer{flex-wrap:wrap;gap:20px}footer small{line-height:1.8}
+.update-entry{margin:24px 0;padding:24px;border:1px solid #38343d;border-radius:16px;background:#19171d}.update-entry time{color:var(--pink);font-size:13px}.update-entry h2{margin:8px 0 16px}.update-entry ul{padding-left:20px;margin:0}.update-entry li+li{margin-top:10px}
+/* 로그인 링크도 글자 배경이 아닌 누를 수 있는 버튼 영역으로 표시합니다. */
+#account-body a.primary{display:inline-flex;align-items:center;justify-content:center;min-height:48px;max-width:100%;padding:12px 20px;border:1px solid #685064;border-radius:12px;background:#2c222d;color:var(--pink);font-weight:600;line-height:1.5;text-decoration:none;transition:background .15s,border-color .15s}
+#account-body a.primary:hover{background:#3a2b3a;border-color:var(--pink)}
+.command-example{margin:18px 0 0}.command-example img{width:100%;height:auto;border-radius:12px}.command-example figcaption{font-size:12px;color:var(--muted);margin-top:8px}.login{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

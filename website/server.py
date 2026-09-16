@@ -4,6 +4,8 @@ import os
 import secrets
 import re
 import time
+import ipaddress
+from time import monotonic
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
@@ -38,7 +40,7 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
         raise ValueError('올바른 포트가 필요합니다.')
     callback_url = origin + '/auth/callback'
     secure = address.scheme == 'https'
-    sessions, pending = {}, {}
+    sessions, pending, requests = {}, {}, {}
 
     async def call(method, path, *, token=None, data=None):
         if discord_request:
@@ -56,7 +58,26 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
         # 등록한 Host 이외의 주소와 교차 출처 요청은 허용하지 않습니다.
         if request.host != address.netloc:
             return web.json_response({"error": "허용되지 않은 주소입니다."}, status=403)
-        now = time.monotonic()
+        now = monotonic()
+        # 터널의 로컬 연결에서 전달된 주소만 사용합니다. 주소별 기록은 1분 뒤 버립니다.
+        if request.path.startswith(('/api/', '/auth/')):
+            for key in list(requests):
+                if requests[key][0] + 60 <= now:
+                    requests.pop(key, None)
+            peer = request.remote or 'unknown'
+            if secure and peer in ('127.0.0.1', '::1'):
+                try:
+                    peer = str(ipaddress.ip_address(request.headers.get('CF-Connecting-IP', peer)))
+                except ValueError:
+                    pass
+            group = 'login' if request.path == '/auth/login' else 'api'
+            key = (peer, group)
+            started, count = requests.get(key, (now, 0))
+            limit = 10 if group == 'login' else 120
+            if count >= limit or (key not in requests and len(requests) >= 4000):
+                return web.json_response({'error': '요청이 많습니다. 잠시 후 다시 시도해주세요.'}, status=429,
+                    headers={'Retry-After': str(max(1, int(started + 60 - now) + 1)), 'Cache-Control': 'no-store'})
+            requests[key] = (started, count + 1)
         for table in (sessions, pending):
             for key in list(table):
                 if table[key]["until"] <= now:
@@ -208,7 +229,7 @@ def create_app(client_id="", client_secret="", discord_request=None, *, guild_sn
     async def static(request):
         # 공개 파일만 명시적으로 제공해 서버 코드나 환경 파일이 노출되지 않게 합니다.
         name = request.match_info.get("name", "index.html")
-        if name not in {"index.html", "app.js", "commands.js", "auth.js", "style.css", "sherbet.png", "policies.json"}:
+        if name not in {"index.html", "app.js", "commands.js", "auth.js", "style.css", "sherbet.png", "policies.json", "updates.json", "example-signature.png", "example-wonderberry.png"}:
             raise web.HTTPNotFound()
         return web.FileResponse(ROOT / name)
 

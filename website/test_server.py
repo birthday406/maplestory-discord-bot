@@ -1,7 +1,7 @@
 """실제 Discord 요청·비밀정보 없이 로그인 경계를 검증합니다."""
 import unittest
 from urllib.parse import parse_qs, urlsplit
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 from types import SimpleNamespace
 import discord
 from aiohttp.test_utils import AioHTTPTestCase
@@ -9,6 +9,27 @@ from website.server import create_app, is_admin, ORIGIN
 
 
 class LoginTests(AioHTTPTestCase):
+    async def test_login_limit_recovers_and_static_stays_available(self):
+        for _ in range(10):
+            self.assertEqual((await self.request('GET', '/auth/login')).status, 302)
+        blocked = await self.request('GET', '/auth/login')
+        self.assertEqual(blocked.status, 429)
+        self.assertIn('Retry-After', blocked.headers)
+        self.assertEqual((await self.request('GET', '/updates.json')).status, 200)
+        import time
+        later = time.monotonic() + 61
+        with patch('website.server.monotonic', return_value=later):
+            self.assertEqual((await self.request('GET', '/auth/login')).status, 302)
+
+    async def test_public_updates_without_login(self):
+        response = await self.request('GET', '/updates.json')
+        self.assertEqual(response.status, 200)
+        entries = await response.json()
+        self.assertGreater(len(entries), 0)
+        self.assertEqual([e['date'] for e in entries], sorted([e['date'] for e in entries], reverse=True))
+        self.assertTrue(all(e['title'] and e['items'] for e in entries))
+        self.remote.assert_not_awaited()
+
     async def test_public_policies_without_discord_login(self):
         response = await self.request('GET', '/policies.json')
         self.assertEqual(response.status, 200)
