@@ -4056,7 +4056,7 @@ async def help_command(interaction: discord.Interaction) -> None:
     )
 
 
-@app_commands.command(name=localized_command_name("admin"), description="서버 관리자용 알림·채널 설정 명령어를 안내합니다.")
+@app_commands.command(name=localized_command_name("admin"), description="홈페이지에서 서버 알림·채널을 설정하도록 안내합니다.")
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
@@ -4065,16 +4065,19 @@ async def admin_help_command(interaction: discord.Interaction) -> None:
     if interaction.guild is None or not interaction.permissions.administrator:
         await interaction.response.send_message("이 안내는 서버 관리자만 사용할 수 있습니다.", ephemeral=True)
         return
-    embed = discord.Embed(title=embed_title("🛠 관리자 명령어"), description="설정 명령어 안내입니다. 이 화면을 열어도 설정은 바뀌지 않습니다.", color=0x5865F2)
-    for name, value in (
-        ("설정 확인", "`/채널설정` — 이 서버의 모든 채널 설정 확인"),
-        ("알림 켜기·끄기", "`/채널설정` → 종류·채널·동작 선택\n선택한 종류와 채널만 변경합니다."),
-        ("서버 오픈 멘션", "서버 오픈 알림을 켤 때 역할도 선택해주세요."),
-        ("시간·환율 표시", "시간·UTC·환율 표시는 음성 채널을 선택해주세요.\n해당 채널에서 봇의 채널 관리 권한이 필요합니다."),
-    ):
-        embed.add_field(name=name, value=value, inline=False)
+    # 설정은 홈페이지 한 곳에서 관리하고, 여기서는 이동 링크만 제공합니다.
+    embed = discord.Embed(
+        title=embed_title("서버 설정"),
+        description="알림과 채널 설정은 **샤벳 홈페이지**에서 관리해주세요.\n\n"
+                    "Discord 로그인 → 서버 선택 → 기능별 채널·알림 설정\n"
+                    "설정을 고른 뒤 **저장**을 누르면 적용됩니다.",
+        color=0x5865F2,
+    )
     embed.set_footer(text="서버 관리자 전용 · 본인에게만 표시됩니다")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="홈페이지에서 설정하기", url="https://sherbetbot.com/#account"))
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 
 
 QUICK_COPY_TEXT = (
@@ -6552,7 +6555,6 @@ class MapleNewsBot(commands.Bot):
             cube_sale_command,
             miracle_time_command,
             server_status_command,
-            channel_settings_command,
         ):
             self.tree.add_command(command)
         self.add_command(quick_copy_symbol_prefix_command)

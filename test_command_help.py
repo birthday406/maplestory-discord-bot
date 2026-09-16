@@ -61,7 +61,9 @@ class CommandHelpTests(unittest.IsolatedAsyncioTestCase):
             sent = interaction.response.send_message.call_args
             self.assertTrue(sent.kwargs['ephemeral'])
             if guild is not None and allowed:
-                self.assertIn('/채널설정', str(sent.kwargs['embed'].to_dict()))
+                self.assertNotIn('/채널설정', str(sent.kwargs['embed'].to_dict()))
+                self.assertEqual(sent.kwargs['view'].children[0].url,'https://sherbetbot.com/#account')
+                sent.kwargs['view'].stop()
             else:
                 self.assertNotIn('embed', sent.kwargs)
 

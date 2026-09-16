@@ -19,6 +19,7 @@ class PublicRankingsTests(AioHTTPTestCase):
             CREATE TABLE ranking_snapshots (name_key TEXT,snapshot_date TEXT,level INT,exp INT);
             INSERT INTO characters VALUES ('sample','Sample',45,'Hero',280,100,'2026-09-15',9000,1000),('first','First',45,'Bishop',290,0,'2026-09-14',0,0),('other','Other',1,'Hero',300,0,'2026-09-15',0,0);
             INSERT INTO ranking_snapshots VALUES ('sample','2026-09-13',280,10),('sample','2026-09-15',280,100);''')
+            db.executescript("CREATE TABLE official_world_rankings(name_key TEXT PRIMARY KEY,world_id INT,ranking INT,updated_date TEXT); INSERT INTO official_world_rankings VALUES ('sample',45,3,'2026-09-15'),('first',45,9,'2026-09-15'),('other',1,1,'2026-09-15');")
             for column in ('image_url TEXT', 'ranking INTEGER', 'legion_rank INTEGER', 'achievement_rank INTEGER'):
                 db.execute('ALTER TABLE characters ADD COLUMN ' + column)
             db.execute("UPDATE characters SET image_url='https://example.com/avatar.png',ranking=12,legion_rank=34,achievement_rank=56 WHERE name_key='sample'")
@@ -29,7 +30,8 @@ class PublicRankingsTests(AioHTTPTestCase):
 
     async def test_public_world_list_and_character_history(self):
         data=await (await self.get('?world=45')).json()
-        self.assertEqual([r['name'] for r in data['rows']],['First','Sample'])
+        self.assertEqual([r['name'] for r in data['rows']],['Sample','First'])
+        self.assertEqual([r['ranking'] for r in data['rows']],[3,9])
         bera=await (await self.get('?world=1')).json()
         self.assertEqual([r['name'] for r in bera['rows']],['Other'])
         scania=await (await self.get('?world=19')).json()
@@ -59,6 +61,36 @@ class PublicRankingsTests(AioHTTPTestCase):
 
 
 class RankingIndexTests(unittest.TestCase):
+    def test_backfill_preserves_latest_world_rank_and_character_data(self):
+        import json
+        from tools.backfill_official_world_ranks import backfill
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)
+            store=RankingStore(path/'ranking.db')
+            character=dict(characterName='Zebra',worldID=45,rank=1)
+            records=[
+                dict(scan_date='2026-09-15',ranking_type='world',characters=[character]),
+                dict(scan_date='2026-09-14',ranking_type='world',characters=[dict(character,rank=5)]),
+                dict(scan_date='2026-09-16',ranking_type='legion',characters=[dict(character,rank=99)]),
+            ]
+            (path/'batch.jsonl').write_text('\n'.join(json.dumps(r) for r in records),encoding='utf-8')
+            backfill(store.path,path)
+            backfill(store.path,path)
+            with closing(sqlite3.connect(store.path)) as db:
+                self.assertEqual(db.execute('SELECT ranking,updated_date FROM official_world_rankings').fetchall(),[(1,'2026-09-15')])
+                self.assertEqual(db.execute('SELECT count(*) FROM characters').fetchone()[0],0)
+
+    def test_overall_lookup_does_not_replace_world_rank(self):
+        from datetime import date
+        with tempfile.TemporaryDirectory() as folder:
+            store=RankingStore(Path(folder)/'ranking.db')
+            character=dict(characterName='Zebra',worldID=45,jobName='Hero',level=300,exp=0,rank=1)
+            store.save_page([character],date(2026,9,15),11,source_page_index=1)
+            store.save_snapshot(dict(character,rank=99),date(2026,9,16))
+            store.save_page([dict(character,rank=5)],date(2026,9,14),11,source_page_index=1)
+            with closing(sqlite3.connect(store.path)) as db:
+                self.assertEqual(db.execute('SELECT ranking,updated_date FROM official_world_rankings').fetchone(),(1,'2026-09-15'))
+
     def test_store_initializes_index_used_by_world_query(self):
         with tempfile.TemporaryDirectory() as folder:
             store=RankingStore(Path(folder)/'ranking.db')

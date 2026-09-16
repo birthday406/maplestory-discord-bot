@@ -118,6 +118,15 @@ class RankingStore:
                     first_seen_date TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS official_world_rankings (
+                    name_key TEXT PRIMARY KEY,
+                    world_id INTEGER NOT NULL,
+                    ranking INTEGER NOT NULL,
+                    updated_date TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_official_world_ranking
+                ON official_world_rankings (world_id, ranking);
+
                 -- 웹 순위표가 전체 캐릭터를 매번 정렬하지 않도록 월드·경험치 순서를 미리 만듭니다.
                 CREATE INDEX IF NOT EXISTS idx_characters_web_ranking
                 ON characters (world_id, level DESC, exp DESC, name_key);
@@ -1095,6 +1104,13 @@ class RankingStore:
         with self._connect() as connection:
             for character in characters:
                 name_key = character["characterName"].casefold()
+                # 월드 목록에서 온 순위만 별도로 보관해 개인 조회의 전체 순위와 섞지 않습니다.
+                if character.get('_scanPageIndex', source_page_index) is not None:
+                    connection.execute('''INSERT INTO official_world_rankings VALUES (?,?,?,?)
+                        ON CONFLICT(name_key) DO UPDATE SET world_id=excluded.world_id,
+                        ranking=excluded.ranking,updated_date=excluded.updated_date
+                        WHERE excluded.updated_date>=official_world_rankings.updated_date''',
+                        (name_key, character['worldID'], character['rank'], day))
                 if discard_newer:
                     connection.execute(
                         "DELETE FROM ranking_snapshots WHERE name_key = ? AND snapshot_date > ?",

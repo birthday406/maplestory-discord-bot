@@ -5,7 +5,7 @@ function rankingsPage() {
   const selectedWorld=route.get('world')||'45';
   const root=document.querySelector('#app');
   root.innerHTML=`<div class="heading"><div><span class="eyebrow">MAPLE RANKINGS</span><h1>우리의 메이플 기록</h1><p>캐릭터를 검색하거나 월드별 성장 순위를 살펴보세요.</p></div></div>
-  <form class="ranking-search"><label>월드<select id="ranking-world"><option value="45">Kronos</option><option value="19">Scania</option><option value="1">Bera</option><option value="70">Hyperion</option></select></label><label>캐릭터 이름<input id="ranking-name" placeholder="닉네임 입력" maxlength="12" autocomplete="off"></label><button class="primary" type="submit">캐릭터 검색</button><button type="button" id="ranking-list">월드 순위표</button></form>
+  <form class="ranking-search"><label>월드<select id="ranking-world"><option value="45">Kronos</option><option value="19">Scania</option><option value="1">Bera</option><option value="70">Hyperion</option></select></label><label>캐릭터 이름<input id="ranking-name" placeholder="닉네임 입력" maxlength="12" autocomplete="off"></label><button class="primary" type="submit">캐릭터 검색</button></form>
   <p class="ranking-note">Lv.260 이상 · 수집 기록 기준 상위 100명</p><p id="ranking-status" role="status"></p><section id="ranking-result"></section>`;
   const form=root.querySelector('form'),world=root.querySelector('#ranking-world'),input=root.querySelector('#ranking-name');
   const status=root.querySelector('#ranking-status'),result=root.querySelector('#ranking-result');
@@ -24,7 +24,7 @@ function rankingsPage() {
   }
   function detailLink(c) {const a=element('a',c.name);a.className='character-link';a.href='#rankings?'+new URLSearchParams({world:world.value,nickname:c.name});return a;}
   function table(headers,rows) {
-    const wrap=element('div');wrap.className='ranking-table-wrap'+(headers[0]==='캐릭터 사진'?' ranking-list-table':'');const t=element('table');
+    const wrap=element('div');wrap.className='ranking-table-wrap'+(headers[1]==='캐릭터 사진'?' ranking-list-table':'');const t=element('table');
     const thead=element('thead'),tr=element('tr');for(const title of headers){const th=element('th',title);th.scope='col';tr.append(th);}thead.append(tr);t.append(thead);
     const body=element('tbody');for(const cells of rows){const row=element('tr');for(const value of cells){const td=element('td');if(value instanceof Node)td.append(value);else td.textContent=value;row.append(td);}body.append(row);}t.append(body);wrap.append(t);return wrap;
   }
@@ -46,7 +46,7 @@ function rankingsPage() {
         card.append(element('p',`유니온 ${c.legion_level>0?number(c.legion_level):'대표 기록 없음'} · 업적 ${c.achievement_score>0?number(c.achievement_score):'대표 기록 없음'}`));result.append(card);
         const stats=element('dl');stats.className='ranking-stats';
         const rank=v=>v>0?number(v)+'위':'기록 없음';
-        for(const [label,value] of [['전체 순위',rank(c.ranking)],['유니온 순위',rank(c.legion_rank)],['업적 순위',rank(c.achievement_rank)],['현재 경험치',number(c.exp)+' EXP'],['경험치 진행률',c.requiredExp?(c.exp/c.requiredExp*100).toFixed(3)+'%':'최고 레벨']]){const box=element('div');box.append(element('dt',label),element('dd',value));stats.append(box);}card.append(stats);
+        for(const [label,value] of [['월드 순위',rank(c.worldRank)],['유니온 순위',rank(c.legion_rank)],['업적 순위',rank(c.achievement_rank)],['현재 경험치',number(c.exp)+' EXP'],['경험치 진행률',c.requiredExp?(c.exp/c.requiredExp*100).toFixed(3)+'%':'최고 레벨']]){const box=element('div');box.append(element('dt',label),element('dd',value));stats.append(box);}card.append(stats);
         result.append(element('p','공개 랭킹에서 수집한 정보입니다. 장비·상세 스탯은 제공되지 않습니다.'));
         result.append(element('h2','최근 경험치 변화'));
         if(!data.gains.length)result.append(element('p','비교할 날짜별 기록이 아직 부족합니다.'));
@@ -54,15 +54,15 @@ function rankingsPage() {
       } else {
         const dates=[...new Set(data.rows.map(c=>c.updated_date).filter(Boolean))].sort();
         status.textContent=dates.length>1?`갱신 중 · 기록 기준 ${dates[0]} ~ ${dates.at(-1)} UTC`:(dates.length?`기록 기준 ${dates[0]} UTC`:'');
-        result.append(element('h2',data.world+' · 경험치 순위표'));
+        result.append(element('h2',data.world+' · 공식 월드 랭킹'));
         if(!data.rows.length){result.append(element('p','이 월드의 저장된 기록이 아직 없습니다.'));return;}
-        result.append(element('p','레벨·경험치순이며 동률은 이름순입니다. 공식 실시간 순위와 다를 수 있어요.'));
-        result.append(table(['캐릭터 사진','순서','캐릭터','레벨·직업'],data.rows.map((c,i)=>{const photo=detailLink(c);photo.replaceChildren(portrait(c));const info=element('div');info.className='ranking-job';info.append(element('strong','Lv.'+c.level),element('span',c.job_name));return [photo,i+1,detailLink(c),info];})));
+        result.append(element('p','공식 월드 순위를 그대로 표시합니다. 수집 시점 이후의 변경은 다음 갱신에 반영됩니다.'));
+        result.append(table(['순위','캐릭터 사진','캐릭터','레벨·직업'],data.rows.map((c,i)=>{const photo=detailLink(c);photo.replaceChildren(portrait(c));const info=element('div');info.className='ranking-job';info.append(element('strong','Lv.'+c.level),element('span',c.job_name));return [c.ranking,photo,detailLink(c),info];})));
       }
     }catch{if(request===serial&&result.isConnected)status.textContent='연결에 실패했습니다. 잠시 후 다시 시도해주세요.';}
   }
   form.onsubmit=e=>{e.preventDefault();const name=input.value.trim();if(!name){status.textContent='검색할 캐릭터 이름을 입력해주세요.';return;}location.hash='rankings?'+new URLSearchParams({world:world.value,nickname:name});};
-  root.querySelector('#ranking-list').onclick=()=>{location.hash='rankings?'+new URLSearchParams({world:world.value});};world.onchange=()=>{location.hash='rankings?'+new URLSearchParams({world:world.value});};load(selectedName);
+  world.onchange=()=>{location.hash='rankings?'+new URLSearchParams({world:world.value});};load(selectedName);
 }
 
 async function showSalePeriod(card) {

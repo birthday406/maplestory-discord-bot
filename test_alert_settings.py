@@ -85,7 +85,7 @@ class AlertSettingsTests(unittest.IsolatedAsyncioTestCase):
         for channel in channels.values():
             self.assertEqual(content.count(channel.mention), 1)
 
-    async def test_command_registered_with_admin_and_guild_restrictions(self):
+    async def test_legacy_channel_settings_is_not_registered(self):
         command = maple_bot.channel_settings_command
         self.assertTrue(command.guild_only)
         self.assertTrue(command.default_permissions.administrator)
@@ -99,7 +99,7 @@ class AlertSettingsTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch.object(maple_bot.aiohttp, "ClientSession"):
             await maple_bot.MapleNewsBot.setup_hook(bot)
-        bot.tree.add_command.assert_any_call(command)
+        self.assertNotIn(command, [call.args[0] for call in bot.tree.add_command.call_args_list])
         registered = [call.args[0].name for call in bot.tree.add_command.call_args_list]
         self.assertNotIn("news-alert", registered)
         self.assertNotIn("alert-settings", registered)

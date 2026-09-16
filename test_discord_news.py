@@ -118,6 +118,19 @@ class DiscordNewsTests(unittest.IsolatedAsyncioTestCase):
         row['body'] += '\nMaintenance has been extended by 2 hours.'
         self.assertFalse(is_link_only_notice(row, {44597}))
 
+    def test_minor_maintenance_promotion_requires_known_post_and_no_extra_news(self):
+        url='https://www.nexon.com/maplestory/news/maintenance/45318/scheduled-minor-patch-maintenance-september-17-2026'
+        body=('Hi Maplers,\nWe will be having an Scheduled Minor Patch Maintenance on '
+              '2026년 9월 17일 오후 12:00 your time. \n'
+              f'You can find the post for this maintenance **[HERE]({url})**.')
+        row=message(body=body);row['links']=[url]
+        self.assertTrue(is_link_only_notice(row,{45318}))
+        self.assertFalse(is_link_only_notice(row,set()))
+        for extra in ('Maintenance has been extended by 2 hours.', 'The maintenance has been completed.',
+                      'Players will be unable to log in.', 'Game is up!'):
+            self.assertFalse(is_link_only_notice(dict(row,body=body+'\n'+extra),{45318}))
+        self.assertFalse(is_link_only_notice(dict(row,body=body.replace('2026년 9월 17일 오후 12:00','a later time due to an issue')),{45318}))
+
     def test_wrong_channel_and_media_host_rejected(self):
         row = message(); row['channel_id'] = '123'
         with self.assertRaises(ValueError): validate_message(row)
@@ -168,6 +181,23 @@ class DiscordNewsTests(unittest.IsolatedAsyncioTestCase):
                     await process_event(bot, store, store.pending()[0], [SimpleNamespace(id=1)])
                 delivery.assert_awaited_once()
                 self.assertEqual(delivery.call_args.args[2]['current']['images'], banner['images'])
+                self.assertFalse(store.pending())
+
+    async def test_minor_patch_banner_and_body_are_both_skipped(self):
+        from discord_news import process_event
+        url='https://www.nexon.com/maplestory/news/maintenance/45318/title'
+        banner=message('1549601155854631053','')
+        banner.update(images=['https://cdn.discordapp.com/attachments/1/2/banner.png'],created_at='2026-09-16T02:01:45Z')
+        body=message('1549601202231050421',f'Hi Maplers,\nWe will be having an Scheduled Minor Patch Maintenance on 2026년 9월 17일 오후 12:00 your time.\nYou can find the post for this maintenance **[HERE]({url})**.')
+        body.update(links=[url],created_at='2026-09-16T02:01:56Z')
+        with tempfile.TemporaryDirectory() as folder:
+            store=NewsStore(Path(folder)/'news.db')
+            store.observe([message()],'2026-09-16T02:00:00Z')
+            store.observe([banner,body],'2026-09-16T02:02:00Z')
+            with patch('discord_news.deliver_all',new_callable=AsyncMock) as delivery:
+                for event in store.pending():
+                    await process_event(SimpleNamespace(sent_ids={45318}),store,event,[SimpleNamespace(id=1)])
+                delivery.assert_not_awaited()
             self.assertFalse(store.pending())
 
     async def test_image_before_unknown_or_unrelated_notice_is_preserved(self):

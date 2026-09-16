@@ -67,6 +67,15 @@ def is_link_only_notice(row, sent_ids):
     # 글씨 강조와 인사말의 장식 이모지는 소개 문구 판정에 영향을 주지 않습니다.
     text = re.sub(r'<a?:\w+:\d+>|:[A-Za-z0-9_]+:', '', text).replace('*', '')
     text = re.sub(r'(?i)\b(?:hi|hello)\s+maplers[!,.:\s]*', '', text).strip()
+    # 점검 예정 시각과 이미 보낸 원문 링크만 있는 정형 소개를 제외합니다.
+    # 날짜 자리에 임의 문장을 허용하지 않아 연장·장애 설명은 보존합니다.
+    timestamp = r'(?:(?:\d{4}년\s*\d{1,2}월\s*\d{1,2}일\s*)?(?:오전|오후)\s*\d{1,2}:\d{2}|<t:\d{9,12}(?::[tTdDfFR])?>)'
+    if re.fullmatch(
+        r'We will be having (?:a|an) (?:scheduled|unscheduled) '
+        r'(?:minor patch |channel )?maintenance (?:on|at) '+timestamp+
+        r'\s*(?:your time)?\.\s*You can find the post for this maintenance HERE[.!\s]*',
+        text, re.I):
+        return True
     if re.fullmatch(
         r'Take a look at the Cash Shop Update for [a-z]+ \d+(?:st|nd|rd|th)? '
         r'HERE, featuring Royal Styles and more[!.\s]*', text, re.I):

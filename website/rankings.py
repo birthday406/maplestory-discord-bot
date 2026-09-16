@@ -23,14 +23,21 @@ def read_ranking(path, world, nickname):
         db.execute('BEGIN')
         columns = 'name,world_id,job_name,level,exp,updated_date,image_url'
         if not nickname:
-            rows = db.execute(f'SELECT {columns} FROM characters WHERE world_id=? AND level>=260 '
-                'ORDER BY level DESC,exp DESC,name_key LIMIT 100', (world,)).fetchall()
+            # 공식 월드 순위 자체를 사용합니다. 레벨·경험치·이름으로 순위를 만들지 않습니다.
+            rows = db.execute('''SELECT c.name,c.world_id,c.job_name,c.level,c.exp,c.image_url,
+                r.ranking,r.updated_date FROM official_world_rankings r
+                JOIN characters c ON c.name_key=r.name_key AND c.world_id=r.world_id
+                WHERE r.world_id=? AND c.level>=260 AND r.ranking>0
+                ORDER BY r.ranking LIMIT 100''', (world,)).fetchall()
             return {'world': WORLDS[world], 'rows': [dict(r) for r in rows]}
         row = db.execute(f'SELECT {columns},ranking,legion_level,legion_rank,achievement_score,achievement_rank FROM characters WHERE name_key=?',
                          (nickname.casefold(),)).fetchone()
         if row is None:
             raise web.HTTPNotFound(text='저장된 캐릭터가 없습니다. 자동 수집 대상은 Lv.260 이상입니다.')
         character = dict(row)
+        world_rank = db.execute('SELECT ranking FROM official_world_rankings WHERE name_key=? AND world_id=?',
+            (nickname.casefold(), character['world_id'])).fetchone()
+        character['worldRank'] = world_rank['ranking'] if world_rank else None
         history = db.execute('SELECT snapshot_date,level,exp FROM ranking_snapshots WHERE name_key=? '
                              'ORDER BY snapshot_date DESC LIMIT 15', (nickname.casefold(),)).fetchall()
         gains = []
